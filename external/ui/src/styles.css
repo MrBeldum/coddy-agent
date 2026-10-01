@@ -2625,12 +2625,6 @@ a.rail-brand {
   z-index: 4;
   flex-shrink: 0;
   padding: 0 0 16px;
-  /* Opaque canvas backing: pinned title stays on top while transcript
-     scrolls behind it (no see-through bleed). Matches canvas top color so
-     the shield is invisible against the page in every theme. */
-  background-color: var(--coddy-canvas-gradient-top);
-  box-shadow: 0 12px 18px -16px
-    color-mix(in srgb, #000 88%, transparent);
 }
 
 /* Same max-width as .chat-bottom-inner / transcript column so title and composer share one vertical stripe */
