@@ -1375,7 +1375,7 @@ func TestInvokedSkillBlocks_bodyAttached(t *testing.T) {
 		Description: "find skills",
 		Content:     body,
 	}
-	blocks := invokedSkillBlocks("/find-skills search pdf", []*skills.Skill{sk})
+	blocks := invokedSkillBlocks("/find-skills search pdf", []*skills.Skill{sk}, "")
 	if len(blocks) != 1 || blocks[0].Resource == nil || blocks[0].Resource.Text != body ||
 		blocks[0].Resource.URI != "skill:find-skills" || blocks[0].Resource.Mention.Kind != mention.KindSkill {
 		t.Fatalf("expected one skill attachment carrying the body, got %+v", blocks)
@@ -1386,6 +1386,45 @@ func TestInvokedSkillBlocks_bodyAttached(t *testing.T) {
 	}
 	if got := mention.ForDisplay(msg); got != "/find-skills search pdf" {
 		t.Fatalf("the transcript shows the message as typed, got %q", got)
+	}
+}
+
+// A skill that is a folder on disk names its own files (scripts/,
+// references/) by relative path, so the model is told where that folder is,
+// with the body it invoked or loaded. A skill read out of the binary has no
+// folder to name.
+func TestSkillBodyNamesTheSkillDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "crossreview")
+	onDisk := &skills.Skill{Name: "crossreview", FilePath: filepath.Join(dir, "SKILL.md"), Content: "Run scripts/x.py.\n"}
+	blocks := invokedSkillBlocks("/crossreview now", []*skills.Skill{onDisk}, "")
+	want := "Skill directory: " + dir + "\n\nRun scripts/x.py."
+	if len(blocks) != 1 || blocks[0].Resource.Text != want {
+		t.Fatalf("attachment text = %+v, want %q", blocks, want)
+	}
+	if got := skillBodyForModel(onDisk, ""); got != want {
+		t.Fatalf("load_skill body = %q, want %q", got, want)
+	}
+	flat := &skills.Skill{Name: "notes", FilePath: filepath.Join(t.TempDir(), "notes.md"), Content: "body"}
+	if got := skillBodyForModel(flat, ""); got != "body" {
+		t.Fatalf("a single-file skill is not a folder of its own, got %q", got)
+	}
+
+	// Served out of the binary: the delivered copy in the managed directory is
+	// named when it is on disk, and nothing is named when it is not.
+	embedded := &skills.Skill{Name: "crossreview", FilePath: "bundled/crossreview/SKILL.md", Content: "body"}
+	managed := t.TempDir()
+	if got := skillBodyForModel(embedded, managed); got != "body" {
+		t.Fatalf("no delivered copy, nothing to name, got %q", got)
+	}
+	if err := os.MkdirAll(filepath.Join(managed, "crossreview"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(managed, "crossreview", "SKILL.md"), []byte("---\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want = "Skill directory: " + filepath.Join(managed, "crossreview") + "\n\nbody"
+	if got := skillBodyForModel(embedded, managed); got != want {
+		t.Fatalf("delivered copy = %q, want %q", got, want)
 	}
 }
 
@@ -1434,7 +1473,7 @@ func TestInvokedSkillBlocks_noSkillMatch(t *testing.T) {
 		FilePath: filepath.Join("skills", "other", "SKILL.md"),
 		Content:  "other body",
 	}
-	if blocks := invokedSkillBlocks("/find-skills pdf", []*skills.Skill{sk}); len(blocks) != 0 {
+	if blocks := invokedSkillBlocks("/find-skills pdf", []*skills.Skill{sk}, ""); len(blocks) != 0 {
 		t.Fatalf("expected nothing when no skill matches; got %+v", blocks)
 	}
 }
@@ -1445,7 +1484,7 @@ func TestInvokedSkillBlocks_noSlashCommand(t *testing.T) {
 		FilePath: filepath.Join("skills", "find-skills", "SKILL.md"),
 		Content:  "body",
 	}
-	if blocks := invokedSkillBlocks("поищи что-нибудь", []*skills.Skill{sk}); len(blocks) != 0 {
+	if blocks := invokedSkillBlocks("поищи что-нибудь", []*skills.Skill{sk}, ""); len(blocks) != 0 {
 		t.Fatalf("expected nothing without a slash command; got %+v", blocks)
 	}
 }

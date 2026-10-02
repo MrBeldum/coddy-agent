@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -257,7 +258,7 @@ func (a *Agent) Run(ctx context.Context, prompt []acp.ContentBlock) (string, err
 	for _, inv := range invokedSkills(typedText(prompt), a.state.GetSkills()) {
 		a.applySkillSettings(ctx, inv.name, inv.skill)
 	}
-	if extra := invokedSkillBlocks(typedText(prompt), a.state.GetSkills()); len(extra) > 0 {
+	if extra := invokedSkillBlocks(typedText(prompt), a.state.GetSkills(), a.managedSkillsDir()); len(extra) > 0 {
 		prompt = append(append([]acp.ContentBlock(nil), prompt...), extra...)
 		userText = contentBlocksToText(prompt)
 	}
@@ -2297,14 +2298,14 @@ func formatToolPairingIssues(issues []session.ToolPairingIssue) string {
 // the typed text invokes as /name. It rides in the message that invoked it,
 // written once, so the next turn replays the same bytes rather than a message
 // that lost the body it was sent with.
-func invokedSkillBlocks(text string, allSkills []*skills.Skill) []acp.ContentBlock {
+func invokedSkillBlocks(text string, allSkills []*skills.Skill, managedDir string) []acp.ContentBlock {
 	var out []acp.ContentBlock
 	for _, inv := range invokedSkills(text, allSkills) {
 		n, sk := inv.name, inv.skill
-		body := strings.TrimSpace(sk.Content)
-		if body == "" {
+		if strings.TrimSpace(sk.Content) == "" {
 			continue
 		}
+		body := skillBodyForModel(sk, managedDir)
 		out = append(out, acp.ContentBlock{Type: acp.ContentTypeResource, Resource: &acp.Resource{
 			URI:      "skill:" + n,
 			MimeType: "text/markdown; charset=utf-8",
@@ -2313,6 +2314,44 @@ func invokedSkillBlocks(text string, allSkills []*skills.Skill) []acp.ContentBlo
 		}})
 	}
 	return out
+}
+
+// skillBodyForModel is the text a model reads of a skill it was handed, by a
+// /name invocation or by load_skill: the body, headed by the folder the skill
+// lives in when it is a SKILL.md folder on disk. A skill names its own files
+// (scripts/, references/) by relative path, and neither the attachment nor the
+// tool result says where SKILL.md was read from; without the line a model goes
+// searching the disk for them. A skill read out of the binary has no folder.
+//
+// A skill served out of the binary has no folder of its own, but the standard
+// delivery writes the same skill into managedDir (skills.dirs may not list that
+// directory, and then the copy in the binary is the one loaded): when that copy
+// is on disk, its folder is the one named.
+func skillBodyForModel(sk *skills.Skill, managedDir string) string {
+	body := strings.TrimSpace(sk.Content)
+	if body == "" || !strings.EqualFold(filepath.Base(sk.FilePath), "SKILL.md") {
+		return body
+	}
+	dir := filepath.Dir(sk.FilePath)
+	if skills.SkillReadonly(sk) {
+		if managedDir == "" {
+			return body
+		}
+		dir = filepath.Join(managedDir, filepath.Base(dir))
+		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+			return body
+		}
+	}
+	return "Skill directory: " + dir + "\n\n" + body
+}
+
+// managedSkillsDir is where the standard delivery writes the skills it hands
+// over, "" without a configuration.
+func (a *Agent) managedSkillsDir() string {
+	if a.cfg == nil {
+		return ""
+	}
+	return a.cfg.Skills.ManagedDir(a.cfg.Paths.Home)
 }
 
 // invokedSkill is one skill a prompt invokes, under the name it was invoked by.
