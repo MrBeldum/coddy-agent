@@ -1,10 +1,15 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { setEnv } from "../env/remoteEnv";
 import { SessionsSidebar } from "./SessionsSidebar";
 import type { SessionRow } from "./types";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  setEnv({ mode: "local" });
+  window.localStorage.clear();
+});
 
 const row = (id: string, title: string): SessionRow => ({
   id,
@@ -403,6 +408,51 @@ test("a heading collapses the rows under it and opens them again", () => {
 
   fireEvent.click(screen.getByTestId("session-group-toggle-today"));
   expect(screen.getByTestId("session-row-today")).toBeInTheDocument();
+});
+
+test("a collapsed workspace group survives navigation and temporary absence", () => {
+  const sessions = [
+    { id: "workspace", title: "Report", cwd: "/srv/reports" },
+  ] as SessionRow[];
+  const first = renderDrawer({ sessions, groupMode: "workspace" });
+  const toggle = screen.getByTestId(
+    "session-group-toggle-cwd:/srv/reports",
+  );
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  first.unmount();
+
+  const withoutGroup = renderDrawer({ sessions: [], groupMode: "workspace" });
+  withoutGroup.unmount();
+
+  renderDrawer({ sessions, groupMode: "workspace" });
+  expect(
+    screen.getByTestId("session-group-toggle-cwd:/srv/reports"),
+  ).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByTestId("session-row-workspace")).toBeNull();
+});
+
+test("collapsed groups are scoped to their environment", () => {
+  const sessions = [dated("today", "Report", "2026-09-15T09:00:00")];
+  setEnv({ mode: "remote", baseUrl: "https://alpha.example", token: "" });
+  const alpha = renderDrawer({ sessions, groupMode: "time" });
+  fireEvent.click(screen.getByTestId("session-group-toggle-today"));
+  alpha.unmount();
+
+  setEnv({ mode: "remote", baseUrl: "https://beta.example", token: "" });
+  const beta = renderDrawer({ sessions, groupMode: "time" });
+  expect(screen.getByTestId("session-group-toggle-today")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  beta.unmount();
+
+  setEnv({ mode: "remote", baseUrl: "https://alpha.example", token: "" });
+  renderDrawer({ sessions, groupMode: "time" });
+  expect(screen.getByTestId("session-group-toggle-today")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
 });
 
 test("the filter menu is closed until its control is pressed, and shuts again", () => {

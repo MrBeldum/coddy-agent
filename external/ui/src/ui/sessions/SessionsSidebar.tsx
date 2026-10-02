@@ -16,6 +16,10 @@ import {
   type SessionGroupMode,
 } from "./sessionGroups";
 import {
+  readCollapsedSessionGroups,
+  writeCollapsedSessionGroups,
+} from "./collapsedSessionGroups";
+import {
   SessionsFilterMenu,
   type SessionsEnvironmentOption,
 } from "./SessionsFilterMenu";
@@ -248,8 +252,10 @@ export function SessionsSidebar(props: {
   const sortKey: SessionSortKey = props.sortKey ?? "updated";
 
   // Collapsed headings are keyed by group, so a group that comes and goes with
-  // a search keeps the state the operator gave it while it is on screen.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  // a search, drawer close, or route change keeps the state the operator gave it.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
+    readCollapsedSessionGroups,
+  );
 
   const groups = useMemo(
     () => groupSessions(props.sessions, groupMode, props.now),
@@ -834,6 +840,7 @@ export function SessionsSidebar(props: {
                           } else {
                             next.add(group.key);
                           }
+                          writeCollapsedSessionGroups(next);
                           return next;
                         })
                       }

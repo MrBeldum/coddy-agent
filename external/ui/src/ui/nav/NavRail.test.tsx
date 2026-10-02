@@ -129,6 +129,33 @@ test("nav shows localized active counts on History and Scheduler icons", () => {
   );
 });
 
+test("wide rail keeps active counts over the History and Scheduler icons", () => {
+  render(
+    <NavRail
+      onNewChat={() => {}}
+      onOpenHistory={() => {}}
+      historyOpen={false}
+      historyActiveCount={2}
+      onOpenScheduler={() => {}}
+      schedulerOpen={false}
+      schedulerActiveCount={3}
+      onOpenSettings={() => {}}
+      settingsOpen={false}
+      canWidenRail
+      railLabelsWide
+      onToggleRailLabels={() => {}}
+    />,
+  );
+
+  const historyCount = screen.getByTestId("nav-history-active-count");
+  expect(historyCount).not.toHaveClass("rail-active-count--inline");
+  expect(screen.getByTestId("nav-history").children[1]).toBe(historyCount);
+
+  const schedulerCount = screen.getByTestId("nav-scheduler-active-count");
+  expect(schedulerCount).not.toHaveClass("rail-active-count--inline");
+  expect(screen.getByTestId("nav-scheduler").children[1]).toBe(schedulerCount);
+});
+
 test("the rail no longer carries a Tasks entry", () => {
   render(
     <NavRail

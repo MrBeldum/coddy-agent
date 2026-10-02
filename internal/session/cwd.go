@@ -130,17 +130,11 @@ func (m *Manager) reloadWorkspaceScopedState(ctx context.Context, st *State, tur
 		}
 		cancel()
 	} else {
+		// A directory selection must make local skills available to the
+		// composer immediately, but it is not an agent turn and must not
+		// execute a workspace-provided MCP process. Reconcile configured MCP
+		// servers under the next turn lock instead, where trust is evaluated.
 		st.markMCPReloadPending()
-		if unlock, err := m.acquirePromptTurnLock(st.GetID(), st); err == nil {
-			applied := true
-			if st.takeMCPReloadPending() {
-				applied = m.applyConfiguredMCPReload(ctx, st)
-			}
-			unlock()
-			if applied {
-				m.drainPendingMCPReload(st.GetID(), st)
-			}
-		}
 	}
 
 	loadedSkills, err := m.loadSkills(cwd, cfg)

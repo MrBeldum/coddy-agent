@@ -2625,12 +2625,6 @@ a.rail-brand {
   z-index: 4;
   flex-shrink: 0;
   padding: 0 0 16px;
-  /* Opaque canvas backing: pinned title stays on top while transcript
-     scrolls behind it (no see-through bleed). Matches canvas top color so
-     the shield is invisible against the page in every theme. */
-  background-color: var(--coddy-canvas-gradient-top);
-  box-shadow: 0 12px 18px -16px
-    color-mix(in srgb, #000 88%, transparent);
 }
 
 /* Same max-width as .chat-bottom-inner / transcript column so title and composer share one vertical stripe */
@@ -3794,6 +3788,132 @@ a.rail-brand {
   height: 100%;
   object-fit: cover;
   border-radius: inherit;
+}
+
+/* Verified shared files render as compact cubes in assistant answers. */
+.tool-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0 14px;
+  min-width: 0;
+}
+
+.tool-artifact-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  width: 168px;
+  height: 176px;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, var(--coddy-blend-base));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 5%, var(--coddy-blend-base));
+}
+
+.tool-artifact-icon {
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--text) 68%, var(--coddy-blend-base));
+}
+
+.tool-artifact-info {
+  display: grid;
+  min-width: 0;
+  grid-row: 1 / -1;
+  grid-template-rows: 1fr auto;
+}
+
+.tool-artifact-name {
+  align-self: end;
+  margin-bottom: 4px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tool-artifact-meta {
+  align-self: end;
+  color: color-mix(in srgb, var(--text) 58%, var(--coddy-blend-base));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tool-artifact-meta--error {
+  color: var(--coddy-danger, #ef4444);
+}
+
+.inline-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+  margin: 12px 0 16px;
+}
+
+.inline-artifact-card {
+  display: grid;
+}
+
+.tool-artifact-card {
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+.tool-artifact-card:hover {
+  border-color: color-mix(in srgb, var(--text) 30%, var(--coddy-blend-base));
+  background: color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+  transform: translateY(-1px);
+}
+
+.inline-artifact-card .tool-artifact-info { padding-top: 22px; }
+.inline-artifact-extension {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--coddy-blend-base));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  pointer-events: none;
+}
+.inline-artifact-image { position: absolute; inset: 0; padding: 0; overflow: hidden; border: 0; background: transparent; cursor: zoom-in; }
+.inline-artifact-thumb { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.inline-artifact-card:has(.inline-artifact-image) .tool-artifact-info { position: relative; z-index: 1; padding: 32px 0 0; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.inline-artifact-card:has(.inline-artifact-image) .tool-artifact-meta { padding: 4px; margin: 0 -4px -4px; border-radius: 5px; background: color-mix(in srgb, #000 56%, transparent); }
+.inline-artifact-menu-trigger { position: absolute; z-index: 2; top: 5px; right: 5px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--bg) 74%, transparent); color: var(--text); cursor: pointer; opacity: 0; }
+.inline-artifact-menu-trigger:focus-visible, .inline-artifact-menu-trigger[aria-expanded="true"] { opacity: 1; }
+.inline-artifact-menu { position: absolute; z-index: 1000; top: calc(100% + 4px); right: 0; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--coddy-glass-panel-border); border-radius: 10px; background: var(--coddy-tip-bg); box-shadow: var(--coddy-tip-shadow); }
+.inline-artifact-menu button { padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 12px; }
+.inline-artifact-menu button:hover:not(:disabled), .inline-artifact-menu button:focus-visible { background: color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base)); }
+
+@media (max-width: 599px) {
+  .tool-artifact-card {
+    width: min(148px, calc(50vw - 28px));
+    height: 164px;
+  }
+
+  .inline-artifact-menu-trigger {
+    width: 32px;
+    height: 32px;
+    opacity: 1;
+  }
 }
 
 .coddy-tool-call-body {
@@ -5521,16 +5641,16 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 .workspace-modal {
   display: flex;
   flex-direction: column;
-  width: min(440px, calc(100vw - 32px));
+  width: min(720px, calc(100vw - 48px));
   /* Roomy body for a folder with few children: 262px is the 140px of head,
      path row and actions plus the 120px of list the body used to claim through
      the list's own min-height. Stated on the dialog, the floor leaves the list
      free to shrink; clamped by the same viewport fraction as the cap below, it
      can never exceed it. */
-  min-height: min(262px, 60vh);
-  min-height: min(262px, 60dvh);
-  max-height: min(60vh, 520px);
-  max-height: min(60dvh, 520px);
+  min-height: min(520px, 80vh);
+  min-height: min(520px, 80dvh);
+  max-height: min(80vh, 760px);
+  max-height: min(80dvh, 760px);
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--muted) 25%, transparent);
   background: var(--bg);
@@ -5543,10 +5663,11 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   flex: none;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 8px;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
+  padding: 12px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
 }
 
 /* Editable path row: type or paste a path (a Windows user needs it to jump to
@@ -5556,7 +5677,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   flex: none;
   width: calc(100% - 28px);
   box-sizing: border-box;
-  margin: 0 14px 8px;
+  margin: 10px 14px 6px;
   padding: 6px 9px;
   border-radius: 9px;
   border: 1px solid var(--coddy-glass-panel-border);
@@ -5564,6 +5685,17 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   color: var(--text);
   font-size: 11.5px;
   outline: none;
+}
+
+.workspace-modal-show-hidden {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  cursor: pointer;
 }
 
 .workspace-modal-path::placeholder {
@@ -5587,7 +5719,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
    platforms with overlay scrollbars (macOS), so it is an affordance, not the
    fix. */
 .workspace-modal-list {
-  flex: 1 1 auto;
+  flex: 1 1 120px;
   min-height: 0;
   overflow-y: auto;
   /* A wheel gesture that runs past the last folder stays in the dialog instead
@@ -5641,6 +5773,26 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   color: var(--muted);
 }
 
+.workspace-modal-row--hidden {
+  opacity: 0.6;
+}
+
+.workspace-modal-row-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-modal-row-target {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Inline "new folder" row: a name field on the folder-row metrics, directly
    above the listing it will appear in. It is a form, not a destination, so it
    takes no row hover - and it sits *outside* the scrollport below on purpose:
@@ -5691,6 +5843,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
 }
 
 .workspace-modal-btn {
@@ -5712,6 +5865,19 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 /* New folder leads the footer, opposite the Cancel / Open pair. */
 .workspace-modal-btn--lead {
   margin-right: auto;
+}
+
+@media (max-width: 1199px) {
+  .workspace-modal {
+    width: calc(100vw - 28px);
+    min-height: 0;
+    max-height: none;
+    height: calc(100dvh - var(--coddy-mobile-top-inset) - 28px);
+  }
+
+  .workspace-modal-head {
+    padding-inline: 14px;
+  }
 }
 
 /* The two buttons inside the inline name row sit on a list row, not in the
@@ -6289,7 +6455,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 .context-breakdown-menu-scroll {
   position: relative;
   z-index: 1;
-  padding: 12px 14px 16px;
+  padding: 0 12px 12px;
   min-height: 0;
 }
 
@@ -6305,7 +6471,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   right: 0;
   bottom: 0;
   margin: 0 auto;
-  max-width: min(560px, 100vw);
+  max-width: min(520px, calc(100vw - 28px));
   border-radius: var(--coddy-glass-panel-radius) var(--coddy-glass-panel-radius)
     0 0;
   z-index: 41;
@@ -6356,22 +6522,25 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 }
 
 .context-breakdown-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  padding: 10px 12px;
 }
 
 .context-breakdown-title {
-  font-weight: 600;
-  font-size: 13px;
+  min-width: 0;
+  text-transform: none;
 }
 
-.context-breakdown-actions {
+.context-breakdown-usage-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 0;
+}
+
+.context-breakdown-used {
+  color: color-mix(in srgb, var(--text) 75%, transparent);
+  font-variant-numeric: tabular-nums;
 }
 
 .context-breakdown-compact {
@@ -6406,18 +6575,7 @@ html:not([data-theme="light"]) .context-breakdown-error {
 }
 
 .context-breakdown-close {
-  border: none;
-  background: transparent;
-  color: color-mix(in srgb, var(--text) 70%, transparent);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-
-.context-breakdown-close:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  flex: 0 0 auto;
 }
 
 .context-breakdown-summary {
@@ -6425,7 +6583,7 @@ html:not([data-theme="light"]) .context-breakdown-error {
   flex-wrap: wrap;
   gap: 6px;
   color: color-mix(in srgb, var(--text) 75%, transparent);
-  margin-bottom: 10px;
+  margin: 4px 14px 10px;
 }
 
 .context-breakdown-summary-sep {
@@ -9158,7 +9316,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .mcp-list {
   /* Where a server row's name starts: the chevron, its gap, the status dot
      and its gap. The tools and the trust note under a row start there too. */
-  --mcp-row-inset: calc(22px + 8px + 9px + 8px);
+  --mcp-switch-inset: calc(22px + 8px);
+  --mcp-row-inset: calc(var(--mcp-switch-inset) + 38px + 8px + 9px + 8px);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -9167,8 +9326,6 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 .mcp-list-item {
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
   padding: 4px 0;
 }
 
@@ -9454,8 +9611,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 /* Expanded per-tool rows, under the server's name. */
 .mcp-tools {
   list-style: none;
-  margin: 0 0 6px;
-  padding: 0 0 0 var(--mcp-row-inset);
+  margin: 0;
+  padding: 0 0 0 var(--mcp-switch-inset);
   display: flex;
   flex-direction: column;
 }
@@ -9467,6 +9624,10 @@ html:not([data-theme="light"]) .context-usage-note--error {
   padding: 5px 0;
   border-top: 1px dashed
     color-mix(in srgb, var(--text) 7%, var(--coddy-blend-base));
+}
+
+.mcp-tool-row > .skill-switch {
+  flex: 0 0 auto;
 }
 
 .mcp-tool-row.is-disabled .mcp-tool-text {

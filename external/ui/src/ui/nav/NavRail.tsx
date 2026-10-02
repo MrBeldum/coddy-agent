@@ -502,9 +502,7 @@ export function NavRail(props: {
                     {historyActiveCount}
                   </span>
                 ) : null}
-                {pillWide ? (
-                  <span className="rail-nav-label">{t("nav.history")}</span>
-                ) : null}
+                {pillWide ? <span className="rail-nav-label">{t("nav.history")}</span> : null}
               </a>
               {!pillWide && !props.historyOpen ? (
                 <span className="rail-tip" role="tooltip">
@@ -536,9 +534,7 @@ export function NavRail(props: {
                     {schedulerActiveCount}
                   </span>
                 ) : null}
-                {pillWide ? (
-                  <span className="rail-nav-label">{t("nav.scheduler")}</span>
-                ) : null}
+                {pillWide ? <span className="rail-nav-label">{t("nav.scheduler")}</span> : null}
               </a>
               {!pillWide && !props.schedulerOpen ? (
                 <span className="rail-tip" role="tooltip">

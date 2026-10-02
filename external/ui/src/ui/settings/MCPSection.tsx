@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chevron } from "../components/Chevron";
-import { LegendWithHint } from "./FieldHint";
+import { FieldHint, LegendWithHint } from "./FieldHint";
 import { IconSync } from "./icons";
 import { IconTrash } from "./SchemaForm";
 import { Switch } from "./Switch";
@@ -408,9 +408,15 @@ export function MCPSection(props: { activeSessionId?: string }) {
           label={t("mcp.discovery.legend")}
           description={t("mcp.discovery.description")}
         />
-        <label className="settings-label" htmlFor="mcp-project-trust">
-          {t("mcp.discovery.projectServersLabel")}
-        </label>
+        <span className="settings-label settings-label-with-hint">
+          <label htmlFor="mcp-project-trust">
+            {t("mcp.discovery.projectServersLabel")}
+          </label>
+          <FieldHint
+            label={t("mcp.discovery.projectServersLabel")}
+            text={t("mcp.discovery.description")}
+          />
+        </span>
         <select
           id="mcp-project-trust"
           className="settings-input"
@@ -517,6 +523,23 @@ export function MCPSection(props: { activeSessionId?: string }) {
                     >
                       <Chevron open={isOpen} />
                     </button>
+                    <Switch
+                      checked={row.enabled}
+                      disabled={!!busy[row.name]}
+                      onChange={() => onToggleServer(row)}
+                      title={
+                        row.enabled
+                          ? t("mcp.switch.enabledTitle")
+                          : t("mcp.switch.disabledTitle")
+                      }
+                      ariaLabel={t(
+                        row.enabled
+                          ? "mcp.switch.disableAria"
+                          : "mcp.switch.enableAria",
+                        { name: row.name },
+                      )}
+                      dataTestId={`mcp-toggle-${row.name}`}
+                    />
                     <span
                       className={`mcp-status-dot is-${row.status}`}
                       title={statusTitle(row)}
@@ -571,23 +594,6 @@ export function MCPSection(props: { activeSessionId?: string }) {
                         <IconShield />
                       </button>
                     ) : null}
-                    <Switch
-                      checked={row.enabled}
-                      disabled={!!busy[row.name]}
-                      onChange={() => onToggleServer(row)}
-                      title={
-                        row.enabled
-                          ? t("mcp.switch.enabledTitle")
-                          : t("mcp.switch.disabledTitle")
-                      }
-                      ariaLabel={t(
-                        row.enabled
-                          ? "mcp.switch.disableAria"
-                          : "mcp.switch.enableAria",
-                        { name: row.name },
-                      )}
-                      dataTestId={`mcp-toggle-${row.name}`}
-                    />
                     <button
                       type="button"
                       className="settings-btn settings-btn-icon"
@@ -692,14 +698,6 @@ export function MCPSection(props: { activeSessionId?: string }) {
                             key={tool.name}
                             className={`mcp-tool-row${tool.enabled ? "" : " is-disabled"}`}
                           >
-                            <div className="mcp-tool-text">
-                              <div className="mcp-tool-name">{tool.name}</div>
-                              {tool.description ? (
-                                <div className="skills-list-item-desc">
-                                  {tool.description}
-                                </div>
-                              ) : null}
-                            </div>
                             <Switch
                               checked={tool.enabled}
                               disabled={
@@ -724,6 +722,14 @@ export function MCPSection(props: { activeSessionId?: string }) {
                               )}
                               dataTestId={`mcp-tool-toggle-${row.name}-${tool.name}`}
                             />
+                            <div className="mcp-tool-text">
+                              <div className="mcp-tool-name">{tool.name}</div>
+                              {tool.description ? (
+                                <div className="skills-list-item-desc">
+                                  {tool.description}
+                                </div>
+                              ) : null}
+                            </div>
                           </li>
                         ))}
                       </ul>

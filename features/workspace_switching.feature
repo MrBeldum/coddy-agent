@@ -113,7 +113,7 @@ Feature: Workspace switching
     When I switch the session to branch "main"
     Then the workspace request fails with status 400
 
-  Scenario: Switching the session workspace reloads its configured MCP servers
+  Scenario: Switching the session workspace defers its configured MCP servers
     Given MCP project trust is "allow"
     And a workspace folder "alpha" without git
     And a workspace folder "beta" without git
@@ -122,16 +122,16 @@ Feature: Workspace switching
     And a session rooted at folder "alpha"
     When I switch the session workspace to folder "beta"
     Then the context path points to folder "beta"
-    And the session's configured MCP clients are "beta-probe"
+    And the session's configured MCP clients are "alpha-probe"
 
-  Scenario: An in-place branch checkout reloads workspace MCP servers
+  Scenario: An in-place branch checkout defers workspace MCP servers
     Given MCP project trust is "allow"
     And a workspace git repository "repo" with branches "main, dev"
     And repository "repo" branch "dev" declares the project MCP server "dev-probe"
     And a session rooted at folder "repo"
     When I switch the session to branch "dev"
     Then the context reports a git repository on branch "dev"
-    And the session's configured MCP clients are "dev-probe"
+    And the session's configured MCP clients are ""
 
   Scenario: A workspace switch during a running turn is refused
     Given a workspace folder "alpha" without git

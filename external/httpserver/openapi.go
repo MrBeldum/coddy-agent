@@ -887,7 +887,7 @@ func openAPISpec() map[string]interface{} {
 				"get": map[string]interface{}{
 					"summary": "List subfolders for the workspace folder picker",
 					"description": "Lists direct subfolders of **`path`** (default: session cwd via **`X-Coddy-Session-ID`**, else the server default cwd). " +
-						"Hidden folders and **`node_modules`** are skipped; rows are sorted by name. A missing folder yields **400**. " +
+						"Hidden folders are included only with **`show_hidden=true`** and **`node_modules`** is always skipped; rows are sorted by name. Directory symlinks carry their resolved target and non-directory symlinks are skipped. A missing folder yields **400**. " +
 						"**`path=:drives:`** lists the machine's drive roots instead (Windows only; **400** elsewhere), and the **`parent`** " +
 						"of a drive root is **`:drives:`** so the picker can walk up out of a volume.",
 					"operationId": "coddyWorkspaceFoldersGet",
@@ -901,6 +901,11 @@ func openAPISpec() map[string]interface{} {
 							"name": "path", "in": "query", "required": false,
 							"schema":      map[string]string{"type": "string"},
 							"description": "Absolute folder to list, or **`:drives:`** for the drive level.",
+						},
+						map[string]interface{}{
+							"name": "show_hidden", "in": "query", "required": false,
+							"schema":      map[string]interface{}{"type": "boolean", "default": false},
+							"description": "Include hidden direct subfolders. **`node_modules`** remains excluded.",
 						},
 					},
 					"responses": map[string]interface{}{
@@ -925,6 +930,18 @@ func openAPISpec() map[string]interface{} {
 													"properties": map[string]interface{}{
 														"name": map[string]interface{}{"type": "string"},
 														"path": map[string]interface{}{"type": "string"},
+														"hidden": map[string]interface{}{
+															"type":        "boolean",
+															"description": "Present and true for a hidden folder when requested.",
+														},
+														"symlink": map[string]interface{}{
+															"type":        "boolean",
+															"description": "Present and true when the folder row is a directory symlink.",
+														},
+														"target": map[string]interface{}{
+															"type":        "string",
+															"description": "Resolved target of a directory symlink.",
+														},
 													},
 												},
 											},
@@ -1854,6 +1871,30 @@ func openAPISpec() map[string]interface{} {
 						"404": errorResponseRef(),
 						"503": errorResponseRef(),
 					},
+				},
+			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Download a session artifact",
+					"description": "Downloads one immutable artifact published by the agent through **share_file**. The id is resolved only through this session's manifest; unregistered ids, traversal, symlinks and digest mismatches are not served. HEAD and Range requests are refused. The response is an attachment with a sandbox CSP and nosniff.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Artifact bytes", "content": map[string]interface{}{"application/octet-stream": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef(), "405": errorResponseRef()},
+				},
+			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}/preview": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Read a shared image artifact inline",
+					"description": "Returns a manifest-registered artifact only when its first 512 bytes sniff as an **`image/*`** media type. The filename is not trusted, so a text file called `preview.png` is still **404**. This route is for an inline preview; download uses the artifact route. Answers with the sniffed content type, `X-Content-Type-Options: nosniff`, and private immutable cache headers.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Original image bytes", "content": map[string]interface{}{"image/*": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef()},
+				},
+			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}/reveal": map[string]interface{}{
+				"post": map[string]interface{}{
+					"summary":     "Reveal a shared artifact source",
+					"description": "Reveals the original verified workspace source for an artifact in the local host file manager. The request carries only the session and artifact ids; the server re-validates the stored absolute and workspace-relative source paths, never accepts a client path, and refuses unavailable sources. Headless and unsupported server hosts return 503.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"204": map[string]interface{}{"description": "Reveal request started"}, "404": errorResponseRef(), "410": errorResponseRef(), "503": errorResponseRef()},
 				},
 			},
 			"/coddy/sessions/{id}/assets/{name}": map[string]interface{}{

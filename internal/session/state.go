@@ -1068,6 +1068,7 @@ func normalizeModelID(cfg *config.Config, id string) string {
 // AddMessage appends a message to the conversation history.
 func (s *State) AddMessage(msg llm.Message) {
 	s.mu.Lock()
+	placePendingArtifacts(s.Messages, &msg)
 	s.Messages = append(s.Messages, msg)
 	s.markMessagesAppended()
 	s.mu.Unlock()

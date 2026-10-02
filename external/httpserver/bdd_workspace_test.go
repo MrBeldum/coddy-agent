@@ -889,7 +889,7 @@ func initializeWorkspaceScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^MCP project trust is "([^"]+)"$`, s.mcpProjectTrustIs)
 	sc.Step(`^folder "([^"]+)" declares the project MCP server "([^"]+)"$`, s.folderDeclaresMCPServer)
 	sc.Step(`^repository "([^"]+)" branch "([^"]+)" declares the project MCP server "([^"]+)"$`, s.branchDeclaresMCPServer)
-	sc.Step(`^the session's configured MCP clients are "([^"]+)"$`, s.sessionMCPClientsAre)
+	sc.Step(`^the session's configured MCP clients are "([^"]*)"$`, s.sessionMCPClientsAre)
 	sc.Step(`^Git removes the session worktree$`, s.removeSessionWorktree)
 	sc.Step(`^I reopen the session transcript$`, s.reopenSessionTranscript)
 	sc.Step(`^the persisted session cwd remains the removed worktree$`, s.persistedCwdRemainsRemovedWorktree)
