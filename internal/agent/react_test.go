@@ -620,6 +620,23 @@ func TestBuildMessagesRepairsMissingToolResultsWithoutChangingStoredHistory(t *t
 	}
 }
 
+func TestBuildMessagesStripsCoddyFileMarkersFromProviderHistory(t *testing.T) {
+	st := &session.State{ID: "sess_file_markers", CWD: t.TempDir(), Mode: session.ModeAgent}
+	st.AddMessage(llm.Message{Role: llm.RoleAssistant, Content: "Here is the report.\n\n<coddy_file id=\"verified\"/>\n<coddy_file id=\"hallucinated\"/>"})
+	ag := NewAgent(&config.Config{}, st, resumePermissionSender{}, nil)
+
+	got := ag.buildMessages("system")
+	if len(got) != 2 {
+		t.Fatalf("messages = %#v", got)
+	}
+	if strings.Contains(got[1].Content, "<coddy_file") {
+		t.Fatalf("provider history leaked file marker: %q", got[1].Content)
+	}
+	if !strings.Contains(got[1].Content, "Here is the report.") {
+		t.Fatalf("provider history lost answer text: %q", got[1].Content)
+	}
+}
+
 func TestRunCancelsUnstartedToolBatchWithStableResults(t *testing.T) {
 	st := &session.State{ID: "sess_cancel_batch", CWD: t.TempDir(), Mode: session.ModeAgent, SessionDir: t.TempDir()}
 	cfg := &config.Config{

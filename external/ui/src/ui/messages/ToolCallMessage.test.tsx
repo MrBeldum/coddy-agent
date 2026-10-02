@@ -971,6 +971,28 @@ test("an ordinary tool row keeps its own duration", () => {
   expect(container.querySelector(".thinking-dur")).toHaveTextContent("12ms");
 });
 
+test("a tool row without a measured duration leaves the timer out", () => {
+  const { container, rerender } = render(
+    <ToolCallMessage
+      toolCallId="tc-no-duration"
+      title="background_wait"
+      status="completed"
+      resultText="still running"
+    />,
+  );
+  expect(container.querySelector(".thinking-dur")).toBeNull();
+
+  rerender(
+    <ToolCallMessage
+      toolCallId="tc-no-duration"
+      title="background_wait"
+      status="in_progress"
+      argsText='{"task_id":"bg_1"}'
+    />,
+  );
+  expect(container.querySelector(".thinking-dur")).toBeNull();
+});
+
 test("restored in_progress write still fetches full arguments", async () => {
   const fetchSpy = vi.fn(async () => {});
   render(

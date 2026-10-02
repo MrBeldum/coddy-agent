@@ -236,6 +236,17 @@ var mcpRefreshTimeout = mcpReloadTimeout
 // and dialed when its next turn starts, as is a server whose dial the
 // deadline cut short.
 func (m *Manager) RefreshMCPServer(ctx context.Context, name string) {
+	m.refreshMCPServer(ctx, name, "", "")
+}
+
+// RefreshMCPServerInWorkspace reconciles a changed project declaration only
+// with sessions in that workspace. Global declarations still reconcile every
+// session because a project shadow may reveal a changed global server.
+func (m *Manager) RefreshMCPServerInWorkspace(ctx context.Context, name, origin, cwd string) {
+	m.refreshMCPServer(ctx, name, origin, cwd)
+}
+
+func (m *Manager) refreshMCPServer(ctx context.Context, name, origin, cwd string) {
 	ctx, cancel := context.WithTimeout(ctx, mcpRefreshTimeout)
 	defer cancel()
 	// The change is on disk already (a switch, an edit of <home>/mcp.json):
@@ -245,6 +256,9 @@ func (m *Manager) RefreshMCPServer(ctx context.Context, name string) {
 	m.mu.RLock()
 	states := make([]*State, 0, len(m.sessions))
 	for _, st := range m.sessions {
+		if origin == mcp.OriginProject && CanonicalWorkspacePath(st.GetCWD()) != CanonicalWorkspacePath(cwd) {
+			continue
+		}
 		states = append(states, st)
 	}
 	m.mu.RUnlock()
@@ -688,12 +702,21 @@ func (m *Manager) loadSessionFromDisk(ctx context.Context, params acp.SessionLoa
 	if err != nil {
 		return nil, fmt.Errorf("session/load cwd: %w", err)
 	}
+	persistedCWD := ""
+	if strings.TrimSpace(params.CWD) == "" {
+		if recovered, ok := RecoverManagedWorktreeCWD(cwd); ok {
+			persistedCWD, cwd = cwd, recovered
+		}
+	}
 
 	st := &State{
 		ID:             params.SessionID,
 		CWD:            cwd,
 		SessionDir:     snap.Dir,
 		contextWindows: m,
+	}
+	if persistedCWD != "" {
+		st.RestoreRecoveredCWD(cwd, persistedCWD)
 	}
 
 	mode := Mode(snap.Meta.Mode)

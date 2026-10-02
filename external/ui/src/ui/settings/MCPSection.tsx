@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chevron } from "../components/Chevron";
-import { LegendWithHint } from "./FieldHint";
+import { FieldHint, LegendWithHint } from "./FieldHint";
 import { IconSync } from "./icons";
 import { IconTrash } from "./SchemaForm";
 import { Switch } from "./Switch";
@@ -32,10 +32,25 @@ type MCPList = {
 /** A listing, or why there is none: the server's own message when it sent one. */
 type MCPListResult = { list: MCPList } | { error: string };
 
-async function fetchServers(refresh = false): Promise<MCPListResult> {
-  let res: Response;
-  try {
-    res = await fetch(`/coddy/mcp${refresh ? "?refresh=1" : ""}`);
+function sessionHeaders(sessionID: string, contentType = false): HeadersInit | undefined {
+  const id = sessionID.trim();
+  if (!id && !contentType) return undefined;
+  const headers: Record<string, string> = {};
+  if (id) headers["X-Coddy-Session-ID"] = id;
+  if (contentType) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
+async function fetchServers(
+  sessionID: string,
+  refresh = false,
+): Promise<MCPListResult> {
+	let res: Response;
+	try {
+		const init: RequestInit = {};
+		const headers = sessionHeaders(sessionID);
+		if (headers) init.headers = headers;
+		res = await fetch(`/coddy/mcp${refresh ? "?refresh=1" : ""}`, init);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -62,14 +77,16 @@ async function fetchServers(refresh = false): Promise<MCPListResult> {
 }
 
 async function apiSend(
-  path: string,
-  method: "POST" | "PUT" | "DELETE",
-  body?: unknown,
+	sessionID: string,
+	path: string,
+	method: "POST" | "PUT" | "DELETE",
+	body?: unknown,
 ): Promise<{ ok: boolean; error?: string }> {
-  const init: RequestInit = { method };
-  if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
+	const init: RequestInit = { method };
+	const headers = sessionHeaders(sessionID, body !== undefined);
+	if (headers) init.headers = headers;
+	if (body !== undefined) {
+		init.body = JSON.stringify(body);
   }
   const res = await fetch(path, init);
   if (!res.ok) {
@@ -162,8 +179,9 @@ type EditorState = {
  * All actions talk to /coddy/mcp* directly; nothing here touches the
  * settings document.
  */
-export function MCPSection() {
-  const { t } = useT();
+export function MCPSection(props: { activeSessionId?: string }) {
+	const { t } = useT();
+	const activeSessionId = props.activeSessionId ?? "";
   const [servers, setServers] = useState<MCPServerRow[]>([]);
   const [projectTrust, setProjectTrust] = useState<ProjectTrust>("ask");
   const [workspace, setWorkspace] = useState("");
@@ -192,7 +210,7 @@ export function MCPSection() {
       if (firstLoad) setLoading(true);
       if (refresh) setRefreshing(true);
       try {
-        const result = await fetchServers(refresh);
+			const result = await fetchServers(activeSessionId, refresh);
         if (seq !== loadSeq.current) return;
         if ("list" in result) {
           setServers(result.list.items);
@@ -213,8 +231,8 @@ export function MCPSection() {
         if (firstLoad) setLoading(false);
         if (refresh) setRefreshing(false);
       }
-    },
-    [],
+	},
+	[activeSessionId],
   );
 
   useEffect(() => {
@@ -241,9 +259,10 @@ export function MCPSection() {
 
   const onToggleServer = (row: MCPServerRow) => {
     withBusy(row.name, async () => {
-      const action = row.enabled ? "disable" : "enable";
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
+		const action = row.enabled ? "disable" : "enable";
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
         "POST",
       );
       if (!res.ok) {
@@ -257,9 +276,10 @@ export function MCPSection() {
 
   const onToggleTool = (row: MCPServerRow, tool: string, enabled: boolean) => {
     withBusy(`${row.name}__${tool}`, async () => {
-      const action = enabled ? "disable" : "enable";
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}/tools/${encodeURIComponent(tool)}/${action}`,
+		const action = enabled ? "disable" : "enable";
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}/tools/${encodeURIComponent(tool)}/${action}`,
         "POST",
       );
       if (!res.ok) {
@@ -275,7 +295,7 @@ export function MCPSection() {
   // MCP API, so it never joins the settings document Save all flow.
   const onProjectTrustChange = (next: ProjectTrust) => {
     withBusy("project-trust", async () => {
-      const res = await apiSend("/coddy/mcp/project-trust", "POST", {
+		const res = await apiSend(activeSessionId, "/coddy/mcp/project-trust", "POST", {
         policy: next,
       });
       if (!res.ok) {
@@ -292,8 +312,9 @@ export function MCPSection() {
       // An approval names the declaration the note showed by its fingerprint,
       // so the server refuses it (409) when the checkout rewrote the entry
       // between the listing and the click.
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
         "POST",
         row.trusted ? undefined : { fingerprint: row.fingerprint ?? "" },
       );
@@ -308,8 +329,9 @@ export function MCPSection() {
 
   const onDelete = (row: MCPServerRow) => {
     withBusy(row.name, async () => {
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}`,
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}`,
         "DELETE",
       );
       if (!res.ok) {
@@ -358,8 +380,9 @@ export function MCPSection() {
     setEditorError(null);
     void (async () => {
       try {
-        const res = await apiSend(
-          `/coddy/mcp/${encodeURIComponent(editor.name.trim())}?scope=${editor.scope}`,
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(editor.name.trim())}?scope=${editor.scope}`,
           "PUT",
           entry,
         );
@@ -385,9 +408,15 @@ export function MCPSection() {
           label={t("mcp.discovery.legend")}
           description={t("mcp.discovery.description")}
         />
-        <label className="settings-label" htmlFor="mcp-project-trust">
-          {t("mcp.discovery.projectServersLabel")}
-        </label>
+        <span className="settings-label settings-label-with-hint">
+          <label htmlFor="mcp-project-trust">
+            {t("mcp.discovery.projectServersLabel")}
+          </label>
+          <FieldHint
+            label={t("mcp.discovery.projectServersLabel")}
+            text={t("mcp.discovery.description")}
+          />
+        </span>
         <select
           id="mcp-project-trust"
           className="settings-input"
@@ -494,6 +523,23 @@ export function MCPSection() {
                     >
                       <Chevron open={isOpen} />
                     </button>
+                    <Switch
+                      checked={row.enabled}
+                      disabled={!!busy[row.name]}
+                      onChange={() => onToggleServer(row)}
+                      title={
+                        row.enabled
+                          ? t("mcp.switch.enabledTitle")
+                          : t("mcp.switch.disabledTitle")
+                      }
+                      ariaLabel={t(
+                        row.enabled
+                          ? "mcp.switch.disableAria"
+                          : "mcp.switch.enableAria",
+                        { name: row.name },
+                      )}
+                      dataTestId={`mcp-toggle-${row.name}`}
+                    />
                     <span
                       className={`mcp-status-dot is-${row.status}`}
                       title={statusTitle(row)}
@@ -548,23 +594,6 @@ export function MCPSection() {
                         <IconShield />
                       </button>
                     ) : null}
-                    <Switch
-                      checked={row.enabled}
-                      disabled={!!busy[row.name]}
-                      onChange={() => onToggleServer(row)}
-                      title={
-                        row.enabled
-                          ? t("mcp.switch.enabledTitle")
-                          : t("mcp.switch.disabledTitle")
-                      }
-                      ariaLabel={t(
-                        row.enabled
-                          ? "mcp.switch.disableAria"
-                          : "mcp.switch.enableAria",
-                        { name: row.name },
-                      )}
-                      dataTestId={`mcp-toggle-${row.name}`}
-                    />
                     <button
                       type="button"
                       className="settings-btn settings-btn-icon"
@@ -669,14 +698,6 @@ export function MCPSection() {
                             key={tool.name}
                             className={`mcp-tool-row${tool.enabled ? "" : " is-disabled"}`}
                           >
-                            <div className="mcp-tool-text">
-                              <div className="mcp-tool-name">{tool.name}</div>
-                              {tool.description ? (
-                                <div className="skills-list-item-desc">
-                                  {tool.description}
-                                </div>
-                              ) : null}
-                            </div>
                             <Switch
                               checked={tool.enabled}
                               disabled={
@@ -701,6 +722,14 @@ export function MCPSection() {
                               )}
                               dataTestId={`mcp-tool-toggle-${row.name}-${tool.name}`}
                             />
+                            <div className="mcp-tool-text">
+                              <div className="mcp-tool-name">{tool.name}</div>
+                              {tool.description ? (
+                                <div className="skills-list-item-desc">
+                                  {tool.description}
+                                </div>
+                              ) : null}
+                            </div>
                           </li>
                         ))}
                       </ul>

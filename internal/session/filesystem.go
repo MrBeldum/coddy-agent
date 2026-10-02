@@ -421,6 +421,13 @@ type SessionMeta struct {
 	// moment it was started is not recoverable, so it stays empty rather than
 	// being invented from a later write.
 	CreatedAt string `json:"createdAt,omitempty"`
+	// MessageCount and the file identity beside it let a History listing use the
+	// transcript size without opening it. Nil values mean a bundle written by an
+	// older build (or an interrupted write), so callers must treat the count as
+	// unknown until they inspect messages.json.
+	MessageCount    *int   `json:"messageCount,omitempty"`
+	MessagesSize    *int64 `json:"messagesSize,omitempty"`
+	MessagesModTime *int64 `json:"messagesModTime,omitempty"`
 	// SchedulerRun marks the session of a scheduler job: the parent every run
 	// of that job is a child of, hidden from the working list and never
 	// prompted. SchedulerJobID names the job; on a run bundle (a child, see
@@ -497,6 +504,36 @@ type LoadedSnapshot struct {
 	PermissionCommands  []string
 	PermissionWriteKeys []string
 	PermissionHTTPKeys  []string
+}
+
+// messageCountMatches reports whether metadata describes the current
+// messages.json. Size and mtime are recorded only after the transcript reaches
+// disk, so any mismatch is deliberately unknown rather than an estimate.
+func (m SessionMeta) messageCountMatches(path string) (int, bool) {
+	if m.MessageCount == nil || m.MessagesSize == nil || m.MessagesModTime == nil {
+		return 0, false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Size() != *m.MessagesSize || info.ModTime().UnixNano() != *m.MessagesModTime {
+		return 0, false
+	}
+	return *m.MessageCount, true
+}
+
+// setMessageCountMetadata records a count only when the transcript that owns
+// it can be identified on disk. The zero value is intentionally unknown.
+func (m *SessionMeta) setMessageCountMetadata(path string, count int) {
+	info, err := os.Stat(path)
+	if err != nil {
+		m.MessageCount = nil
+		m.MessagesSize = nil
+		m.MessagesModTime = nil
+		return
+	}
+	size, modTime := info.Size(), info.ModTime().UnixNano()
+	m.MessageCount = &count
+	m.MessagesSize = &size
+	m.MessagesModTime = &modTime
 }
 
 // ReadSnapshot loads session.json, messages.json, and todos/active.md if present.
@@ -707,8 +744,9 @@ type SessionListEntry struct {
 	PinnedAt string
 	// PinnedRank is the place the operator dragged this pin to; 0 = never placed.
 	PinnedRank int
-	// MessageCount counts the persisted transcript rows of every role. The
-	// snapshot behind this listing is already parsed, so it costs no extra read.
+	// MessageCount counts the persisted transcript rows of every role when
+	// metadata identifies the current messages.json. Call EnrichMessageCounts
+	// before a caller needs an exact count for a legacy or stale bundle.
 	MessageCount int
 	// SubagentRun marks a session another session spawned, and the three
 	// fields below name the run. They come off the same snapshot the row was
@@ -717,6 +755,12 @@ type SessionListEntry struct {
 	ParentSessionID string
 	SubagentName    string
 	SubagentTaskID  string
+
+	// bundleDir and messageCountKnown stay private so callers retain the small,
+	// stable list row while the store can enrich a page without rediscovering a
+	// nested child bundle.
+	bundleDir         string
+	messageCountKnown bool
 }
 
 // ListOptions selects which persisted sessions ListSnapshotsWith returns.
@@ -793,51 +837,113 @@ func (f *FileStore) ListSnapshotsWith(opts ListOptions) ([]SessionListEntry, err
 	return out, nil
 }
 
-// appendBundleRow reads one bundle and adds its row when opts admit it.
+// appendBundleRow reads one bundle's metadata and adds its row when opts admit
+// it. It deliberately does not open messages.json: default History needs no
+// transcript fields, and archive filters must exclude a row before a large or
+// damaged transcript can affect the scan.
 func (f *FileStore) appendBundleRow(out []SessionListEntry, dir, id, cwdFilter string, opts ListOptions) []SessionListEntry {
-	snap, err := f.readSnapshotAt(dir, id)
+	meta, err := f.readListMetaAt(dir, id)
 	if err != nil {
 		return out
 	}
-	if !opts.IncludeSchedulerRuns && snap.Meta.ExcludedFromComposerSessionList(id) {
+	if recovered, ok := RecoverManagedWorktreeCWD(meta.CWD); ok {
+		meta.CWD = recovered
+	}
+	if !opts.IncludeSchedulerRuns && meta.ExcludedFromComposerSessionList(id) {
 		return out
 	}
-	if !opts.IncludeSubagents && snap.Meta.IsSubagentRun() {
+	if !opts.IncludeSubagents && meta.IsSubagentRun() {
 		return out
 	}
-	if cwdFilter != "" && !matchesWorkspace(cwdFilter, snap.Meta.CWD) {
+	if cwdFilter != "" && !matchesWorkspace(cwdFilter, meta.CWD) {
 		return out
 	}
-	if !opts.Archived.Keeps(snap.Meta.Archived) {
+	if !opts.Archived.Keeps(meta.Archived) {
 		return out
 	}
-	if !opts.Origin.Keeps(snap.Meta.Origin) {
+	if !opts.Origin.Keeps(meta.Origin) {
 		return out
 	}
+	messageCount, known := meta.messageCountMatches(filepath.Join(dir, messagesFile))
 	row := SessionListEntry{
-		SessionID:       snap.Meta.ID,
-		CWD:             snap.Meta.CWD,
-		Title:           snap.Meta.Title,
-		UpdatedAt:       snap.Meta.UpdatedAt,
-		CreatedAt:       snap.Meta.CreatedAt,
-		Model:           snap.Meta.SelectedModelID,
-		Tags:            NormalizeTags(snap.Meta.Tags),
-		Archived:        snap.Meta.Archived,
-		ArchivedAt:      snap.Meta.ArchivedAt,
-		Origin:          snap.Meta.Origin,
-		Pinned:          snap.Meta.Pinned,
-		PinnedAt:        snap.Meta.PinnedAt,
-		PinnedRank:      snap.Meta.PinnedRank,
-		MessageCount:    len(snap.Messages),
-		SubagentRun:     snap.Meta.SubagentRun,
-		ParentSessionID: snap.Meta.ParentSessionID,
-		SubagentName:    snap.Meta.SubagentName,
-		SubagentTaskID:  snap.Meta.SubagentTaskID,
+		SessionID:         meta.ID,
+		CWD:               meta.CWD,
+		Title:             meta.Title,
+		UpdatedAt:         meta.UpdatedAt,
+		CreatedAt:         meta.CreatedAt,
+		Model:             meta.SelectedModelID,
+		Tags:              NormalizeTags(meta.Tags),
+		Archived:          meta.Archived,
+		ArchivedAt:        meta.ArchivedAt,
+		Origin:            meta.Origin,
+		Pinned:            meta.Pinned,
+		PinnedAt:          meta.PinnedAt,
+		PinnedRank:        meta.PinnedRank,
+		MessageCount:      messageCount,
+		SubagentRun:       meta.SubagentRun,
+		ParentSessionID:   meta.ParentSessionID,
+		SubagentName:      meta.SubagentName,
+		SubagentTaskID:    meta.SubagentTaskID,
+		bundleDir:         dir,
+		messageCountKnown: known,
 	}
 	if !SessionMatchesAnyTag(row, opts.Tags) {
 		return out
 	}
 	return append(out, row)
+}
+
+// readListMetaAt reads the durable metadata necessary to list a bundle. A
+// child directory is authoritative evidence that the row is a subagent run,
+// matching ReadSnapshot's protection for a child whose first save was
+// interrupted.
+func (f *FileStore) readListMetaAt(dir, sessionID string) (SessionMeta, error) {
+	b, err := readFileWithRetry(filepath.Join(dir, sessionMetaFile))
+	if err != nil {
+		return SessionMeta{}, err
+	}
+	var meta SessionMeta
+	if err := json.Unmarshal(b, &meta); err != nil {
+		return SessionMeta{}, fmt.Errorf("session.json: %w", err)
+	}
+	if parent, ok := f.childBundleParent(dir); ok {
+		meta.SubagentRun = true
+		if strings.TrimSpace(meta.ParentSessionID) == "" {
+			meta.ParentSessionID = parent
+		}
+	}
+	return meta, nil
+}
+
+// EnrichMessageCounts decodes transcripts only for rows whose persisted count
+// metadata is absent or no longer identifies messages.json. It is intended for
+// count-dependent requests after filtering and paging, not default History.
+func (f *FileStore) EnrichMessageCounts(rows []SessionListEntry) {
+	for i := range rows {
+		if rows[i].messageCountKnown {
+			continue
+		}
+		dir := rows[i].bundleDir
+		if dir == "" {
+			dir = f.SessionPath(rows[i].SessionID)
+		}
+		rows[i].MessageCount = f.messageCountAt(dir)
+		rows[i].messageCountKnown = true
+	}
+}
+
+// messageCountAt keeps the historical list behavior for a missing or corrupt
+// transcript: its count is zero, not a listing failure.
+func (f *FileStore) messageCountAt(dir string) int {
+	b, err := readFileWithRetry(filepath.Join(dir, messagesFile))
+	if err != nil {
+		return 0
+	}
+	var wrap messagesFileData
+	if err := json.Unmarshal(b, &wrap); err != nil {
+		return 0
+	}
+	return len(wrap.Messages)
 }
 
 // appendChildRows adds the sessions nested inside dir, and their own children,
@@ -1045,7 +1151,7 @@ func (f *FileStore) Save(state *State) error {
 	meta := SessionMeta{
 		Version:           sessionFileLayout,
 		ID:                state.ID,
-		CWD:               state.GetCWD(),
+		CWD:               state.CWDForPersist(),
 		Mode:              state.GetMode(),
 		SelectedModelID:   state.GetSelectedModelID(),
 		SelectedReasoning: state.GetSelectedReasoning(),
@@ -1106,6 +1212,9 @@ func (f *FileStore) Save(state *State) error {
 	sameMeta.Archived, sameMeta.ArchivedAt = prevMeta.Archived, prevMeta.ArchivedAt
 	sameMeta.Pinned, sameMeta.PinnedAt = prevMeta.Pinned, prevMeta.PinnedAt
 	sameMeta.PinnedRank = prevMeta.PinnedRank
+	sameMeta.MessageCount = prevMeta.MessageCount
+	sameMeta.MessagesSize = prevMeta.MessagesSize
+	sameMeta.MessagesModTime = prevMeta.MessagesModTime
 	preserveUpdatedAt := messagesUnchanged && metaExisted && reflect.DeepEqual(sameMeta, prevMeta)
 
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
@@ -1121,9 +1230,6 @@ func (f *FileStore) Save(state *State) error {
 	}
 	meta.UpdatedAt, meta.CreatedAt = updatedAt, createdAt
 
-	if err := writeJSONAtomic(metaPath, meta); err != nil {
-		return err
-	}
 	switch {
 	case pending != nil:
 		if err := writeBytesAtomic(msgPath, pending); err != nil {
@@ -1141,6 +1247,13 @@ func (f *FileStore) Save(state *State) error {
 		moved := *cached
 		moved.rev, moved.editRev, moved.count = msgRev, msgEditRev, len(msgs)
 		f.rememberMessages(msgPath, &moved)
+	}
+	// Write the transcript before metadata that identifies it. A crash or write
+	// failure between the two leaves no trusted count rather than a count for
+	// bytes that never reached messages.json.
+	meta.setMessageCountMetadata(msgPath, len(msgs))
+	if err := writeJSONAtomic(metaPath, meta); err != nil {
+		return err
 	}
 	uiWrap := uiLogFileData{
 		Version: uiLogLayout,

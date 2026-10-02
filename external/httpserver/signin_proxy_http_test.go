@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -128,8 +129,16 @@ func TestCodexDeviceStartBodyProxyNoneOverridesSaved(t *testing.T) {
 	savedProx := proxytest.New()
 	defer savedProx.Close()
 
-	srv := signInTestServer(t, t.TempDir(),
+	home, err := os.MkdirTemp("", "coddy-codex-signin-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := signInTestServer(t, home,
 		config.ProviderConfig{Name: "x", Type: "codex", Proxy: savedProx.URL()}, issuer.URL)
+	defer func() {
+		srv.Drain()
+		_ = os.RemoveAll(home)
+	}()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -215,8 +224,16 @@ func TestNeuralDeepDeviceStartFollowsBodyProxy(t *testing.T) {
 	defer prox.Close()
 	t.Setenv(llm.EnvNeuralDeepHubURL, hub.URL)
 
-	srv := signInTestServer(t, t.TempDir(),
+	home, err := os.MkdirTemp("", "coddy-neuraldeep-signin-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := signInTestServer(t, home,
 		config.ProviderConfig{Name: "x", Type: "neuraldeep", Proxy: "none"}, "")
+	defer func() {
+		srv.Drain()
+		_ = os.RemoveAll(home)
+	}()
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

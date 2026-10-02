@@ -400,7 +400,7 @@ export function SettingsSection(props: {
   // persist into config.yaml / .coddy/mcp.json immediately, so it does not
   // edit the settings document at all.
   if (section.kind === "mcp") {
-    return <MCPSection />;
+    return <MCPSection {...(activeSessionId ? { activeSessionId } : {})} />;
   }
 
   // Subagents edits its config section like any object tab, and additionally

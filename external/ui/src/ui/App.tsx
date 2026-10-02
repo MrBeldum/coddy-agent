@@ -11,6 +11,7 @@ import type { CSSProperties } from "react";
 import { ChatScreen } from "./chat/ChatScreen";
 import { useStableHandler } from "./components/useStableHandler";
 import type { QueuedMessage, QueueMode } from "./chat/Composer";
+import { normalizeClipboardImageFile } from "./chat/clipboardImageFile";
 import { fileFromDataUrl } from "./chat/dataUrlFile";
 import {
   contextUsagePercent,
@@ -397,6 +398,13 @@ function newId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`;
 }
 
+function isStackedShell(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia(shellStackMaxWidthMediaQuery).matches
+  );
+}
+
 export function App() {
   const { t } = useT();
   const confirm = useConfirm();
@@ -630,6 +638,8 @@ export function App() {
   const relayAbortBySidRef = useRef<Map<string, AbortController>>(new Map());
   const pendingPostBySidRef = useRef(new Map<string, AbortController>());
   const streamGenerationBySidRef = useRef(new Map<string, number>());
+
+  const activatedMCPSelectionsRef = useRef(new Set<string>());
   const relayAttachPendingRef = useRef(new Set<string>());
   const stopPendingBySidRef = useRef(
     new Map<string, { superseded: boolean }>(),
@@ -1937,7 +1947,7 @@ export function App() {
       setSettingsRoute(false);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       setSessionsOpen(false);
       return;
     }
@@ -1951,7 +1961,9 @@ export function App() {
       void markCoddySessionActivityRead(p.sessionId);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(p.tasksOpen);
+      setTasksOpen((wasOpen) =>
+        p.tasksOpen || (!isStackedShell() && wasOpen),
+      );
       if (p.tasksOpen && p.taskId) {
         // A link that names a task opens its card once; the address goes back to
         // saying only that the panel is showing.
@@ -1967,7 +1979,7 @@ export function App() {
       setSettingsRoute(false);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       setSessionId("");
       viewedSessionIdRef.current = "";
       setActiveDraftId(p.draftId.trim());
@@ -1987,7 +1999,7 @@ export function App() {
       setSessionsOpen(true);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       return;
     }
     if (p.branch === "swarm") {
@@ -1995,7 +2007,7 @@ export function App() {
       setSettingsRoute(false);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       setSessionsOpen(false);
       return;
     }
@@ -2006,7 +2018,7 @@ export function App() {
       setSettingsItem(p.item);
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       setSessionsOpen(false);
       return;
     }
@@ -2032,7 +2044,7 @@ export function App() {
       }
       setSchedulerOpen(true);
       setSessionsOpen(false);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       setSchedulerEditor(schedulerEditorFromParsedHash(p));
       return;
     }
@@ -3011,6 +3023,15 @@ export function App() {
     // that lands after this client's archive PATCH may carry the flag from
     // before the write, and the write is what must stay on screen.
     const issuedAt = Date.now();
+    const activateMCP =
+      request.kind === "tail" &&
+      sid === sessionId &&
+      !activatedMCPSelectionsRef.current.has(sid);
+    if (activateMCP) activatedMCPSelectionsRef.current.add(sid);
+    const pageQuery = transcriptPageQuery(request);
+    const activationQuery = activateMCP
+      ? `${pageQuery}${pageQuery ? "&" : "?"}activate_mcp=1`
+      : pageQuery;
     const res = await fetchJSON<{
       window?: unknown;
       messages: Array<any>;
@@ -3034,7 +3055,7 @@ export function App() {
         createdAt?: string;
       }>;
     }>(
-      `/coddy/sessions/${encodeURIComponent(sid)}/messages${transcriptPageQuery(request)}`,
+      `/coddy/sessions/${encodeURIComponent(sid)}/messages${activationQuery}`,
       {
         headers: sid === sessionId ? headers : { [HDR]: sid },
       },
@@ -3161,11 +3182,11 @@ export function App() {
       next,
       localForMerge,
     );
-    revokeSupersededUserMessagePreviews(mergedTranscript, localForMerge);
     const mergedBase = preserveUserMessageFiles(
       mergedTranscript,
       localForMerge,
     );
+    revokeSupersededUserMessagePreviews(mergedBase, localForMerge);
     let merged = reattachLocalQuestionPrompts(mergedBase, localForMerge);
     merged = mergePermissionPromptsIntoTranscript(
       merged,
@@ -4555,7 +4576,7 @@ export function App() {
                     };
                     resolve(null);
                   };
-                  reader.readAsDataURL(f);
+                  reader.readAsDataURL(normalizeClipboardImageFile(f));
                 },
               ),
           ),
@@ -5336,7 +5357,7 @@ export function App() {
       return;
     }
     setSessionsOpen(false);
-    setTasksOpen(false);
+    if (isStackedShell()) setTasksOpen(false);
     setSchedulerOpen(true);
     setSchedulerEditor(null);
     setSchedulerListHash();
@@ -5352,13 +5373,18 @@ export function App() {
     setSchedulerEditor(null);
     setSettingsRoute(false);
     setTasksOpen(true);
-    setSessionTasksHash(sid);
+    if (isStackedShell()) {
+      setSessionTasksHash(sid);
+    }
   }, [sessionId]);
 
   const closeTasksDrawer = useCallback(() => {
     setTasksOpen(false);
     // A pointer at a task that never showed up does not wait for the next opening.
     setTasksFocus(null);
+    if (!isStackedShell()) {
+      return;
+    }
     if (sessionsOpen) {
       setHistoryHash();
       return;
@@ -5593,7 +5619,7 @@ export function App() {
   const openSwarmFromNav = useCallback(() => {
     setSchedulerOpen(false);
     setSchedulerEditor(null);
-    setTasksOpen(false);
+    if (isStackedShell()) setTasksOpen(false);
     setSessionsOpen(false);
     setSettingsRoute(false);
     window.location.hash = appNavHrefSwarm();
@@ -5607,7 +5633,7 @@ export function App() {
       }
       setSchedulerOpen(false);
       setSchedulerEditor(null);
-      setTasksOpen(false);
+      if (isStackedShell()) setTasksOpen(false);
       setSessionsOpen(false);
       setSettingsRoute(false);
       window.location.hash = appNavHrefDocs(slug, anchor);
@@ -5703,7 +5729,7 @@ export function App() {
   const openSettingsFromNav = useCallback(() => {
     setSchedulerOpen(false);
     setSchedulerEditor(null);
-    setTasksOpen(false);
+    if (isStackedShell()) setTasksOpen(false);
     setSessionsOpen(false);
     setSettingsHash();
   }, []);
@@ -5729,7 +5755,7 @@ export function App() {
   const onOpenHistoryFromNav = useCallback(() => {
     setSchedulerOpen(false);
     setSchedulerEditor(null);
-    setTasksOpen(false);
+    if (isStackedShell()) setTasksOpen(false);
     setSettingsRoute(false);
     setSwarmRoute(false);
     setSessionsOpen(true);
@@ -5993,7 +6019,7 @@ export function App() {
                         data_url: reader.result as string,
                       });
                     reader.onerror = () => reject(reader.error);
-                    reader.readAsDataURL(file);
+                    reader.readAsDataURL(normalizeClipboardImageFile(file));
                   },
                 ),
             ),
@@ -6515,6 +6541,11 @@ export function App() {
             }
             settingsOverrides={settingsOverrides}
             onDraftChange={setDraft}
+            onMentionArtifact={(path: string) =>
+              setDraft((current) =>
+                `${current}${current.trim() ? " " : ""}@${path}`,
+              )
+            }
             generating={generating}
             {...(!generating && lastUserText.trim() && !subagentTranscript
               ? { onRetryLast: handleRetryLast }

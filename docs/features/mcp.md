@@ -457,6 +457,22 @@ one went away.
 
 ## MCP Server Lifecycle
 
+### Selected web session
+
+The MCP Settings tab resolves project-local declarations from the workspace of
+the selected session, rather than from the directory that started `coddy
+serve`. A request with a selected session uses that session's workspace; a
+request with no session keeps the server-default workspace for a new chat.
+Project-local switches, trust decisions, and edits refresh only sessions in
+that workspace, while global declarations still refresh every affected
+session.
+
+Opening a chat in the bundled web UI explicitly starts its deferred configured
+MCP servers in the background. This does not delay rendering the transcript,
+and the next prompt waits for the bounded connection attempt before receiving
+its tool list. Passive reads, including slash completion, MCP Settings lists,
+and paged transcript reads, never start a deferred server.
+
 1. On `session/new`, the session takes every enabled server from the merged
    config.yaml + `~/.coddy/mcp.json` + `./.coddy/mcp.json` list that the workspace
    trust gate admits, then connects any ACP client-supplied servers. A configured

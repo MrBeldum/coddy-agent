@@ -887,7 +887,7 @@ func openAPISpec() map[string]interface{} {
 				"get": map[string]interface{}{
 					"summary": "List subfolders for the workspace folder picker",
 					"description": "Lists direct subfolders of **`path`** (default: session cwd via **`X-Coddy-Session-ID`**, else the server default cwd). " +
-						"Hidden folders and **`node_modules`** are skipped; rows are sorted by name. A missing folder yields **400**. " +
+						"Hidden folders are included only with **`show_hidden=true`** and **`node_modules`** is always skipped; rows are sorted by name. Directory symlinks carry their resolved target and non-directory symlinks are skipped. A missing folder yields **400**. " +
 						"**`path=:drives:`** lists the machine's drive roots instead (Windows only; **400** elsewhere), and the **`parent`** " +
 						"of a drive root is **`:drives:`** so the picker can walk up out of a volume.",
 					"operationId": "coddyWorkspaceFoldersGet",
@@ -901,6 +901,11 @@ func openAPISpec() map[string]interface{} {
 							"name": "path", "in": "query", "required": false,
 							"schema":      map[string]string{"type": "string"},
 							"description": "Absolute folder to list, or **`:drives:`** for the drive level.",
+						},
+						map[string]interface{}{
+							"name": "show_hidden", "in": "query", "required": false,
+							"schema":      map[string]interface{}{"type": "boolean", "default": false},
+							"description": "Include hidden direct subfolders. **`node_modules`** remains excluded.",
 						},
 					},
 					"responses": map[string]interface{}{
@@ -925,6 +930,18 @@ func openAPISpec() map[string]interface{} {
 													"properties": map[string]interface{}{
 														"name": map[string]interface{}{"type": "string"},
 														"path": map[string]interface{}{"type": "string"},
+														"hidden": map[string]interface{}{
+															"type":        "boolean",
+															"description": "Present and true for a hidden folder when requested.",
+														},
+														"symlink": map[string]interface{}{
+															"type":        "boolean",
+															"description": "Present and true when the folder row is a directory symlink.",
+														},
+														"target": map[string]interface{}{
+															"type":        "string",
+															"description": "Resolved target of a directory symlink.",
+														},
 													},
 												},
 											},
@@ -1826,6 +1843,7 @@ func openAPISpec() map[string]interface{} {
 						"Every read carries **window** **`{offset, total, turnsBefore, userRowsBefore}`**: **offset** is the index of the first returned message and **total** the length of the history; **turnsBefore** counts the user messages before the page that are not compaction summaries (a prompt's **userMessageIndex** for **POST /coddy/sessions/{id}/rewind** is **turnsBefore** plus its position among the page's prompts) and **userRowsBefore** counts every user-role message before it (the numbering of **uiLog** **userTurnIndex**). **uiLog** holds only the rows of the page: a row stamped with turn **t** sits before the **t**-th user-role message (0-based), or at the end of the history, and a row on the boundary between two pages opens the newer one, so the newest page still shows what ended the turn before it.",
 					"parameters": []interface{}{
 						map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}},
+						map[string]interface{}{"name": "activate_mcp", "in": "query", "required": false, "description": "Set to `1` only on the SPA's initial, unpaged selected-session read with a matching `X-Coddy-Session-ID` header. It starts that restored ordinary session's deferred configured MCP connections in the background; all other reads remain passive.", "schema": map[string]interface{}{"type": "string", "enum": []string{"1"}}},
 						map[string]interface{}{"name": "limit", "in": "query", "required": false, "description": "Read a page of about this many messages ending at **before** (1..1000).", "schema": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 1000}},
 						map[string]interface{}{"name": "before", "in": "query", "required": false, "description": "Message index the page ends at, exclusive (default: the end of the history).", "schema": map[string]interface{}{"type": "integer", "minimum": 0}},
 						map[string]interface{}{"name": "from", "in": "query", "required": false, "description": "Message index a window starts at, read to **before** or the end; not with **limit**.", "schema": map[string]interface{}{"type": "integer", "minimum": 0}},
@@ -1853,6 +1871,30 @@ func openAPISpec() map[string]interface{} {
 						"404": errorResponseRef(),
 						"503": errorResponseRef(),
 					},
+				},
+			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Download a session artifact",
+					"description": "Downloads one immutable artifact published by the agent through **share_file**. The id is resolved only through this session's manifest; unregistered ids, traversal, symlinks and digest mismatches are not served. HEAD and Range requests are refused. The response is an attachment with a sandbox CSP and nosniff.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Artifact bytes", "content": map[string]interface{}{"application/octet-stream": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef(), "405": errorResponseRef()},
+				},
+			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}/preview": map[string]interface{}{
+				"get": map[string]interface{}{
+					"summary":     "Read a shared image artifact inline",
+					"description": "Returns a manifest-registered artifact only when its first 512 bytes sniff as an **`image/*`** media type. The filename is not trusted, so a text file called `preview.png` is still **404**. This route is for an inline preview; download uses the artifact route. Answers with the sniffed content type, `X-Content-Type-Options: nosniff`, and private immutable cache headers.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"200": map[string]interface{}{"description": "Original image bytes", "content": map[string]interface{}{"image/*": map[string]interface{}{"schema": map[string]string{"type": "string", "format": "binary"}}}}, "404": errorResponseRef()},
+				},
+			},
+			"/coddy/sessions/{id}/artifacts/{artifactID}/reveal": map[string]interface{}{
+				"post": map[string]interface{}{
+					"summary":     "Reveal a shared artifact source",
+					"description": "Reveals the original verified workspace source for an artifact in the local host file manager. The request carries only the session and artifact ids; the server re-validates the stored absolute and workspace-relative source paths, never accepts a client path, and refuses unavailable sources. Headless and unsupported server hosts return 503.",
+					"parameters":  []interface{}{map[string]interface{}{"name": "id", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}, map[string]interface{}{"name": "artifactID", "in": "path", "required": true, "schema": map[string]string{"type": "string"}}},
+					"responses":   map[string]interface{}{"204": map[string]interface{}{"description": "Reveal request started"}, "404": errorResponseRef(), "410": errorResponseRef(), "503": errorResponseRef()},
 				},
 			},
 			"/coddy/sessions/{id}/assets/{name}": map[string]interface{}{
@@ -2284,6 +2326,7 @@ func openAPISpec() map[string]interface{} {
 					"description": "Returns the merged MCP server list from three levels: **`mcp_servers`** in config.yaml and the global **`<home>/mcp.json`** (scope `global`), plus the project-local **`.coddy/mcp.json`** (scope `local`); all mcp.json files are Cursor-compatible and later levels override earlier ones by name. Enabled servers are probed for their tool inventory over their transport (stdio spawn, streamable HTTP with legacy-SSE fallback, or SSE; connect, `tools/list`, close); results are cached until the server definition changes. **`?refresh=1`** forces a re-probe.\n\nA project-local entry arrives with the checkout, so it is **not** probed until it is approved for this workspace (see **POST** `/coddy/mcp/{name}/trust`): such a row comes back with `status: \"needs_approval\"`, `trusted: false`, no tools, and the `command`/`args`/`env`/`url`/`fingerprint` an approval would cover. Under `mcp.project_trust: deny` the status is `denied`.",
 					"operationId": "listMCPServers",
 					"parameters": []interface{}{
+						mcpWorkspaceSessionParam(),
 						map[string]interface{}{
 							"name": "refresh", "in": "query", "required": false,
 							"schema":      map[string]string{"type": "string"},
@@ -2301,6 +2344,8 @@ func openAPISpec() map[string]interface{} {
 								},
 							},
 						},
+						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
@@ -2310,10 +2355,11 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Enable an MCP server",
 					"description": "Clears the disabled flag. Global entries persist in their defining file; project entries persist in `<home>/mcp-overrides.json`, leaving the checkout unchanged. Live sessions connect this server if the trust gate admits it; their other servers keep running. A session with a turn in flight connects it when its next turn starts.",
 					"operationId": "enableMCPServer",
-					"parameters":  []interface{}{mcpServerNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpWorkspaceSessionParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Server enabled."},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 					},
 				},
 			},
@@ -2322,10 +2368,11 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Disable an MCP server",
 					"description": "Sets the disabled flag under the same scope rule as enable. Live sessions close this server, leaving their other servers running (a turn in flight keeps it until the turn ends); new sessions skip connecting it.",
 					"operationId": "disableMCPServer",
-					"parameters":  []interface{}{mcpServerNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpWorkspaceSessionParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Server disabled."},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 					},
 				},
 			},
@@ -2334,7 +2381,7 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Approve a project MCP server for this workspace",
 					"description": "Records the operator's approval of a project-local (`.coddy/mcp.json`) server's declaration for the server's workspace, so sessions may start it, and connects it in live sessions. The optional body names the declaration the operator was shown by the `fingerprint` the list reported; when the checkout rewrote the entry since, the approval is refused with **409** and nothing is recorded. Without a body the current declaration is approved. The approval is bound to the workspace and to a digest of the command-bearing declaration (transport, command, args, env, url, headers), and is stored in `<home>/mcp-trust.json` with a receipt naming what was approved (env and header **names** only). Rewriting the entry withdraws it. Refused with 400 for servers defined in config.yaml or `<home>/mcp.json` (they need no approval) and under `mcp.project_trust: deny`.",
 					"operationId": "trustMCPServer",
-					"parameters":  []interface{}{mcpServerNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpWorkspaceSessionParam()},
 					"requestBody": map[string]interface{}{
 						"required": false,
 						"content": map[string]interface{}{
@@ -2364,6 +2411,7 @@ func openAPISpec() map[string]interface{} {
 							},
 						},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 						"409": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
@@ -2374,7 +2422,7 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Withdraw a project MCP server approval",
 					"description": "Removes the workspace approval of a project-local server. Live sessions close it (a turn in flight keeps it until the turn ends) and new sessions no longer start it. `removed` reports whether an approval was actually on file.",
 					"operationId": "untrustMCPServer",
-					"parameters":  []interface{}{mcpServerNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpWorkspaceSessionParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
 							"description": "Approval withdrawn (or none was on file).",
@@ -2390,6 +2438,7 @@ func openAPISpec() map[string]interface{} {
 								},
 							},
 						},
+						"404": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
@@ -2437,10 +2486,11 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Enable a single MCP tool",
 					"description": "Enables **{tool}** in the effective tool list. Global switches persist in their defining file; project switches persist in `<home>/mcp-overrides.json`. Nothing reconnects: live sessions offer the tool again on their next turn.",
 					"operationId": "enableMCPTool",
-					"parameters":  []interface{}{mcpServerNameParam(), mcpToolNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpToolNameParam(), mcpWorkspaceSessionParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Tool enabled."},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 					},
 				},
 			},
@@ -2449,10 +2499,11 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Disable a single MCP tool",
 					"description": "Disables **{tool}** under the same scope rule as enable. The tool is hidden from the agent and rejected at dispatch from the next turn on; nothing reconnects.",
 					"operationId": "disableMCPTool",
-					"parameters":  []interface{}{mcpServerNameParam(), mcpToolNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpToolNameParam(), mcpWorkspaceSessionParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Tool disabled."},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 					},
 				},
 			},
@@ -2463,6 +2514,7 @@ func openAPISpec() map[string]interface{} {
 					"operationId": "putMCPServer",
 					"parameters": []interface{}{
 						mcpServerNameParam(),
+						mcpWorkspaceSessionParam(),
 						map[string]interface{}{
 							"name": "scope", "in": "query", "required": false,
 							"schema":      map[string]interface{}{"type": "string", "enum": []string{"global", "local"}},
@@ -2480,6 +2532,7 @@ func openAPISpec() map[string]interface{} {
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Server saved."},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
@@ -2487,10 +2540,11 @@ func openAPISpec() map[string]interface{} {
 					"summary":     "Delete an mcp.json MCP server",
 					"description": "Removes the named entry from the mcp.json file that defines it (project **`.coddy/mcp.json`** or global **`<home>/mcp.json`**); a project entry's switches in `<home>/mcp-overrides.json` go with it. Live sessions close the server. Servers defined in config.yaml are refused with 400.",
 					"operationId": "deleteMCPServer",
-					"parameters":  []interface{}{mcpServerNameParam()},
+					"parameters":  []interface{}{mcpServerNameParam(), mcpWorkspaceSessionParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Server deleted."},
 						"400": errorResponseRef(),
+						"404": errorResponseRef(),
 					},
 				},
 			},
@@ -3899,6 +3953,14 @@ func mcpServerNameParam() map[string]interface{} {
 		"name": "name", "in": "path", "required": true,
 		"schema":      map[string]string{"type": "string"},
 		"description": "MCP server name (no `__`, spaces, or path separators).",
+	}
+}
+
+func mcpWorkspaceSessionParam() map[string]interface{} {
+	return map[string]interface{}{
+		"name": "X-Coddy-Session-ID", "in": "header", "required": false,
+		"schema":      map[string]string{"type": "string"},
+		"description": "Optional session whose workspace selects project-local MCP declarations and switches. Without it, the server default workspace is used. A malformed ID is 400; an unknown session is 404.",
 	}
 }
 

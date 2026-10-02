@@ -101,6 +101,7 @@ export function ChatScreen(props: {
   onPermissionModeChange?: ((mode: string) => void) | undefined;
   settingsOverrides?: TurnOverride[];
   onDraftChange: (v: string) => void;
+  onMentionArtifact?: (path: string) => void;
   onSend: (text: string, files?: File[]) => void;
   /** The files attached in the composer, when the caller owns them: a send the
    *  server never took puts them back (App.tsx, streamResponses). */
@@ -557,6 +558,8 @@ export function ChatScreen(props: {
     ...(props.backgroundNowMs !== undefined
       ? { backgroundNowMs: props.backgroundNowMs }
       : {}),
+    ...(props.onOpenSession ? { onOpenSession: props.onOpenSession } : {}),
+    ...(props.onMentionArtifact ? { onMentionArtifact: props.onMentionArtifact } : {}),
   };
 
   const mainClassName = [

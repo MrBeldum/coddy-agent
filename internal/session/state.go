@@ -48,6 +48,10 @@ type State struct {
 	// CWD is the session working directory.
 	CWD string
 
+	// persistedCWD keeps the original path when a missing managed worktree is
+	// recovered to its parent checkout for this process.
+	persistedCWD string
+
 	// Mode is the current operating mode.
 	Mode Mode
 
@@ -329,10 +333,31 @@ func (s *State) GetCWD() string {
 	return s.CWD
 }
 
+// CWDForPersist returns the original stored workspace when a deleted managed
+// worktree was recovered to an effective parent-checkout workspace.
+func (s *State) CWDForPersist() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.persistedCWD != "" {
+		return s.persistedCWD
+	}
+	return s.CWD
+}
+
+// RestoreRecoveredCWD sets an effective fallback without changing the path
+// an ordinary persistence operation writes. SetCWD clears this override.
+func (s *State) RestoreRecoveredCWD(effective, persisted string) {
+	s.mu.Lock()
+	s.CWD = effective
+	s.persistedCWD = persisted
+	s.mu.Unlock()
+}
+
 // SetCWD updates the session working directory (persisted in session.json).
 func (s *State) SetCWD(dir string) {
 	s.mu.Lock()
 	s.CWD = dir
+	s.persistedCWD = ""
 	s.mu.Unlock()
 	s.touchPersist()
 }
@@ -1043,6 +1068,7 @@ func normalizeModelID(cfg *config.Config, id string) string {
 // AddMessage appends a message to the conversation history.
 func (s *State) AddMessage(msg llm.Message) {
 	s.mu.Lock()
+	placePendingArtifacts(s.Messages, &msg)
 	s.Messages = append(s.Messages, msg)
 	s.markMessagesAppended()
 	s.mu.Unlock()

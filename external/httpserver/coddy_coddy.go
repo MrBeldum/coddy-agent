@@ -3,6 +3,8 @@
 package httpserver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/platform"
 	"github.com/EvilFreelancer/coddy-agent/internal/prompts"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/todo"
@@ -203,6 +206,9 @@ func (s *Server) registerCoddyRoutes() {
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/activity", s.coddySessionActivityGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/messages", s.coddySessionMessagesGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}", s.coddySessionAssetGet)
+	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}", s.coddySessionArtifactGet)
+	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}/preview", s.coddySessionArtifactPreviewGet)
+	s.mux.HandleFunc("POST /coddy/sessions/{id}/artifacts/{artifactID}/reveal", s.coddySessionArtifactRevealPost)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}/thumbnail", s.coddySessionAssetThumbnailGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/composer-stream", s.coddySessionComposerStream)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/tool-calls", s.coddyToolCallsList)
@@ -229,6 +235,151 @@ func (s *Server) registerCoddyRoutes() {
 	s.registerRewindRoute()
 	s.registerSkillsManagementRoutes()
 	s.registerMCPManagementRoutes()
+}
+
+// coddySessionArtifactGet streams only a manifest-registered immutable artifact.
+func (s *Server) coddySessionArtifactGet(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Range") != "" || r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":{"message":"artifact ranges are not supported"}}`, http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	a, path, err := session.ReadArtifact(st.GetPersistedSessionDir(), artifactID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.ReplaceAll(strings.ReplaceAll(a.Name, "\r", "_"), "\n", "_")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(name))
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("stream session artifact", "error", err)
+	}
+}
+
+// coddySessionArtifactPreviewGet serves only a verified image artifact inline.
+// Non-image files remain download-only through the artifact route.
+func (s *Server) coddySessionArtifactPreviewGet(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	a, path, err := session.ReadArtifact(st.GetPersistedSessionDir(), artifactID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	buf := make([]byte, 512)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		http.NotFound(w, r)
+		return
+	}
+	mimeType := http.DetectContentType(buf[:n])
+	if !strings.HasPrefix(mimeType, "image/") {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("stream session artifact preview", "error", err)
+	}
+}
+
+// coddySessionArtifactRevealPost asks the host desktop to reveal only the
+// verified source path stored for this session artifact. The client supplies
+// neither a path nor a command.
+func (s *Server) coddySessionArtifactRevealPost(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	path, err := session.ArtifactSourcePath(st.GetPersistedSessionDir(), st.GetCWD(), artifactID)
+	if err != nil {
+		if errors.Is(err, session.ErrArtifactSourceUnavailable) {
+			http.Error(w, `{"error":{"message":"artifact source is unavailable"}}`, http.StatusGone)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if err := platform.RevealFile(path); err != nil {
+		if errors.Is(err, platform.ErrRevealHeadless) || errors.Is(err, platform.ErrRevealUnsupported) {
+			http.Error(w, `{"error":{"message":"artifact reveal is unavailable on this server"}}`, http.StatusServiceUnavailable)
+			return
+		}
+		s.log.Warn("reveal session artifact", "error", err)
+		http.Error(w, `{"error":{"message":"artifact reveal could not be started"}}`, http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) coddySessionCancelGeneration(w http.ResponseWriter, r *http.Request) {
@@ -449,17 +600,41 @@ func (s *Server) coddyDescribePost(w http.ResponseWriter, r *http.Request) {
 }
 
 type coddyToolCallRow struct {
-	ToolCallID             string          `json:"toolCallId"`
-	Name                   string          `json:"name,omitempty"`
-	Kind                   string          `json:"kind,omitempty"`
-	Status                 string          `json:"status,omitempty"`
-	StartedAt              string          `json:"startedAt,omitempty"`
-	FinishedAt             string          `json:"finishedAt,omitempty"`
-	ArgsPreview            string          `json:"argsPreview,omitempty"`
-	ResultPreview          string          `json:"resultPreview,omitempty"`
-	ResultPreviewTruncated bool            `json:"resultPreviewTruncated,omitempty"`
-	ResultTotalLines       int             `json:"resultTotalLines,omitempty"`
-	PlanSnapshot           []acp.PlanEntry `json:"planSnapshot,omitempty"`
+	ToolCallID             string                   `json:"toolCallId"`
+	Name                   string                   `json:"name,omitempty"`
+	Kind                   string                   `json:"kind,omitempty"`
+	Status                 string                   `json:"status,omitempty"`
+	StartedAt              string                   `json:"startedAt,omitempty"`
+	FinishedAt             string                   `json:"finishedAt,omitempty"`
+	ArgsPreview            string                   `json:"argsPreview,omitempty"`
+	ResultPreview          string                   `json:"resultPreview,omitempty"`
+	ResultPreviewTruncated bool                     `json:"resultPreviewTruncated,omitempty"`
+	ResultTotalLines       int                      `json:"resultTotalLines,omitempty"`
+	PlanSnapshot           []acp.PlanEntry          `json:"planSnapshot,omitempty"`
+	Artifacts              []map[string]interface{} `json:"artifacts,omitempty"`
+}
+
+func artifactDTOs(sessionID string, artifacts []llm.Artifact) []map[string]interface{} {
+	if sessionID == "" || len(artifacts) == 0 {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(artifacts))
+	for _, a := range artifacts {
+		if a.ID == "" {
+			continue
+		}
+		row := map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "sourcePath": a.SourcePath, "relativePath": a.SourceRelativePath, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID), "revealUrl": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/reveal"}
+		if artifactImageName(a.Name) {
+			row["previewUrl"] = "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/preview"
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func artifactImageName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") || strings.HasSuffix(lower, ".gif") || strings.HasSuffix(lower, ".webp") || strings.HasSuffix(lower, ".bmp")
 }
 
 func previewText(s string, max int) string {
@@ -623,6 +798,7 @@ func (s *Server) coddyToolCallsList(w http.ResponseWriter, r *http.Request) {
 			}
 			ordered[i].row.Status = "completed"
 			coddyApplyResultPreview(&ordered[i].row, m.Content)
+			ordered[i].row.Artifacts = artifactDTOs(id, m.Artifacts)
 		}
 	}
 
@@ -687,6 +863,12 @@ func (s *Server) coddyToolCallGet(w http.ResponseWriter, r *http.Request) {
 		"meta":       meta,
 		"args":       args,
 		"result":     full,
+	}
+	for _, m := range st.GetMessages() {
+		if m.Role == llm.RoleTool && m.ToolCallID == toolCallID {
+			payload["artifacts"] = artifactDTOs(id, m.Artifacts)
+			break
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -861,33 +1043,37 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"order must be \"asc\" or \"desc\""}}`, http.StatusBadRequest)
 		return
 	}
-	// The rail badge is global to History, not to the page or any filter the
-	// reader currently has open. Use the normal list eligibility so archived,
-	// scheduler and subagent sessions do not make it into that count.
-	historyRows, err := fs.ListSnapshotsWith(session.ListOptions{})
-	if err != nil {
-		s.log.Error("coddy sessions active count", "error", err)
-		http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
-		return
-	}
-	activeCount := 0
-	for _, row := range historyRows {
-		if s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(fs.SessionPath(row.SessionID)) {
-			activeCount++
-		}
-	}
-	rows, err := fs.ListSnapshotsWith(session.ListOptions{
+	listOpts := session.ListOptions{
 		CWD:                  strings.TrimSpace(r.URL.Query().Get("cwd")),
 		IncludeSchedulerRuns: includeScheduler,
 		IncludeSubagents:     includeSubagents,
 		Archived:             archived,
 		Tags:                 session.ParseTagList(r.URL.Query().Get("tags")),
 		Origin:               origin,
-	})
+	}
+	rows, err := fs.ListSnapshotsWith(listOpts)
 	if err != nil {
 		s.log.Error("coddy sessions list", "error", err)
 		http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
 		return
+	}
+	// The rail badge is global to History, not to the page or any filter the
+	// reader currently has open. Active child sessions contribute even though
+	// History itself keeps their rows hidden.
+	historyRows := rows
+	if !isNormalHistoryList(listOpts) || !listOpts.IncludeSubagents {
+		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{IncludeSubagents: true})
+		if err != nil {
+			s.log.Error("coddy sessions active count", "error", err)
+			http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	activeCount := 0
+	for _, row := range historyRows {
+		if s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(fs.SessionPath(row.SessionID)) {
+			activeCount++
+		}
 	}
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		rows, err = fs.FilterSnapshotListForSearch(rows, q)
@@ -914,6 +1100,12 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 			return total
 		}
 	}
+	if sortKey == session.SortMessages {
+		// A message sort compares every candidate, so legacy/stale count
+		// metadata is enriched before the whole-list sort. Default History
+		// never calls this and therefore never opens transcripts for counts.
+		fs.EnrichMessageCounts(rows)
+	}
 	session.SortSessionList(rows, sortKey, sortOrder, tokensOf)
 
 	limit, offset := parseLimitCursor(r.URL.Query())
@@ -937,6 +1129,11 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 	slice := rows[start:end]
 	includeActivity := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_activity")), "true")
 	includeStats := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_stats")), "true")
+	if includeStats {
+		// Statistics are emitted for page rows only, so legacy/stale transcript
+		// counts are decoded only after sorting and paging have selected them.
+		fs.EnrichMessageCounts(slice)
+	}
 	// One walk of the task pool for the whole listing, rather than one per row.
 	var backgroundRunning map[string]int
 	if includeActivity {
@@ -1035,6 +1232,18 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// isNormalHistoryList reports whether opts are the unfiltered working History
+// scope used by active_count. Keeping it here makes the single-scan path
+// explicit without changing the badge semantics for filtered requests.
+func isNormalHistoryList(opts session.ListOptions) bool {
+	return strings.TrimSpace(opts.CWD) == "" &&
+		!opts.IncludeSchedulerRuns &&
+		!opts.IncludeSubagents &&
+		opts.Archived == session.ArchiveExclude &&
+		len(opts.Tags) == 0 &&
+		opts.Origin == session.OriginAny
 }
 
 // coddySessionTokenUsage reads the provider token totals a session accumulated.
@@ -1167,6 +1376,9 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 		}
 		if m.Role == llm.RoleTool && m.ToolCallID != "" {
 			item["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.Artifacts) > 0 {
+			item["artifacts"] = artifactDTOs(sessionID, m.Artifacts)
 		}
 		if len(m.ToolCalls) > 0 {
 			tc := make([]map[string]interface{}, 0, len(m.ToolCalls))
@@ -1446,12 +1658,41 @@ func writePageQueryError(w http.ResponseWriter, err error) {
 	http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 }
 
+// messageMCPActivationRequested recognizes the single transcript read the
+// SPA uses when it selects a session. Activation is deliberately unavailable
+// to older or rebased history reads and requires the session header to bind the request
+// to the selected chat rather than merely its URL path.
+func messageMCPActivationRequested(r *http.Request, id string) (bool, error) {
+	q := r.URL.Query()
+	raw, present := q["activate_mcp"]
+	if !present {
+		return false, nil
+	}
+	if len(raw) != 1 || raw[0] != "1" {
+		return false, errors.New("activate_mcp must be 1")
+	}
+	for _, name := range []string{"before", "from"} {
+		if _, paged := q[name]; paged {
+			return false, errors.New("activate_mcp is only valid on an initial transcript read")
+		}
+	}
+	if strings.TrimSpace(r.Header.Get("X-Coddy-Session-ID")) != id {
+		return false, errors.New("activate_mcp requires X-Coddy-Session-ID matching the path id")
+	}
+	return true, nil
+}
+
 func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
+	activateMCP, err := messageMCPActivationRequested(r, id)
+	if err != nil {
+		writePageQueryError(w, err)
+		return
+	}
 	query, err := messagePageQuery(r)
 	if err != nil {
 		writePageQueryError(w, err)
@@ -1460,6 +1701,12 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 	st := s.coddyEnsureLoaded(w, r, id)
 	if st == nil {
 		return
+	}
+	if activateMCP {
+		if err := s.mgr.ActivateDeferredMCP(r.Context(), id); err != nil {
+			s.log.Warn("deferred MCP activation did not start with transcript read",
+				"session", id, "error", err)
+		}
 	}
 	msgs, rev := st.MessagesWithRev()
 	page := session.PageMessages(msgs, query)

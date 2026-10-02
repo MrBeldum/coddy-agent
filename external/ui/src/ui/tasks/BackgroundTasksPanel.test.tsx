@@ -712,6 +712,14 @@ test("an expanded subagent card opens the child transcript and shows the run's l
   // The transcript action follows the potentially long report in the expanded card.
   const transcript = screen.getByTestId("bgtask-open-transcript-bg_7");
   expect(screen.getByTestId("bgtask-body-bg_7")).toContainElement(transcript);
+  expect(
+    screen
+      .getByTestId("bgtask-output-bg_7")
+      .compareDocumentPosition(transcript),
+  ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(transcript.compareDocumentPosition(foot)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
   expect(onOpenSession).not.toHaveBeenCalled();
   fireEvent.click(transcript);
   expect(onOpenSession).toHaveBeenCalledWith("sess_0a1b2c");
