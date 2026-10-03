@@ -133,20 +133,13 @@ func stdoutCols() int {
 	return n
 }
 
+// printSkillSearchRoots prints the folders the loader reads, in its order and
+// each once at its last place (SearchRoots), so the list says which folder
+// wins a name.
 func printSkillSearchRoots(skillDirs []string, cwd, home string) {
 	fmt.Println("Search roots:")
-	seen := make(map[string]bool)
-	for _, d := range skillDirs {
-		exp := ExpandConfiguredPath(d, cwd, home)
-		if exp == "" {
-			continue
-		}
-		p := filepath.Clean(exp)
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
-		fmt.Printf("  %s\n", p)
+	for _, p := range SearchRoots(skillDirs, cwd, home) {
+		fmt.Printf("  %s\n", filepath.Clean(p))
 	}
 	fmt.Println()
 }

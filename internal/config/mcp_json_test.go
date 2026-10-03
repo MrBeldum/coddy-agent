@@ -448,3 +448,146 @@ func TestExpandMCPValue(t *testing.T) {
 		t.Errorf("MCPValueVariables = %v, want [A B C]", got)
 	}
 }
+
+// The block of mcp_servers ends where the parser puts the next key, so a
+// layout the old line rule misread - a comment at column 0 among the items,
+// a sequence written without indentation, a flow list closed at column 0 -
+// is cut whole and the file still reads.
+func TestLegacyMoveCutsTheWholeBlockWhateverItsLayout(t *testing.T) {
+	head := "agent:\n  model: local/m\n"
+	tail := "rules:\n  enable: true\n"
+	cases := map[string]string{
+		"comment before items written without indentation": "mcp_servers:\n# first server\n- name: a\n  command: x\n",
+		"commented-out entry between indented items":       "mcp_servers:\n  - name: a\n    command: x\n#  - name: b\n#    command: y\n  - name: c\n    command: z\n",
+		"commented-out entry between unindented items":     "mcp_servers:\n- name: a\n  command: x\n# - name: b\n- name: c\n  command: z\n",
+		"flow list closed at column 0":                     "mcp_servers: [\n  {name: a, command: x},\n  {name: c, command: z}\n]\n",
+	}
+	for name, legacy := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			home := filepath.Join(dir, "home")
+			if err := os.MkdirAll(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(path, []byte(head+legacy+tail), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path}); err != nil {
+				t.Fatalf("load after the move: %v", err)
+			}
+			after, _ := os.ReadFile(path)
+			if string(after) != head+tail {
+				t.Fatalf("config.yaml after the move:\n%s\nwant:\n%s", after, head+tail)
+			}
+			moved, _ := ReadMCPJSONFile(GlobalMCPJSONPath(home))
+			if _, ok := moved["a"]; !ok {
+				t.Fatalf("servers moved: %v", moved)
+			}
+			// A second load finds nothing more to do.
+			if _, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path}); err != nil {
+				t.Fatal(err)
+			}
+			if backups, _ := filepath.Glob(path + ".bak-*"); len(backups) != 1 {
+				t.Fatalf("backups = %v, want one", backups)
+			}
+		})
+	}
+}
+
+// A key inside a flow-style mapping is not a block of lines: what it holds is
+// moved, the key stays for the operator, and nothing around it is lost.
+func TestLegacyKeyInAFlowMappingIsMovedButNotCut(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	body := "skills: {dirs: [/opt/team], sources: [owner/new], auto_discovery: false}\nrules:\n  enable: true\n"
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Skills.AutoDiscoveryEnabled() || len(cfg.Skills.Dirs) != 1 {
+		t.Fatalf("the rest of the skills mapping was lost: %+v", cfg.Skills)
+	}
+	if after, _ := os.ReadFile(path); string(after) != body {
+		t.Fatalf("a flow mapping was rewritten:\n%s", after)
+	}
+	if got, _ := ReadMarketplacesFile(GlobalMarketplacesPath(home)); !reflect.DeepEqual(got.Sources, []string{"owner/new"}) {
+		t.Fatalf("the sources were not moved: %+v", got)
+	}
+}
+
+// A config.yaml read because the home has none may have come with a
+// checkout: its servers are not made the operator's own and the file is not
+// rewritten.
+func TestLegacyKeysOfAWorkspaceConfigAreNotMoved(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	body := "mcp_servers:\n  - name: from-checkout\n    command: ./run-me.sh\nskills:\n  sources:\n    - attacker/skills\n"
+	if err := os.WriteFile(filepath.Join(project, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFromCLI(CLIPaths{Home: home, CWD: project})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Paths.ConfigFromWorkspace || cfg.Paths.ConfigPath != filepath.Join(project, "config.yaml") {
+		t.Fatalf("paths = %+v, want the workspace's file marked as such", cfg.Paths)
+	}
+	if after, _ := os.ReadFile(filepath.Join(project, "config.yaml")); string(after) != body {
+		t.Fatalf("the workspace's config.yaml was rewritten:\n%s", after)
+	}
+	if backups, _ := filepath.Glob(filepath.Join(project, "config.yaml.bak-*")); len(backups) != 0 {
+		t.Fatalf("a backup was left in the workspace: %v", backups)
+	}
+	if moved, _ := ReadMCPJSONFile(GlobalMCPJSONPath(home)); len(moved) != 0 {
+		t.Fatalf("servers of a checkout moved into the home: %v", moved)
+	}
+	if got, _ := ReadMarketplacesFile(GlobalMarketplacesPath(home)); len(got.Sources) != 0 {
+		t.Fatalf("sources of a checkout moved into the home: %+v", got)
+	}
+}
+
+// A key that could not move yet (the file it moves into does not read) stays
+// in config.yaml, and a save of the settings keeps it there as the file had
+// it instead of dropping what it declares.
+func TestASaveKeepsAKeyThatCouldNotMoveYet(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(GlobalMCPJSONPath(home), []byte("{\"mcpServers\": {,}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(GlobalMarketplacesPath(home), []byte("{,}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := "agent:\n  model: local/m\nmcp_servers:\n  - name: github\n    command: npx\nskills:\n  sources:\n    - owner/new\nrules:\n  enable: true\n"
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if still, _ := os.ReadFile(path); string(still) != body {
+		t.Fatalf("a move that could not run rewrote the file:\n%s", still)
+	}
+	out, err := MarshalConfigYAMLForFile(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"mcp_servers:", "name: github", "sources:", "owner/new"} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("a save dropped %q:\n%s", want, out)
+		}
+	}
+}

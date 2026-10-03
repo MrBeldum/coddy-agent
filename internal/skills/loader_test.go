@@ -3,6 +3,7 @@ package skills_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -468,5 +469,33 @@ func TestFolderNamedTwiceIsReadAtItsLastPlace(t *testing.T) {
 	}
 	if got := describe(t, skills.NewLoader([]string{link, b, a}), root, "", "twice"); got != "from a" {
 		t.Fatalf("link-to-a, b, a: got %q, want a", got)
+	}
+}
+
+// The search roots coddy skills list prints are the folders the loader reads,
+// in its order: a folder named twice at its last place, a link to a listed
+// folder counted as that folder, so the list says which folder wins a name.
+func TestSearchRootsAreTheFoldersTheLoaderReads(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+	for _, d := range []string{a, b} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := skills.SearchRoots([]string{a, b, a}, root, ""); !reflect.DeepEqual(got, []string{b, a}) {
+		t.Fatalf("a, b, a: roots %v, want b then a", got)
+	}
+	link := filepath.Join(root, "link-to-a")
+	if err := os.Symlink(a, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if got := skills.SearchRoots([]string{a, link, b}, root, ""); !reflect.DeepEqual(got, []string{link, b}) {
+		t.Fatalf("a, link-to-a, b: roots %v, want the link once, then b", got)
+	}
+	// A ${CWD} entry without a workspace names no folder.
+	if got := skills.SearchRoots([]string{"${CWD}/.coddy/skills", b}, "", ""); !reflect.DeepEqual(got, []string{b}) {
+		t.Fatalf("no workspace: roots %v", got)
 	}
 }

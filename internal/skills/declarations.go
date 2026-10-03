@@ -207,18 +207,44 @@ var ErrDeclarationChanged = errors.New("the declaration changed since it was sho
 // shown; when it no longer matches the file, nothing is recorded and the
 // error wraps ErrDeclarationChanged. An empty fingerprint approves the entry
 // as it is now, for a client that shows it and approves it in one step.
+//
+// key may name entries of several files (a project source at the address of
+// one of the operator's catalogs is listed on its own): the project entry is
+// the one approved, the one with that fingerprint when one is given.
 func ApproveShown(cfg *config.Config, cwd, key, fingerprint string) (Declaration, error) {
-	d, ok := FindDeclaration(cfg, cwd, key)
-	if !ok {
+	decls, _ := Declarations(cfg, cwd)
+	fp := strings.TrimSpace(fingerprint)
+	var first, project *Declaration
+	for i := range decls {
+		d := &decls[i]
+		if !keyNames(key, d.Kind, d.Name, d.Source) {
+			continue
+		}
+		if first == nil {
+			first = d
+		}
+		if d.Origin != OriginProject {
+			continue
+		}
+		if fp != "" && d.Fingerprint == fp {
+			project = d
+			break
+		}
+		if project == nil {
+			project = d
+		}
+	}
+	if first == nil {
 		return Declaration{}, fmt.Errorf("no source or marketplace %q is declared for %s", key, cwd)
 	}
-	if d.Origin != OriginProject {
-		return d, fmt.Errorf("%q comes from %s, which needs no approval", key, originWord(d))
+	if project == nil {
+		return *first, fmt.Errorf("%q comes from %s, which needs no approval", key, originWord(*first))
 	}
+	d := *project
 	if cfg.Skills.ResolvedProjectTrust() == config.ProjectTrustDeny {
 		return d, fmt.Errorf("project marketplaces are switched off by skills.project_trust: deny")
 	}
-	if fp := strings.TrimSpace(fingerprint); fp != "" && fp != d.Fingerprint {
+	if fp != "" && fp != d.Fingerprint {
 		return d, fmt.Errorf("%s: %w; review it and approve again", key, ErrDeclarationChanged)
 	}
 	if err := NewTrustStore(cfg.Paths.Home).Approve(mcp.CanonicalWorkspace(cwd), d); err != nil {

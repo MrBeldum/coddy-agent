@@ -142,3 +142,41 @@ test("deleting a project skill asks in the workspace the list was read for", asy
     ).toBe(true),
   );
 });
+
+// The install search and the update check follow the viewed session, like
+// the marketplaces list they come from: a project marketplace approved in
+// that workspace is offered, one held there is neither checked nor updated.
+test("the install search and the update check go to the viewed session", async () => {
+  const seen: Array<{ url: string; session: string | null }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      seen.push({
+        url: String(input),
+        session: new Headers(init?.headers).get("X-Coddy-Session-ID"),
+      });
+      return { ok: true, json: async () => ({ items: [], entries: [] }) };
+    }),
+  );
+  render(
+    <SkillsSection
+      schema={schema}
+      value={{}}
+      onChange={() => {}}
+      workspacePath="/projects/data"
+      activeSessionId="sess_data"
+    />,
+  );
+  fireEvent.focus(await screen.findByTestId("skills-install-input"));
+  await waitFor(() =>
+    expect(seen.find((c) => c.url === "/coddy/skills/available")?.session).toBe(
+      "sess_data",
+    ),
+  );
+  fireEvent.click(screen.getByTestId("skills-sync-all"));
+  await waitFor(() =>
+    expect(seen.find((c) => c.url === "/coddy/skills/updates")?.session).toBe(
+      "sess_data",
+    ),
+  );
+});

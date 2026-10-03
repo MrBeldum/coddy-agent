@@ -149,7 +149,7 @@ func AddMarketplace(ctx context.Context, cfg *config.Config, cwd, source, scope 
 	origin := OriginHome
 	if scope == ScopeLocal {
 		origin = OriginProject
-		if err := approveOwn(cfg, cwd, Declaration{Kind: KindMarketplace, Name: name, Source: source, Path: path}); err != nil {
+		if err := approveOwn(cfg, cwd, projectEntry(path, Declaration{Kind: KindMarketplace, Name: name, Source: source, Path: path})); err != nil {
 			return AddedMarketplace{}, false, err
 		}
 	}

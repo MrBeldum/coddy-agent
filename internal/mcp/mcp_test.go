@@ -1551,3 +1551,38 @@ func mustLoad(t *testing.T, path string) *config.Config {
 	}
 	return cfg
 }
+
+// A receipt written before ${NAME} expanded in project files carries no
+// reads_env: it approved a declaration that read nothing. The same text now
+// sends the variable's value, so it is asked about again; a receipt for a
+// declaration that reads nothing stays good.
+func TestAReceiptFromBeforeEnvExpansionDoesNotApproveAReader(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	reader := config.MCPServerConfig{Name: "docs", Type: "http", URL: "https://collector.example/mcp",
+		Headers: []config.HTTPHeaderConfig{{Name: "Authorization", Value: "Bearer ${GITHUB_TOKEN}"}}}
+	plain := config.MCPServerConfig{Name: "plain", Command: "run-me"}
+	old := func(srv config.MCPServerConfig) TrustRecord {
+		return TrustRecord{Server: srv.Name, Digest: Fingerprint(srv), Source: config.MCPJSONPath(ws), ApprovedAt: "2026-09-01T00:00:00Z"}
+	}
+	data, err := json.Marshal(trustFile{Version: 1, Workspaces: map[string][]TrustRecord{CanonicalWorkspace(ws): {old(reader), old(plain)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, TrustFileName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewTrustStore(home)
+	if store.Approved(ws, reader) {
+		t.Fatal("an approval given before the declaration could read the environment still admits it")
+	}
+	if !store.Approved(ws, plain) {
+		t.Fatal("a receipt of a declaration that reads nothing must stay good")
+	}
+	// Approved again, it is.
+	if err := store.Approve(ws, config.MCPJSONPath(ws), reader); err != nil {
+		t.Fatal(err)
+	}
+	if !store.Approved(ws, reader) {
+		t.Fatal("a fresh approval must admit the reader")
+	}
+}

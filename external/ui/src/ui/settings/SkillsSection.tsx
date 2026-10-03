@@ -7,6 +7,7 @@ import {
 } from "./SchemaForm";
 import { LegendWithHint } from "./FieldHint";
 import { MarketplacesEditor } from "./MarketplacesEditor";
+import { sessionHeaders } from "./marketplaces";
 import { Switch } from "./Switch";
 import { SwitchField } from "./SwitchField";
 import { filterInstallableMatches } from "./installableMatches";
@@ -51,8 +52,14 @@ async function fetchInstalled(
   return data.items ?? [];
 }
 
-async function fetchUpdates(): Promise<SkillUpdate[]> {
-  const res = await fetch("/coddy/skills/updates");
+// The update check, the install search, an update and an install go to the
+// viewed session's workspace, like the marketplaces list they follow: a
+// project marketplace approved there is offered, and one held there is
+// neither checked nor updated from.
+async function fetchUpdates(sessionId: string | undefined): Promise<SkillUpdate[]> {
+  const res = await fetch("/coddy/skills/updates", {
+    headers: sessionHeaders(sessionId),
+  });
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: SkillUpdate[] };
   return data.items ?? [];
@@ -66,8 +73,12 @@ type AvailablePlugin = {
   installed: boolean;
 };
 
-async function fetchAvailable(): Promise<AvailablePlugin[]> {
-  const res = await fetch("/coddy/skills/available");
+async function fetchAvailable(
+  sessionId: string | undefined,
+): Promise<AvailablePlugin[]> {
+  const res = await fetch("/coddy/skills/available", {
+    headers: sessionHeaders(sessionId),
+  });
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: AvailablePlugin[] };
   return data.items ?? [];
@@ -77,12 +88,13 @@ async function apiSend(
   path: string,
   method: "POST" | "DELETE",
   body?: unknown,
+  sessionId?: string | undefined,
 ): Promise<{ ok: boolean; error?: string }> {
-  const init: RequestInit = { method };
-  if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
-  }
+  const init: RequestInit = {
+    method,
+    headers: sessionHeaders(sessionId, body !== undefined),
+  };
+  if (body !== undefined) init.body = JSON.stringify(body);
   const res = await fetch(path, init);
   if (!res.ok) {
     try {
@@ -168,13 +180,14 @@ export function SkillsSection(props: {
     setLoading(false);
   }, [workspacePath]);
 
+  const sessionId = props.activeSessionId;
   const refreshUpdates = useCallback(async () => {
-    const ups = await fetchUpdates();
+    const ups = await fetchUpdates(sessionId);
     const map: Record<string, SkillUpdate> = {};
     for (const u of ups) map[u.name] = u;
     setUpdates(map);
     return map;
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     void loadInstalled(true);
@@ -235,6 +248,8 @@ export function SkillsSection(props: {
       const res = await apiSend(
         `/coddy/skills/${encodeURIComponent(skill.name)}/update`,
         "POST",
+        undefined,
+        sessionId,
       );
       if (!res.ok) {
         setError(res.error || translate("skills.error.update"));
@@ -260,7 +275,7 @@ export function SkillsSection(props: {
   const loadAvailable = async (force = false) => {
     if (available !== null && !force) return;
     setAvailableLoading(true);
-    setAvailable(await fetchAvailable());
+    setAvailable(await fetchAvailable(sessionId));
     setAvailableLoading(false);
   };
 
@@ -269,10 +284,12 @@ export function SkillsSection(props: {
     setError(null);
     setStatus(null);
     void (async () => {
-      const res = await apiSend("/coddy/skills/install", "POST", {
-        source: p.source,
-        plugin: p.name,
-      });
+      const res = await apiSend(
+        "/coddy/skills/install",
+        "POST",
+        { source: p.source, plugin: p.name },
+        sessionId,
+      );
       if (!res.ok)
         setError(
           res.error || translate("skills.error.install", { name: p.name }),

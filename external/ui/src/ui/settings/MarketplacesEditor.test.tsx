@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,6 +10,10 @@ import {
 import { initLocale } from "../i18n/i18n";
 import { MarketplacesEditor } from "./MarketplacesEditor";
 import { showsEntryTrustControl, type MarketplaceEntry } from "./marketplaces";
+import {
+  noteSettingsConfigSaved,
+  resetSettingsConfigForTests,
+} from "./settingsConfigStore";
 
 // The marketplaces list of Settings -> Skills reads what the two
 // marketplaces.json files and Coddy itself declare for the viewed session's
@@ -22,6 +27,7 @@ afterEach(() => {
   cleanup();
   initLocale("en");
   vi.unstubAllGlobals();
+  resetSettingsConfigForTests();
 });
 
 const SYSTEM: MarketplaceEntry = {
@@ -302,7 +308,7 @@ test("removing names the entry by its key", async () => {
     expect(screen.queryByTestId("skills-marketplace-shop")).toBeNull(),
   );
   const del = calls.find((c) => c.method === "DELETE");
-  expect(del?.url).toBe("/coddy/skills/sources?source=shop");
+  expect(del?.url).toBe("/coddy/skills/sources?source=shop&origin=home");
 });
 
 test("sync of one entry and sync of all refresh the installed list", async () => {
@@ -345,4 +351,91 @@ test("only a project entry under ask offers the shield", () => {
   expect(showsEntryTrustControl(PROJECT_SOURCE, "deny")).toBe(false);
   expect(showsEntryTrustControl(HOME_CATALOG, "ask")).toBe(false);
   expect(showsEntryTrustControl(SYSTEM, "ask")).toBe(false);
+});
+
+// A chat kept as a draft in the browser has no session on the server: its id
+// is not sent (the server would answer 404), and a project entry cannot be
+// written for it, since the server would take its own default folder.
+test("a draft chat is no session: no header, and only your file can be written", async () => {
+  const calls = stubApi(listing([SYSTEM]), (call, setListing) => {
+    if (call.url === "/coddy/skills/sources") setListing(listing([SYSTEM]));
+    return undefined;
+  });
+  renderEditor("draft_0123456789abcdef");
+  const scope = await screen.findByTestId("skills-marketplace-scope");
+  expect(calls[0]?.headers["X-Coddy-Session-ID"]).toBeUndefined();
+  expect(scope).toBeDisabled();
+  expect(scope).toHaveValue("global");
+  expect(scope).toHaveAttribute(
+    "title",
+    expect.stringContaining("Send the first message of a chat in the project"),
+  );
+  fireEvent.change(screen.getByTestId("skills-marketplace-input"), {
+    target: { value: "team/new-skills" },
+  });
+  fireEvent.click(screen.getByTestId("skills-marketplace-add"));
+  await waitFor(() =>
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      source: "team/new-skills",
+      scope: "global",
+    }),
+  );
+});
+
+// A refresh that fails after a sync (the connection dropped) says so and
+// leaves the Sync buttons usable.
+test("a failed refresh after a sync never leaves Sync disabled", async () => {
+  stubApi(listing([SYSTEM, HOME_CATALOG]));
+  const onSynced = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+  renderEditor("sess_view", onSynced);
+  fireEvent.click(await screen.findByTestId("skills-sync-all"));
+  await screen.findByText("Sync failed");
+  expect(screen.getByTestId("skills-sync-all")).toBeEnabled();
+  expect(screen.getByTestId("skills-marketplace-sync-shop")).toBeEnabled();
+});
+
+// A save of the settings may change skills.project_trust: the list is read
+// again, so the shields and the held notes follow the saved policy.
+test("a save of the settings reads the list again", async () => {
+  const calls = stubApi(listing([PROJECT_SOURCE]));
+  renderEditor();
+  await screen.findByTestId("skills-marketplace-team/data-skills");
+  const gets = () => calls.filter((c) => c.method === "GET").length;
+  expect(gets()).toBe(1);
+  act(() => {
+    noteSettingsConfigSaved({ skills: { project_trust: "allow" } });
+  });
+  await waitFor(() => expect(gets()).toBe(2));
+});
+
+// A denied row has no shield to press, so its Sync names the policy, not an
+// approval.
+test("the Sync of a denied row names the policy", async () => {
+  stubApi(listing([{ ...PROJECT_SOURCE, status: "denied" }], "deny"));
+  renderEditor();
+  const sync = await screen.findByTestId(
+    "skills-marketplace-sync-team/data-skills",
+  );
+  expect(sync).toBeDisabled();
+  expect(sync).toHaveAttribute(
+    "title",
+    "Project marketplaces are switched off by skills.project_trust: deny",
+  );
+});
+
+// Removing a row edits the file of that row only.
+test("removing a row names its file", async () => {
+  const calls = stubApi(listing([PROJECT_SOURCE]), (call, setListing) => {
+    if (call.method === "DELETE") setListing(listing([]));
+    return undefined;
+  });
+  renderEditor();
+  fireEvent.click(
+    await screen.findByTestId("skills-marketplace-remove-team/data-skills"),
+  );
+  await waitFor(() =>
+    expect(calls.find((c) => c.method === "DELETE")?.url).toBe(
+      "/coddy/skills/sources?source=team%2Fdata-skills&origin=project",
+    ),
+  );
 });

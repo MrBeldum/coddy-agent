@@ -506,18 +506,18 @@ func TestListSourcesAndRemoveSource(t *testing.T) {
 	}
 
 	// Removing an unknown source is a no-op (removed=false, no error).
-	removed, err := RemoveSource(cfg, "", "owner/missing")
+	removed, err := RemoveSource(cfg, "", "owner/missing", "")
 	if err != nil || removed {
 		t.Fatalf("remove unknown: removed=%v err=%v", removed, err)
 	}
 
 	// Empty source is an error.
-	if _, err := RemoveSource(cfg, "", "  "); err == nil {
+	if _, err := RemoveSource(cfg, "", "  ", ""); err == nil {
 		t.Fatal("expected error for empty source")
 	}
 
 	// Case-insensitive match, persisted to disk.
-	removed, err = RemoveSource(cfg, "", "OWNER/ONE")
+	removed, err = RemoveSource(cfg, "", "OWNER/ONE", "")
 	if err != nil || !removed {
 		t.Fatalf("remove existing: removed=%v err=%v", removed, err)
 	}
@@ -584,7 +584,7 @@ func TestSyncRecordsVersionThenCheckAndUpdate(t *testing.T) {
 	}
 
 	// No update available right after install.
-	ups, err := CheckUpdates(context.Background(), cfg)
+	ups, err := CheckUpdates(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatalf("CheckUpdates: %v", err)
 	}
@@ -596,7 +596,7 @@ func TestSyncRecordsVersionThenCheckAndUpdate(t *testing.T) {
 	writeMarketplaceManifest(t, repo, "demo", "2.0.0")
 	gitCommitAllRepo(t, repo, false, "v2")
 
-	ups, err = CheckUpdates(context.Background(), cfg)
+	ups, err = CheckUpdates(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatalf("CheckUpdates 2: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestAddRemoveSourceDoNotClobberConfig(t *testing.T) {
 	if err != nil || len(file.Sources) != 1 || file.Sources[0] != "owner/repo" || len(file.Marketplaces) != 1 {
 		t.Fatalf("marketplaces.json after the add = %+v, %v", file, err)
 	}
-	if _, err := RemoveSource(cfg, "", "owner/repo"); err != nil {
+	if _, err := RemoveSource(cfg, "", "owner/repo", ""); err != nil {
 		t.Fatalf("RemoveSource: %v", err)
 	}
 	file, _ = config.ReadMarketplacesFile(config.GlobalMarketplacesPath(home))

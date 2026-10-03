@@ -522,6 +522,26 @@ func TestExplicitSkillsDirMissingIsAWarningDefaultsAreSilent(t *testing.T) {
 	}
 }
 
+// A relative skills.dirs or subagents.dirs entry names a folder of the
+// workspace, as the loaders read it, not of the directory the check runs in.
+func TestRelativeDirsAreProbedInTheWorkspace(t *testing.T) {
+	prep, home := prepare(t, "skills:\n  dirs: [\"team-skills\"]\nsubagents:\n  dirs: [\"team-agents\"]\n")
+	for _, d := range []string{"team-agents", "team-skills"} {
+		if err := os.MkdirAll(filepath.Join(home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if wd, _ := os.Getwd(); wd == prep.Paths.CWD {
+		t.Fatalf("the workspace must differ from the process cwd for this test (%s)", wd)
+	}
+	rep := Run(t.Context(), Request{Cfg: prep.Cfg, Paths: prep.Paths, Locator: prep.Locator})
+	for _, path := range []string{"skills.dirs[0]", "subagents.dirs[0]"} {
+		if c := find(t, rep, path); c.Status != StatusOK {
+			t.Errorf("%s = %+v, want the workspace folder found", path, c)
+		}
+	}
+}
+
 func TestHooksFileParses(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good.json")

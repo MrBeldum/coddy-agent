@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
+	"reflect"
 	"strings"
 	"time"
 
@@ -61,6 +61,15 @@ func migrateLegacyKeys(paths Paths, data []byte) []byte {
 	if len(moves) == 0 {
 		return data
 	}
+	if paths.ConfigFromWorkspace {
+		// A config.yaml found in the workspace may have come with a checkout:
+		// moving its servers or sources into the home files would make them
+		// the operator's own, ungated in every workspace. It is read as it is.
+		for _, m := range moves {
+			slog.Default().Warn("config: the workspace's config.yaml, read because the Coddy home has none, still has a key that left config.yaml; it is not used and not moved out of a file that may have come with a checkout", "key", m.path, "config", paths.ConfigPath, "home", paths.Home)
+		}
+		return data
+	}
 	if !configPathWriteMu.TryLock() {
 		return data
 	}
@@ -75,23 +84,89 @@ func migrateLegacyKeys(paths Paths, data []byte) []byte {
 			continue
 		}
 		log.Info("config: moved a key out of config.yaml", "key", m.path, "moved", moved, "already_there", kept, "config", paths.ConfigPath)
+		// The cut is by lines. A key inside a flow-style mapping, or a flow
+		// value whose closing bracket shares the key's indentation, is not a
+		// block of lines: cutting it would take its neighbours along or leave
+		// a bracket behind. What it held is moved all the same (a repeat is
+		// kept as it is the next time); the key stays for the operator.
+		if !cutKeepsTheRest(data, cutKeyBlocks(data, root, m.key), [][]string{strings.Split(m.path, ".")}) {
+			log.Warn("config: moved a key out of config.yaml but it cannot be cut out of the file without touching its neighbours; delete it by hand", "key", m.path, "config", paths.ConfigPath)
+			continue
+		}
 		done = append(done, m)
 	}
 	if len(done) == 0 {
 		return data
 	}
-	// Cut from the bottom of the file up, so a cut never moves the lines of
-	// a key still to be cut.
-	sort.Slice(done, func(i, j int) bool { return done[i].key.Line > done[j].key.Line })
-	next := data
+	// Every block is measured on the text as it was read and all are cut in
+	// one pass, so no cut is measured on lines another one moved.
+	keys := make([]*yaml.Node, 0, len(done))
+	cut := make([][]string, 0, len(done))
 	for _, m := range done {
-		next = removeYAMLKeyBlock(next, m.key)
+		keys = append(keys, m.key)
+		cut = append(cut, strings.Split(m.path, "."))
+	}
+	next := cutKeyBlocks(data, root, keys...)
+	if !cutKeepsTheRest(data, next, cut) {
+		log.Warn("config: keys moved but config.yaml would not read the same without them; left as it is", "config", paths.ConfigPath)
+		return data
 	}
 	if err := rewriteConfigKeepingBackup(paths.ConfigPath, data, next); err != nil {
 		log.Warn("config: keys moved but config.yaml could not be rewritten; they are ignored", "path", paths.ConfigPath, "error", err)
 		return data
 	}
 	return next
+}
+
+// cutKeepsTheRest reports whether next, data with the keys at paths cut out
+// of its text, reads as exactly the document data reads as without them. A
+// mapping left without keys reads as an empty one either way.
+func cutKeepsTheRest(data, next []byte, paths [][]string) bool {
+	var want, got any
+	if yaml.Unmarshal(data, &want) != nil || yaml.Unmarshal(next, &got) != nil {
+		return false
+	}
+	for _, path := range paths {
+		dropYAMLPath(want, path)
+	}
+	return reflect.DeepEqual(emptyMapsAsNil(want), emptyMapsAsNil(got))
+}
+
+// dropYAMLPath deletes the key path names from a decoded document.
+func dropYAMLPath(doc any, path []string) {
+	m, ok := doc.(map[string]any)
+	if !ok || len(path) == 0 {
+		return
+	}
+	if len(path) == 1 {
+		delete(m, path[0])
+		return
+	}
+	dropYAMLPath(m[path[0]], path[1:])
+}
+
+// emptyMapsAsNil makes a mapping with no keys and an empty value the same,
+// as `skills:` left with nothing under it reads as null.
+func emptyMapsAsNil(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if len(t) == 0 {
+			return nil
+		}
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = emptyMapsAsNil(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = emptyMapsAsNil(val)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // mappingEntry finds key in a mapping node, returning its key and value nodes.
@@ -230,38 +305,61 @@ func rewriteConfigKeepingBackup(path string, old, next []byte) error {
 	return atomicWriteFile(path, next, perm)
 }
 
-// removeYAMLKeyBlock cuts one mapping key out of raw YAML text: the key's
-// line, every line of its value (deeper indented, blank, or a sequence item
-// at the key's own indentation), and the comment lines right above the key at
-// its indentation (its description; not the schema modeline). Blank lines
-// that end the block stay, so the next section keeps its separation.
-func removeYAMLKeyBlock(raw []byte, key *yaml.Node) []byte {
+// cutKeyBlocks cuts mapping keys out of raw YAML text, each with its block
+// (keyBlock), measured on raw itself: root is raw's parsed document.
+func cutKeyBlocks(raw []byte, root *yaml.Node, keys ...*yaml.Node) []byte {
 	lines := strings.SplitAfter(string(raw), "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
+	drop := make([]bool, len(lines))
+	for _, key := range keys {
+		start, end, ok := keyBlock(lines, root, key)
+		if !ok {
+			continue
+		}
+		for i := start; i < end; i++ {
+			drop[i] = true
+		}
+	}
+	var b strings.Builder
+	for i, line := range lines {
+		if !drop[i] {
+			b.WriteString(line)
+		}
+	}
+	return []byte(b.String())
+}
+
+// keyBlock is the range of lines [start, end) one mapping key takes: the
+// comment lines right above it at its indentation (its description; not the
+// schema modeline), its line, and everything up to the next key the parser
+// placed at its indentation or left of it, less the blank lines and the
+// comment lines at that key's indentation that come right before it (the
+// next key's description). Ending at the next key rather than at the first
+// line that looks shallower keeps a comment at column 0 between list items,
+// a sequence written without indentation and a closing bracket at the key's
+// indentation inside the block.
+func keyBlock(lines []string, root, key *yaml.Node) (int, int, bool) {
 	start := key.Line - 1
 	col := key.Column - 1
 	if start < 0 || start >= len(lines) {
-		return raw
+		return 0, 0, false
 	}
-	end := start + 1
-	for end < len(lines) {
-		line := strings.TrimRight(lines[end], "\r\n")
-		if strings.TrimSpace(line) == "" {
-			end++
-			continue
+	end, nextCol := len(lines), -1
+	walkYAMLKeys(root, func(k *yaml.Node) {
+		if k.Line > key.Line && k.Column <= key.Column && k.Line-1 < end {
+			end, nextCol = k.Line-1, k.Column-1
 		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
-		rest := line[indent:]
-		if indent > col || (indent == col && (rest == "-" || strings.HasPrefix(rest, "- "))) {
-			end++
+	})
+	for end > start+1 {
+		prev := strings.TrimRight(lines[end-1], "\r\n")
+		indent := len(prev) - len(strings.TrimLeft(prev, " "))
+		if strings.TrimSpace(prev) == "" || (nextCol >= 0 && indent == nextCol && strings.HasPrefix(prev[indent:], "#")) {
+			end--
 			continue
 		}
 		break
-	}
-	for end > start+1 && strings.TrimSpace(lines[end-1]) == "" {
-		end--
 	}
 	for start > 0 {
 		prev := strings.TrimRight(lines[start-1], "\r\n")
@@ -279,5 +377,22 @@ func removeYAMLKeyBlock(raw []byte, key *yaml.Node) []byte {
 	if start > 0 && blank(start-1) && (end == len(lines) || blank(end)) {
 		start--
 	}
-	return []byte(strings.Join(lines[:start], "") + strings.Join(lines[end:], ""))
+	return start, end, true
+}
+
+// walkYAMLKeys calls fn for every mapping key of the tree under n.
+func walkYAMLKeys(n *yaml.Node, fn func(*yaml.Node)) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			fn(n.Content[i])
+			walkYAMLKeys(n.Content[i+1], fn)
+		}
+		return
+	}
+	for _, c := range n.Content {
+		walkYAMLKeys(c, fn)
+	}
 }

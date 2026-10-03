@@ -98,31 +98,7 @@ func (l *Loader) LoadAll(cwd, agentHome string, installDir ...string) ([]*Skill,
 	}
 
 	// Load from directories in config order; later dirs override earlier ones.
-	// A folder named twice - a default folder spelled out again in
-	// skills.dirs, the workspace being the home folder, a project's
-	// .agents/skills linked to the user's - is read once, at its last (lowest
-	// in the list, strongest) place, so naming a default folder in skills.dirs
-	// moves it below the directories listed before it.
-	type dirRead struct{ path, key string }
-	reads := make([]dirRead, 0, len(l.Dirs))
-	lastAt := make(map[string]int)
-	for _, dir := range l.Dirs {
-		expanded := expandPath(dir, cwd, agentHome)
-		if expanded == "" {
-			continue
-		}
-		key := filepath.Clean(expanded)
-		if real, err := filepath.EvalSymlinks(key); err == nil {
-			key = real
-		}
-		lastAt[key] = len(reads)
-		reads = append(reads, dirRead{path: expanded, key: key})
-	}
-	for i, rd := range reads {
-		if lastAt[rd.key] != i {
-			continue
-		}
-		expanded := rd.path
+	for _, expanded := range SearchRoots(l.Dirs, cwd, agentHome) {
 		found, err := loadFromDir(expanded)
 		if err != nil {
 			continue
@@ -361,6 +337,39 @@ func expandPath(path, cwd, agentHome string) string {
 		path = filepath.Join(cwd, path)
 	}
 	return path
+}
+
+// SearchRoots is the folders dirs name for a workspace, expanded, in the
+// order they are read: weakest first, a later one winning a skill name. A
+// folder named twice - a default folder spelled out again in skills.dirs, the
+// workspace being the home folder, a project's .agents/skills linked to the
+// user's - is read once, at its last (lowest in the list, strongest) place,
+// so naming a default folder in skills.dirs moves it below the directories
+// listed before it. A link to a folder counts as that folder. LoadAll reads
+// these and `coddy skills list` prints them.
+func SearchRoots(dirs []string, cwd, agentHome string) []string {
+	type dirRead struct{ path, key string }
+	reads := make([]dirRead, 0, len(dirs))
+	lastAt := make(map[string]int)
+	for _, dir := range dirs {
+		expanded := expandPath(dir, cwd, agentHome)
+		if expanded == "" {
+			continue
+		}
+		key := filepath.Clean(expanded)
+		if real, err := filepath.EvalSymlinks(key); err == nil {
+			key = real
+		}
+		lastAt[key] = len(reads)
+		reads = append(reads, dirRead{path: expanded, key: key})
+	}
+	out := make([]string, 0, len(lastAt))
+	for i, rd := range reads {
+		if lastAt[rd.key] == i {
+			out = append(out, rd.path)
+		}
+	}
+	return out
 }
 
 // ExpandConfiguredPath resolves ${CODDY_HOME}, ${HOME}, ${CWD}, ~ and a

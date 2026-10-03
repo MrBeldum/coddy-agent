@@ -226,6 +226,12 @@ func (s *Server) coddySkillsSourcesPost(w http.ResponseWriter, r *http.Request) 
 	case "", skills.KindSource:
 		added, err = skills.AddSource(cfg, cwd, req.Source, req.Scope)
 	case skills.KindMarketplace:
+		if req.Sync {
+			// Declaring a marketplace installs nothing; syncing its source
+			// would install every plugin it lists and record them so.
+			http.Error(w, `{"error":{"message":"a marketplace installs nothing on its own: install its plugins one by one (POST /coddy/skills/install, or plugin install <plugin>@<marketplace>), or add it with kind source to have every plugin installed"}}`, http.StatusBadRequest)
+			return
+		}
 		var refreshed bool
 		_, refreshed, err = skills.AddMarketplace(r.Context(), cfg, cwd, req.Source, req.Scope)
 		added = !refreshed
@@ -285,13 +291,19 @@ func (s *Server) coddySkillsDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // coddySkillsUpdatesGet reports, per installed remote skill, whether a newer
-// version is available in its marketplace source (performs network/git access).
+// version is available in its marketplace source (performs network/git
+// access). A source a project of the workspace declares and the trust gate
+// holds back is not contacted.
 func (s *Server) coddySkillsUpdatesGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
-	statuses, err := skills.CheckUpdates(r.Context(), s.activeCfg())
+	cwd, ok := s.resolveListingCWD(w, r)
+	if !ok {
+		return
+	}
+	statuses, err := skills.CheckUpdates(r.Context(), s.activeCfg(), cwd)
 	if err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusInternalServerError)
@@ -489,7 +501,8 @@ func (s *Server) coddySkillsUpdatePost(w http.ResponseWriter, r *http.Request) {
 
 // coddySkillsSourcesDelete takes the sources and marketplaces ?source= names
 // (a marketplace by name, either kind by source) out of the operator's
-// marketplaces.json and the session workspace's.
+// marketplaces.json and the session workspace's, or only out of the one
+// ?origin= names.
 func (s *Server) coddySkillsSourcesDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.NotFound(w, r)
@@ -504,7 +517,9 @@ func (s *Server) coddySkillsSourcesDelete(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":{"message":"missing source query parameter"}}`, http.StatusBadRequest)
 		return
 	}
-	removed, err := skills.RemoveSource(s.activeCfg(), cwd, source)
+	// origin (home or project) limits the removal to the file of the row a
+	// client showed; without it both files are edited.
+	removed, err := skills.RemoveSource(s.activeCfg(), cwd, source, r.URL.Query().Get("origin"))
 	if err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusBadRequest)

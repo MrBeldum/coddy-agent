@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -3773,6 +3774,14 @@ func TestCoddySkillsNewRoutesEdgeCases(t *testing.T) {
 	if status, b := post("/coddy/skills/sources", `{"source":"owner/repo","kind":"nope"}`); status != http.StatusBadRequest {
 		t.Fatalf("add with an unknown kind = %d %s, want 400", status, b)
 	}
+	// Declaring a marketplace installs nothing, so asking to sync it as well
+	// is refused before anything is declared or fetched.
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/catalog","kind":"marketplace","sync":true}`); status != http.StatusBadRequest || !strings.Contains(string(b), "installs nothing") {
+		t.Fatalf("add a marketplace with sync = %d %s, want 400", status, b)
+	}
+	if file, _ := config.ReadMarketplacesFile(config.GlobalMarketplacesPath(home)); len(file.Marketplaces) != 0 {
+		t.Fatalf("the refused marketplace was declared: %+v", file)
+	}
 	// A trust request must name the entry, and the entry must be declared.
 	if status, _ := post("/coddy/skills/sources/trust", `{}`); status != http.StatusBadRequest {
 		t.Fatalf("trust without a key = %d, want 400", status)
@@ -3818,6 +3827,33 @@ func TestCoddySkillsNewRoutesEdgeCases(t *testing.T) {
 	}
 	if states["owner/project"] != "project/needs_approval" || states["owner/local"] != "project/ready" {
 		t.Fatalf("listed entries = %s", lb)
+	}
+
+	// The row's origin limits a removal to its file: removing your own
+	// entry leaves the project's checked-in copy alone.
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/local"}`); status != http.StatusOK {
+		t.Fatalf("add to yours = %d %s", status, b)
+	}
+	delOrigin := func(query string) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/coddy/skills/sources?"+query, nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = ioReadAllClose(res.Body)
+		return res.StatusCode
+	}
+	if status := delOrigin("source=owner/local&origin=home"); status != http.StatusOK {
+		t.Fatalf("remove from yours = %d", status)
+	}
+	homeFile, _ := config.ReadMarketplacesFile(config.GlobalMarketplacesPath(home))
+	projectFile, _ := config.ReadMarketplacesFile(config.ProjectMarketplacesPath(home))
+	if len(homeFile.Sources) != 0 || !slices.Contains(projectFile.Sources, "owner/local") {
+		t.Fatalf("after removing from yours: home %+v, project %+v", homeFile, projectFile)
+	}
+	if status := delOrigin("source=owner/local&origin=elsewhere"); status != http.StatusBadRequest {
+		t.Fatalf("remove with an unknown origin = %d, want 400", status)
 	}
 }
 
@@ -3899,6 +3935,38 @@ func TestCoddySkillsDeleteAnyAndReadonly(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(skillsDir, "local")); !os.IsNotExist(err) {
 		t.Errorf("local skill dir should be gone: %v", err)
+	}
+
+	// Settings deletes a project skill of the folder a new chat picked before
+	// its session exists: no session header, the folder in the cwd query, the
+	// same workspace GET /coddy/skills?cwd= listed it for.
+	picked := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(picked, ".coddy", "skills", "picked-only"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "skills", "picked-only", "SKILL.md"), []byte("---\nname: picked-only\ndescription: d\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req3, _ := http.NewRequest(http.MethodDelete, ts.URL+"/coddy/skills/picked-only", nil)
+	dr3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioReadAllClose(dr3.Body)
+	if dr3.StatusCode != http.StatusBadRequest {
+		t.Fatalf("delete of a project skill of another folder without cwd = %d, want 400", dr3.StatusCode)
+	}
+	req4, _ := http.NewRequest(http.MethodDelete, ts.URL+"/coddy/skills/picked-only?cwd="+url.QueryEscape(picked), nil)
+	dr4, err := http.DefaultClient.Do(req4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b4, _ := ioReadAllClose(dr4.Body)
+	if dr4.StatusCode != http.StatusOK {
+		t.Fatalf("delete with the picked folder = %d %s, want 200", dr4.StatusCode, b4)
+	}
+	if _, err := os.Stat(filepath.Join(picked, ".coddy", "skills", "picked-only")); !os.IsNotExist(err) {
+		t.Errorf("the project skill of the picked folder should be gone: %v", err)
 	}
 }
 

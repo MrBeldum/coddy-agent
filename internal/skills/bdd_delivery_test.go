@@ -205,7 +205,7 @@ func (s *deliveryState) deleteSkill(name string) error {
 }
 
 func (s *deliveryState) removeMarketplaceRefused(source string) error {
-	removed, err := skills.RemoveSource(s.cfg, "", source)
+	removed, err := skills.RemoveSource(s.cfg, "", source, "")
 	if err == nil {
 		return fmt.Errorf("removing %q was allowed (removed=%v)", source, removed)
 	}

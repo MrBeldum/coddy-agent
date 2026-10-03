@@ -795,11 +795,61 @@ func AddSource(cfg *config.Config, cwd, source, scope string) (bool, error) {
 		return false, err
 	}
 	if scope == ScopeLocal {
-		if err := approveOwn(cfg, cwd, Declaration{Kind: KindSource, Source: source, Path: path}); err != nil {
+		if err := approveOwn(cfg, cwd, projectEntry(path, Declaration{Kind: KindSource, Source: source, Path: path})); err != nil {
 			return added, err
 		}
 	}
 	return added, nil
+}
+
+// projectEntry is d as the project file at path spells it. An approval binds
+// that spelling (the digest), so one made of what the operator typed would
+// miss an entry the file already declared another way (a git URL for an
+// owner/repo, another case).
+func projectEntry(path string, d Declaration) Declaration {
+	file, err := config.ReadMarketplacesFile(path)
+	if err != nil {
+		return d
+	}
+	switch d.Kind {
+	case KindSource:
+		for _, s := range file.Sources {
+			if sameSource(s, d.Source) {
+				d.Source = strings.TrimSpace(s)
+				return d
+			}
+		}
+	case KindMarketplace:
+		for _, m := range file.Marketplaces {
+			if strings.EqualFold(strings.TrimSpace(m.Name), d.Name) && sameSource(m.Source, d.Source) {
+				d.Name, d.Source = strings.TrimSpace(m.Name), strings.TrimSpace(m.Source)
+				return d
+			}
+		}
+	}
+	return d
+}
+
+// heldSource finds a declaration of decls that reads from source and that the
+// trust gate holds back, unless another declaration in effect reads from it
+// too (the operator's own file declaring the same source).
+func heldSource(decls []Declaration, source string) (Declaration, bool) {
+	var found *Declaration
+	for i, d := range decls {
+		if !sameSource(d.Source, source) {
+			continue
+		}
+		if d.State == StateReady {
+			return Declaration{}, false
+		}
+		if found == nil {
+			found = &decls[i]
+		}
+	}
+	if found == nil {
+		return Declaration{}, false
+	}
+	return *found, true
 }
 
 // approveOwn records the approval of a project entry the operator has just
@@ -865,13 +915,16 @@ type UpdateStatus struct {
 // CheckUpdates fetches the manifest for every remote source and reports, per
 // installed remote skill, whether a newer version is available. It performs
 // network / git access but never modifies installed skills. Sources that cannot
-// be reached are treated as "no update" rather than failing the whole check.
-func CheckUpdates(ctx context.Context, cfg *config.Config) ([]UpdateStatus, error) {
+// be reached are treated as "no update" rather than failing the whole check,
+// and a source a project of cwd declares and the trust gate holds back is not
+// contacted at all: it reports no update.
+func CheckUpdates(ctx context.Context, cfg *config.Config, cwd string) ([]UpdateStatus, error) {
 	managedDir := cfg.Skills.ManagedDir(cfg.Paths.Home)
 	lock := readRemoteLock(managedDir)
 	if len(lock) == 0 {
 		return nil, nil
 	}
+	decls, _ := Declarations(cfg, cwd)
 	names := make([]string, 0, len(lock))
 	for n := range lock {
 		names = append(names, n)
@@ -883,6 +936,10 @@ func CheckUpdates(ctx context.Context, cfg *config.Config) ([]UpdateStatus, erro
 	for _, name := range names {
 		ent := lock[name]
 		st := UpdateStatus{Name: name, Source: ent.Source, Version: ent.Version, Latest: ent.Version}
+		if _, isHeld := heldSource(decls, ent.Source); isHeld {
+			out = append(out, st)
+			continue
+		}
 		versions, ok := cache[ent.Source]
 		if !ok {
 			versions, _ = sourceManifestVersions(ctx, ent.Source) // best-effort
@@ -904,7 +961,11 @@ func CheckUpdates(ctx context.Context, cfg *config.Config) ([]UpdateStatus, erro
 // UpdateSkill re-syncs the source that provides skillName, installing whatever
 // version that source currently declares: the whole source when it is one in
 // effect for cwd, else the one plugin. Fails if the skill was not installed
-// from a remote source.
+// from a remote source, and refuses a source a project of cwd declares that
+// the trust gate holds back (approval withdrawn, or skills.project_trust:
+// deny) with how to approve it: an update fetches from the source like a sync.
+// A source no file of cwd declares any more stays updatable, as the operator's
+// explicit request.
 func UpdateSkill(ctx context.Context, cfg *config.Config, cwd, skillName string) (*SyncResult, error) {
 	name, err := sanitizeSkillName(skillName)
 	if err != nil {
@@ -917,6 +978,10 @@ func UpdateSkill(ctx context.Context, cfg *config.Config, cwd, skillName string)
 	ent, ok := lock[name]
 	if !ok {
 		return nil, fmt.Errorf("skill %q is not a remote (synced) skill", name)
+	}
+	decls, _ := Declarations(cfg, cwd)
+	if d, isHeld := heldSource(decls, ent.Source); isHeld {
+		return nil, heldError(d)
 	}
 	res := &SyncResult{}
 	if strings.TrimSpace(ent.Plugin) != "" && !isWholeSource(cfg, cwd, ent.Source) {
@@ -1370,11 +1435,13 @@ type Removed struct {
 // Any reports whether anything was removed.
 func (r Removed) Any() bool { return len(r.Marketplaces)+len(r.Sources) > 0 }
 
-// RemoveSource takes out of the operator's file and the project's file of cwd
-// every source and marketplace key names (RemoveDeclared) and reports whether
-// anything was removed.
-func RemoveSource(cfg *config.Config, cwd, key string) (bool, error) {
-	r, err := RemoveDeclared(cfg, cwd, key)
+// RemoveSource takes out of the files origin names (OriginHome, OriginProject,
+// or both for an empty origin) every source and marketplace key names
+// (RemoveDeclaredIn) and reports whether anything was removed. A client that
+// shows one row per file passes the row's origin, so removing your own entry
+// never edits the project's checked-in file, nor the reverse.
+func RemoveSource(cfg *config.Config, cwd, key, origin string) (bool, error) {
+	r, err := RemoveDeclaredIn(cfg, cwd, key, origin)
 	if err != nil {
 		return false, err
 	}
@@ -1389,17 +1456,36 @@ func RemoveSource(cfg *config.Config, cwd, key string) (bool, error) {
 // source is refused: it is in no file - a copy a file carries is taken out,
 // and saying so is the answer.
 func RemoveDeclared(cfg *config.Config, cwd, key string) (Removed, error) {
+	return RemoveDeclaredIn(cfg, cwd, key, "")
+}
+
+// RemoveDeclaredIn is RemoveDeclared limited to the file origin names:
+// OriginHome, OriginProject, or both for an empty origin. Any other origin is
+// an error.
+func RemoveDeclaredIn(cfg *config.Config, cwd, key, origin string) (Removed, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return Removed{}, fmt.Errorf("empty source")
 	}
-	paths := []string{config.GlobalMarketplacesPath(cfg.Paths.Home)}
-	if strings.TrimSpace(cwd) != "" {
-		paths = append(paths, config.ProjectMarketplacesPath(cwd))
+	type declFile struct {
+		path    string
+		project bool
+	}
+	var files []declFile
+	switch strings.TrimSpace(origin) {
+	case "", OriginHome, OriginProject:
+	default:
+		return Removed{}, fmt.Errorf("unknown origin %q (use %q or %q)", origin, OriginHome, OriginProject)
+	}
+	if o := strings.TrimSpace(origin); o == "" || o == OriginHome {
+		files = append(files, declFile{path: config.GlobalMarketplacesPath(cfg.Paths.Home)})
+	}
+	if o := strings.TrimSpace(origin); (o == "" || o == OriginProject) && strings.TrimSpace(cwd) != "" {
+		files = append(files, declFile{path: config.ProjectMarketplacesPath(cwd), project: true})
 	}
 	var r Removed
-	for i, path := range paths {
-		markets, sources, err := undeclare(path, key)
+	for _, f := range files {
+		markets, sources, err := undeclare(f.path, key)
 		if err != nil {
 			return r, err
 		}
@@ -1408,8 +1494,19 @@ func RemoveDeclared(cfg *config.Config, cwd, key string) (Removed, error) {
 		}
 		r.Marketplaces = append(r.Marketplaces, markets...)
 		r.Sources = append(r.Sources, sources...)
-		if i == 1 {
-			if _, err := Revoke(cfg, cwd, key); err != nil {
+		if f.project {
+			// The approvals of what left the project file go with it, each
+			// entry by what it is: a source removed together with its
+			// marketplace's name would otherwise keep its receipt, and a
+			// checkout writing it back would be trusted unasked.
+			gone := make([]Declaration, 0, len(markets)+len(sources))
+			for _, m := range markets {
+				gone = append(gone, Declaration{Kind: KindMarketplace, Name: strings.TrimSpace(m.Name), Source: strings.TrimSpace(m.Source)})
+			}
+			for _, s := range sources {
+				gone = append(gone, Declaration{Kind: KindSource, Source: strings.TrimSpace(s)})
+			}
+			if _, err := NewTrustStore(cfg.Paths.Home).RevokeEntries(mcp.CanonicalWorkspace(cwd), gone); err != nil {
 				return r, err
 			}
 		}

@@ -174,8 +174,9 @@ both files declare counts once, as yours, and a marketplace name keeps the sourc
 `coddy plugin marketplace add <src>` adds a marketplace to your file. **Settings → Skills →
 Marketplaces** lists every entry of the session's workspace with what it is (**all plugins** or
 **catalog**) and where it is declared (**built in**, **yours**, **from the project**); its add field
-declares a source in your file or, with **This project**, in the project's, and every row syncs and
-removes on its own.
+declares a source in your file or, with **This project** (once the chat has a session), in the
+project's, and every row syncs and removes on its own. Removing a row edits the file of that row
+only; `coddy plugin marketplace remove` takes the entry out of both files.
 
 ### Project marketplaces and trust
 
@@ -212,7 +213,12 @@ themselves:
   file unless it declares that name or source already. `.marketplaces.json` stays, holding only the
   plugin lists Coddy read from each marketplace.
 
-`coddy -t` reports a `skills.sources` key still standing in a file as moved, with a pointer here.
+The move follows the rules of the `mcp_servers` one ([MCP](mcp.md#moving-from-configyaml)): a
+file it moves into that does not read moves nothing and a save keeps the key, a key inside a
+flow mapping (`skills: {sources: [...], ...}`) has its sources moved and stays for you to delete,
+and a `config.yaml` read from the workspace because the home has none is neither rewritten nor
+moved from, since its sources would become yours. `coddy -t` reports a `skills.sources` key still
+standing in a file as moved, with a pointer here.
 
 ### The `plugin` command (CLI and `/plugin` in chat)
 

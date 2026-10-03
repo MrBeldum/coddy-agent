@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -56,21 +57,26 @@ func NewTrustStore(home string) *TrustStore {
 // Path returns the receipts file path.
 func (s *TrustStore) Path() string { return s.path }
 
-func (s *TrustStore) read() trustFile {
-	file := trustFile{Version: trustFileVersion, Workspaces: map[string][]TrustRecord{}}
-	data, err := os.ReadFile(s.path)
+// read loads the receipts. A missing file is no receipts; a damaged one is an
+// error, so it never reads as "nothing approved" and the next approval never
+// writes over the receipts it held (the MCP store does the same).
+func (s *TrustStore) read() (trustFile, error) {
+	data, err := os.ReadFile(s.path) //nolint:gosec // path derives from the coddy home directory
 	if err != nil {
-		return file
+		if os.IsNotExist(err) {
+			return trustFile{Version: trustFileVersion, Workspaces: map[string][]TrustRecord{}}, nil
+		}
+		return trustFile{}, fmt.Errorf("read %s: %w", s.path, err)
 	}
 	var parsed trustFile
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return file
+		return trustFile{}, fmt.Errorf("parse %s: %w", s.path, err)
 	}
 	if parsed.Workspaces == nil {
 		parsed.Workspaces = map[string][]TrustRecord{}
 	}
 	parsed.Version = trustFileVersion
-	return parsed
+	return parsed, nil
 }
 
 func (s *TrustStore) write(file trustFile) error {
@@ -84,11 +90,16 @@ func (s *TrustStore) write(file trustFile) error {
 	return writeFileAtomic(filepath.Dir(s.path), filepath.Base(s.path), append(data, '\n'))
 }
 
-// Records returns the receipts recorded for a canonical workspace.
+// Records returns the receipts recorded for a canonical workspace; none when
+// the file cannot be read.
 func (s *TrustStore) Records(workspace string) []TrustRecord {
 	trustMu.Lock()
 	defer trustMu.Unlock()
-	out := append([]TrustRecord(nil), s.read().Workspaces[workspace]...)
+	file, err := s.read()
+	if err != nil {
+		return nil
+	}
+	out := append([]TrustRecord(nil), file.Workspaces[workspace]...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Source < out[j].Source })
 	return out
 }
@@ -101,7 +112,11 @@ func (s *TrustStore) Approved(workspace, digest string) bool {
 	}
 	trustMu.Lock()
 	defer trustMu.Unlock()
-	for _, r := range s.read().Workspaces[workspace] {
+	file, err := s.read()
+	if err != nil {
+		return false
+	}
+	for _, r := range file.Workspaces[workspace] {
 		if r.Digest == digest {
 			return true
 		}
@@ -114,7 +129,10 @@ func (s *TrustStore) Approved(workspace, digest string) bool {
 func (s *TrustStore) Approve(workspace string, d Declaration) error {
 	trustMu.Lock()
 	defer trustMu.Unlock()
-	file := s.read()
+	file, err := s.read()
+	if err != nil {
+		return err
+	}
 	kept := make([]TrustRecord, 0, len(file.Workspaces[workspace])+1)
 	for _, r := range file.Workspaces[workspace] {
 		if !sameEntry(r.Kind, r.Name, r.Source, d) {
@@ -134,14 +152,42 @@ func (s *TrustStore) Approve(workspace string, d Declaration) error {
 // Revoke removes the receipts of the entries key names in workspace (a
 // marketplace by name, either kind by source) and reports whether one existed.
 func (s *TrustStore) Revoke(workspace, key string) (bool, error) {
+	return s.revokeWhere(workspace, func(r TrustRecord) bool {
+		return keyNames(key, r.Kind, r.Name, r.Source)
+	})
+}
+
+// RevokeEntries removes the receipts of exactly these entries in workspace
+// (sameEntry), the way a removal from the project file takes the approvals of
+// what it removed with it.
+func (s *TrustStore) RevokeEntries(workspace string, entries []Declaration) (bool, error) {
+	if len(entries) == 0 {
+		return false, nil
+	}
+	return s.revokeWhere(workspace, func(r TrustRecord) bool {
+		for _, d := range entries {
+			if sameEntry(r.Kind, r.Name, r.Source, d) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// revokeWhere drops the receipts of workspace that match and reports whether
+// any did.
+func (s *TrustStore) revokeWhere(workspace string, match func(TrustRecord) bool) (bool, error) {
 	trustMu.Lock()
 	defer trustMu.Unlock()
-	file := s.read()
+	file, err := s.read()
+	if err != nil {
+		return false, err
+	}
 	recs := file.Workspaces[workspace]
 	kept := make([]TrustRecord, 0, len(recs))
 	removed := false
 	for _, r := range recs {
-		if keyNames(key, r.Kind, r.Name, r.Source) {
+		if match(r) {
 			removed = true
 			continue
 		}

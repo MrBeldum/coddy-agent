@@ -544,7 +544,7 @@ func (s *archiveFeatureState) publishesNewArchive(market, plugin string) error {
 }
 
 func (s *archiveFeatureState) updateStatus(name string) (UpdateStatus, error) {
-	statuses, err := CheckUpdates(context.Background(), s.cfg)
+	statuses, err := CheckUpdates(context.Background(), s.cfg, "")
 	if err != nil {
 		return UpdateStatus{}, err
 	}

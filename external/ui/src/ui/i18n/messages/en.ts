@@ -510,10 +510,10 @@ export const messagesEn: Record<string, string> = {
     "Register the spawn_agent tool and list the subagent catalog in the system prompt (default true).",
   "settings.schema.subagents.dirs.label": "Definition directories",
   "settings.schema.subagents.dirs.desc":
-    "Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the lowest one, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy.",
+    "Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy.",
   "settings.schema.subagents.project_trust.label": "Project definitions",
   "settings.schema.subagents.project_trust.desc":
-    'Definitions found inside the workspace travel with the checkout. "ask": load them but refuse to spawn one until it is approved for this workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust). "allow": treat them like your own files. "deny": never read them.',
+    'Definitions found inside the workspace travel with the checkout. "ask": load them but refuse to spawn one until it is approved for this workspace (the shield of its row in Definitions, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust). "allow": treat them like your own files. "deny": never read them.',
   "settings.schema.subagents.max_concurrent.label": "Max concurrent",
   "settings.schema.subagents.max_concurrent.desc":
     "How many subagent runs the whole process may have in flight at once (default 4). Extra spawns are refused, not queued.",
@@ -551,10 +551,10 @@ export const messagesEn: Record<string, string> = {
 
   "settings.schema.skills.dirs.label": "Skill directories",
   "settings.schema.skills.dirs.desc":
-    "Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the lowest one, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included).",
+    "Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included).",
   "settings.schema.skills.project_trust.label": "Project marketplaces",
   "settings.schema.skills.project_trust.desc":
-    'The project\'s .coddy/marketplaces.json travels with the checkout. "ask": leave its sources and marketplaces out of every sync until each entry is approved for this workspace (the shield in the list below, or coddy plugin marketplace trust). "allow": treat them like your own ~/.coddy/marketplaces.json. "deny": never read the file. What they install goes to ~/.coddy/skills; the project\'s skill folders are not affected.',
+    'The project\'s .coddy/marketplaces.json travels with the checkout. "ask": leave its sources and marketplaces out of every sync until each entry is approved for this workspace (the shield in the list below, or coddy plugin marketplace trust). "allow": treat them like your own ~/.coddy/marketplaces.json. "deny": never use them; they are listed as switched off. What they install goes to ~/.coddy/skills; the project\'s skill folders are not affected.',
   "settings.schema.skills.auto_discovery.desc":
     "Let the agent load a matching skill's full instructions on its own (model-driven load_skill tool), instead of only when you type /name. Defaults to on.",
 
@@ -982,6 +982,10 @@ export const messagesEn: Record<string, string> = {
   "skills.sources.syncedTitle": "Synced",
   "skills.sources.syncTitle": "Sync {source}",
   "skills.sources.heldSyncTitle": "Approve it for this workspace first",
+  "skills.sources.deniedSyncTitle":
+    "Project marketplaces are switched off by skills.project_trust: deny",
+  "skills.sources.scope.noSessionTitle":
+    "Send the first message of a chat in the project to declare a marketplace for it; until then this adds to yours",
   "skills.sources.syncAria": "Sync this marketplace",
   "skills.sources.removeTitle": "Remove from {path}",
   "skills.sources.systemTitle":

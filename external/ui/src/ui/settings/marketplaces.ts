@@ -3,6 +3,7 @@
 // MarketplacesEditor.tsx the way mcpServerJson.ts is kept out of MCPSection.
 
 import type { ProjectTrust } from "./mcpServerJson";
+import { isClientDraftSessionId } from "../sessions/draftSessions";
 
 /** One declared source or marketplace. Mirrors `skills.Declaration`. */
 export type MarketplaceEntry = {
@@ -48,13 +49,24 @@ export function showsEntryTrustControl(
   return e.gated && policy === "ask";
 }
 
+/**
+ * liveSessionId is the viewed chat's id when the server has a session for it:
+ * a draft kept in the browser (draft_<hex>) is not one, and naming it would
+ * get a 404 instead of the server's default workspace.
+ */
+export function liveSessionId(sessionId: string | undefined): string | undefined {
+  const id = (sessionId ?? "").trim();
+  return id && !isClientDraftSessionId(id) ? id : undefined;
+}
+
 /** sessionHeaders scopes a request to the viewed session, like the MCP tab. */
 export function sessionHeaders(
   sessionId: string | undefined,
   json = false,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (sessionId) headers["X-Coddy-Session-ID"] = sessionId;
+  const live = liveSessionId(sessionId);
+  if (live) headers["X-Coddy-Session-ID"] = live;
   if (json) headers["Content-Type"] = "application/json";
   return headers;
 }

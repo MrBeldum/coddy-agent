@@ -2612,7 +2612,7 @@ func openAPISpec() map[string]interface{} {
 				},
 				"post": map[string]interface{}{
 					"summary":     "Declare a skill source or marketplace",
-					"description": "Declares a source (installed whole: every plugin it publishes, kept in sync) or, with **`kind: marketplace`**, a catalog whose plugins are installed one by one (its **`marketplace.json`** is read for its name). **`scope: global`** (default) writes **`<home>/marketplaces.json`**; **`scope: local`** writes the session workspace's **`.coddy/marketplaces.json`** and approves the entry for that workspace, the operator having typed it. Set **`sync:true`** to also fetch a source immediately. config.yaml is not touched.",
+					"description": "Declares a source (installed whole: every plugin it publishes, kept in sync) or, with **`kind: marketplace`**, a catalog whose plugins are installed one by one (its **`marketplace.json`** is read for its name). **`scope: global`** (default) writes **`<home>/marketplaces.json`**; **`scope: local`** writes the session workspace's **`.coddy/marketplaces.json`** and approves the entry for that workspace, the operator having typed it. Set **`sync:true`** to also fetch a source immediately; with **`kind: marketplace`** it is a 400, because declaring a marketplace installs nothing. config.yaml is not touched.",
 					"operationId": "addSkillSource",
 					"requestBody": map[string]interface{}{
 						"required": true,
@@ -2622,7 +2622,7 @@ func openAPISpec() map[string]interface{} {
 									"type": "object",
 									"properties": map[string]interface{}{
 										"source": map[string]string{"type": "string", "description": "owner/repo[@ref], a git URL, or a marketplace.json URL."},
-										"sync":   map[string]interface{}{"type": "boolean", "description": "Fetch the source immediately after adding."},
+										"sync":   map[string]interface{}{"type": "boolean", "description": "Fetch the source immediately after adding (kind source only)."},
 										"scope":  map[string]interface{}{"type": "string", "enum": []string{"global", "local"}, "description": "global: <home>/marketplaces.json (default); local: the workspace's .coddy/marketplaces.json."},
 										"kind":   map[string]interface{}{"type": "string", "enum": []string{"source", "marketplace"}, "description": "source (default): installed whole; marketplace: a catalog."},
 									},
@@ -2639,13 +2639,18 @@ func openAPISpec() map[string]interface{} {
 				},
 				"delete": map[string]interface{}{
 					"summary":     "Remove a skill source or marketplace",
-					"description": "Takes every source and marketplace **`source`** names (a marketplace by name, either kind by source in any spelling; a marketplace removed by name takes a source of its address with it) out of **`<home>/marketplaces.json`** and the session workspace's **`.coddy/marketplaces.json`**, with the approvals of the project entries. Already-installed skills remain until removed. Missing **`source`** returns 400, and so does a source listed under **`system`** by `GET /coddy/skills/sources`: those are built into Coddy and are in no file.",
+					"description": "Takes every source and marketplace **`source`** names (a marketplace by name, either kind by source in any spelling; a marketplace removed by name takes a source of its address with it) out of **`<home>/marketplaces.json`** and the session workspace's **`.coddy/marketplaces.json`** (only out of the one **`origin`** names, when given), with the approvals of the project entries removed. Already-installed skills remain until removed. Missing **`source`** returns 400, and so do an unknown **`origin`** and a source listed under **`system`** by `GET /coddy/skills/sources`: those are built into Coddy and are in no file.",
 					"operationId": "removeSkillSource",
 					"parameters": []interface{}{
 						map[string]interface{}{
 							"name": "source", "in": "query", "required": true,
 							"schema":      map[string]string{"type": "string"},
 							"description": "A marketplace name, or a source address.",
+						},
+						map[string]interface{}{
+							"name": "origin", "in": "query", "required": false,
+							"schema":      map[string]interface{}{"type": "string", "enum": []string{"home", "project"}},
+							"description": "Remove only from this file (the origin of the row a client showed): home is <home>/marketplaces.json, project the workspace's .coddy/marketplaces.json. Omitted: both.",
 						},
 					},
 					"responses": map[string]interface{}{
@@ -2745,8 +2750,9 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/skills/updates": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "Check installed remote skills for updates",
-					"description": "For every installed remote skill, fetches its marketplace source and compares the installed version against the latest declared upstream. Performs network / git access. Returns one entry per remote skill with **`update_available`** set when a newer version exists. For a zip-archive plugin without a declared version the upstream value is the archive **`sha256`** its entry declares, and any change of it is an update.",
+					"description": "For every installed remote skill, fetches its marketplace source and compares the installed version against the latest declared upstream. Performs network / git access. Returns one entry per remote skill with **`update_available`** set when a newer version exists. For a zip-archive plugin without a declared version the upstream value is the archive **`sha256`** its entry declares, and any change of it is an update. A source a project of the workspace declares (**X-Coddy-Session-ID**, else the optional **`cwd`** query, else the server default cwd) that the trust gate holds back is not contacted and reports no update.",
 					"operationId": "checkSkillUpdates",
+					"parameters":  []interface{}{listingCWDParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
 							"description": "Per-skill update status.",
@@ -2763,7 +2769,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/skills/{name}/update": map[string]interface{}{
 				"post": map[string]interface{}{
 					"summary":     "Update a skill to its latest version",
-					"description": "Re-syncs the marketplace source that provides **{name}**, installing whatever version that source currently declares. A skill installed from a marketplace added with `plugin marketplace add` reinstalls only its own plugin, not every plugin that marketplace lists. Fails with 400 when the skill was not installed from a remote source.",
+					"description": "Re-syncs the marketplace source that provides **{name}**, installing whatever version that source currently declares. A skill installed from a marketplace (a catalog) reinstalls only its own plugin, not every plugin that marketplace lists. Fails with 400 when the skill was not installed from a remote source, and when that source is a project entry of the session workspace the trust gate holds back (approval withdrawn, or `skills.project_trust: deny`). A source no file of the workspace declares any more stays updatable.",
 					"operationId": "updateSkill",
 					"parameters": []interface{}{
 						map[string]interface{}{

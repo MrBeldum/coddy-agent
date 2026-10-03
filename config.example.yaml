@@ -206,7 +206,7 @@ prompts:
   # ask_prompt: "ask.md"
 
 skills:
-  # Four folders are always read, lowest -> highest priority (a lower one
+  # Four folders are always read, lowest -> highest priority (a later one
   # wins a skill name): ${HOME}/.agents/skills, the project's .agents/skills,
   # ${CODDY_HOME}/skills, the project's .coddy/skills. dirs only ADDS
   # directories, read after the four and stronger than them. ${CWD} and a

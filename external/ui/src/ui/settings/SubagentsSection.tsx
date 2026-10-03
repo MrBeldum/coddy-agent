@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Chevron } from "../components/Chevron";
 import { useT } from "../i18n/I18nProvider";
 import { SchemaForm, type JsonSchema } from "./SchemaForm";
@@ -11,6 +17,10 @@ import {
 import { fetchSubagentCatalog, setSubagentTrust } from "./subagentsApi";
 import { LegendWithHint } from "./FieldHint";
 import { IconShield } from "./icons";
+import {
+  snapshotSettingsConfig,
+  subscribeSettingsConfig,
+} from "./settingsConfigStore";
 
 /**
  * SubagentsSection is the Settings -> Subagents tab. Hybrid, like the Skills
@@ -46,6 +56,12 @@ export function SubagentsSection(props: {
   const [trustError, setTrustError] = useState<string | null>(null);
   const factsId = useId();
   const workspacePath = props.workspacePath;
+  // The saved settings: subagents.project_trust decides which definitions
+  // need approval, so a save reads the catalog again.
+  const savedSettings = useSyncExternalStore(
+    subscribeSettingsConfig,
+    snapshotSettingsConfig,
+  ).config;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,7 +79,7 @@ export function SubagentsSection(props: {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, savedSettings]);
 
   const items = catalog?.items ?? [];
   const policy = catalog?.policy ?? "ask";

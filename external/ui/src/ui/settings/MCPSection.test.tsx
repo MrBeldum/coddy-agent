@@ -86,6 +86,24 @@ test("lists MCP servers for the selected session workspace", async () => {
   });
 });
 
+// A chat kept as a draft in the browser has no session on the server; naming
+// it would get a 404 instead of the default workspace's servers.
+test("a draft chat lists the server's default workspace, without a session header", async () => {
+  const calls: Array<{ url: string; headers: HeadersInit | undefined }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), headers: init?.headers });
+      return Promise.resolve({ ok: true, json: async () => listResponse });
+    }),
+  );
+
+  render(<MCPSection activeSessionId="draft_0123456789abcdef" />);
+
+  await waitFor(() => expect(screen.getByTestId("mcp-list")).toBeTruthy());
+  expect(calls[0]).toEqual({ url: "/coddy/mcp", headers: undefined });
+});
+
 test("renders merged servers with scope badges, every one editable", async () => {
   stubFetch();
   render(<MCPSection />);

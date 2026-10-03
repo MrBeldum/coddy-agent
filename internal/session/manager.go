@@ -239,7 +239,15 @@ func mcpTrustChanged(next *config.Config, previousTrust string) bool {
 // surfaces reconcile the server they changed themselves, and a reload that
 // follows their write finds the session already in line.
 func (m *Manager) ReloadMCPDeclarations(ctx context.Context) {
-	next := globalMCPDeclarations(m.activeCfg(), m.log)
+	next, err := readGlobalMCPDeclarations(m.activeCfg())
+	if err != nil {
+		// A file caught mid-write or saved with a typo says nothing about
+		// which servers should stop: the running ones stay, and the snapshot
+		// with them, until it reads again.
+		m.log.Warn("global MCP servers file changed but does not read; the running servers stay",
+			"path", config.GlobalMCPJSONPath(m.activeCfg().Paths.Home), "error", err)
+		return
+	}
 	m.mcpDeclMu.Lock()
 	previous := m.mcpDecls
 	m.mcpDecls = next
@@ -258,15 +266,34 @@ func (m *Manager) ReloadMCPDeclarations(ctx context.Context) {
 // globalMCPDeclarations is what <home>/mcp.json declares, by server name:
 // the digest of the declaration and its server switch. Per-tool switches
 // are left out; they apply on the next turn without reconnecting anything.
+// A file that does not read declares nothing here, as at session start.
 func globalMCPDeclarations(cfg *config.Config, log *slog.Logger) map[string]string {
-	out := map[string]string{}
-	if cfg == nil {
-		return out
-	}
-	for _, srv := range mcp.GlobalServers(cfg, log) {
-		out[srv.Config.Name] = fmt.Sprintf("%s disabled=%t", mcp.Fingerprint(srv.Config), srv.Config.Disabled)
+	out, err := readGlobalMCPDeclarations(cfg)
+	if err != nil {
+		if log != nil {
+			log.Warn("failed to load mcp.json", "path", config.GlobalMCPJSONPath(cfg.Paths.Home), "error", err)
+		}
+		return map[string]string{}
 	}
 	return out
+}
+
+// readGlobalMCPDeclarations is globalMCPDeclarations with a file that does
+// not read reported: a missing file declares no server, a broken one is an
+// error, never "no servers".
+func readGlobalMCPDeclarations(cfg *config.Config) (map[string]string, error) {
+	out := map[string]string{}
+	if cfg == nil {
+		return out, nil
+	}
+	servers, err := config.LoadMCPJSONServers(config.GlobalMCPJSONPath(cfg.Paths.Home))
+	if err != nil {
+		return nil, err
+	}
+	for _, srv := range servers {
+		out[srv.Name] = fmt.Sprintf("%s disabled=%t", mcp.Fingerprint(srv), srv.Disabled)
+	}
+	return out, nil
 }
 
 // changedMCPDeclarations lists, sorted, the names whose declaration differs

@@ -206,7 +206,7 @@ func TestSystemSourceIsListedAndUndeletable(t *testing.T) {
 		t.Fatalf("sources: want %v, got %v", want, got)
 	}
 
-	if _, err := skills.RemoveSource(cfg, "", config.SystemSkillsSource); err == nil {
+	if _, err := skills.RemoveSource(cfg, "", config.SystemSkillsSource, ""); err == nil {
 		t.Fatal("removing the system marketplace was allowed")
 	}
 	if added, err := skills.AddSource(cfg, "", config.SystemSkillsSource, skills.ScopeGlobal); err != nil || added {
@@ -319,7 +319,7 @@ func TestRemovingARedundantConfigEntryClearsTheFile(t *testing.T) {
 	cfg := deliveryHome(t, true)
 	declareHome(t, cfg, "someone/else", config.SystemSkillsSource)
 
-	_, err := skills.RemoveSource(cfg, "", config.SystemSkillsSource)
+	_, err := skills.RemoveSource(cfg, "", config.SystemSkillsSource, "")
 	if err == nil || !strings.Contains(err.Error(), "stays in effect") {
 		t.Fatalf("expected the answer to say the marketplace stays, got %v", err)
 	}

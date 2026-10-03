@@ -227,3 +227,33 @@ func TestSlowMCPHelperProcess(t *testing.T) {
 	}
 	os.Exit(0)
 }
+
+// The watcher's reload reads <home>/mcp.json strictly: a file caught
+// mid-write or saved with a typo says nothing about which servers should
+// stop, so the running ones stay until it reads again.
+func TestReloadKeepsTheServersOfAFileThatDoesNotRead(t *testing.T) {
+	mgr, state := newReloadTestManager(t, reloadTestConfig(t, reloadTestMCPServer("settings-probe")))
+	if got := len(state.GetMCPClients()); got != 1 {
+		t.Fatalf("session started with %d MCP clients, want 1", got)
+	}
+	path := config.GlobalMCPJSONPath(mgr.activeCfg().Paths.Home)
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, good[:len(good)/2], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr.ReloadMCPDeclarations(context.Background())
+	if got := len(state.GetMCPClients()); got != 1 {
+		t.Fatalf("a half-written mcp.json left %d clients, want the server kept", got)
+	}
+	// Repaired as it was, the file changes nothing either.
+	if err := os.WriteFile(path, good, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mgr.ReloadMCPDeclarations(context.Background())
+	if got := len(state.GetMCPClients()); got != 1 {
+		t.Fatalf("after the repair %d clients, want 1", got)
+	}
+}

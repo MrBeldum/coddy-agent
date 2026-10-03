@@ -124,17 +124,26 @@ func (s *Server) resolveSessionCWD(w http.ResponseWriter, r *http.Request) (stri
 
 // resolveListingCWD picks the workspace of a read-only listing the composer
 // asks for while the user types (skills, slash commands, mentions and the
-// subagents they offer, the file a mention names): the session named by
-// X-Coddy-Session-ID when the server has it, exactly as resolveSessionCWD
-// does, else the folder in the cwd query parameter, else the server default
-// cwd. The cwd parameter is how a new chat names the folder picked on the start
-// screen before its session exists; the SPA sends it next to the header as
-// well, which covers the first send of a chat with no folder picked, whose id
-// the server only learns from that turn. It must be an absolute path to an
-// existing directory (400 otherwise) and is ignored when the session exists,
-// whose own workspace always wins. A query and not a header, because a folder
-// name may not be ASCII. Routes that change a workspace (MCP declarations,
-// trust, folder creation) stay on resolveSessionCWD and never take cwd.
+// subagents they offer, the file a mention names, the update check of the
+// installed skills): the session named by X-Coddy-Session-ID when the server
+// has it, exactly as resolveSessionCWD does, else the folder in the cwd query
+// parameter, else the server default cwd. The cwd parameter is how a new chat
+// names the folder picked on the start screen before its session exists; the
+// SPA sends it next to the header as well, which covers the first send of a
+// chat with no folder picked, whose id the server only learns from that turn.
+// It must be an absolute path to an existing directory (400 otherwise) and is
+// ignored when the session exists, whose own workspace always wins. A query
+// and not a header, because a folder name may not be ASCII.
+//
+// Routes that change a workspace (MCP declarations, trust, marketplaces,
+// folder creation) stay on resolveSessionCWD and never take cwd, with one
+// exception: DELETE /coddy/skills/{name} deletes a skill in the workspace
+// GET /coddy/skills listed it for, so Settings can delete a project skill of
+// a folder picked before its session exists. That grants nothing new: a
+// client can already open a session in any existing folder
+// (POST /coddy/sessions/{id}/workspace) and delete with its header, the route
+// is behind the same CSRF check as every other DELETE, and the delete only
+// removes paths inside that workspace's skill folders.
 func (s *Server) resolveListingCWD(w http.ResponseWriter, r *http.Request) (string, bool) {
 	raw := strings.TrimSpace(r.URL.Query().Get("cwd"))
 	if raw == "" {
@@ -149,7 +158,12 @@ func (s *Server) resolveListingCWD(w http.ResponseWriter, r *http.Request) (stri
 		http.Error(w, `{"error":{"message":"cwd must be an absolute path"}}`, http.StatusBadRequest)
 		return "", false
 	}
-	abs := filepath.Clean(raw)
+	// Clean only normalises the spelling here, it sanitises nothing: the
+	// parameter names any folder on purpose (the operator's folder picker
+	// reaches the whole disk), it must be absolute and an existing directory,
+	// and what is behind it reads, or deletes a skill inside that folder's
+	// skill directories (see above).
+	abs := filepath.Clean(raw) // nosemgrep: go.lang.security.filepath-clean-misuse.filepath-clean-misuse
 	fi, err := os.Stat(abs)
 	if err != nil || !fi.IsDir() {
 		http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, "folder not found: "+abs), http.StatusBadRequest)

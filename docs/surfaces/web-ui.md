@@ -1248,10 +1248,21 @@ on screen (`X-Coddy-Session-ID`), and every action applies at once.
   and its **Sync** button is disabled. Under `deny` its note says the policy switched it off and
   there is no shield; under `allow` project rows are in effect and have none either.
 - **Sync** on a row is `POST /coddy/skills/sync?source=<key>`, **Sync all** `POST /coddy/skills/sync`;
-  both refresh the installed list and flash a check mark. Delete is
-  `DELETE /coddy/skills/sources?source=<key>`.
+  both refresh the installed list and flash a check mark, and a refresh that fails says so and leaves
+  the buttons usable. The Sync of a held row is disabled, its title asks for the approval first,
+  or under `deny` names the policy. Delete is `DELETE /coddy/skills/sources?source=<key>&origin=<row origin>`: it
+  edits the file of that row only, so removing your entry never touches the project's checked-in copy.
 - The add field declares a source (installed whole) with `POST /coddy/skills/sources`, in your file
   or, with **This project**, in the project's, which approves it for that workspace as it is written.
+  **This project** is available once the chat has a session: before its first message the server
+  would take its own default folder, not the one on screen, so the picker stays on your file.
+- A chat kept as a draft in the browser has no session on the server: the list and its actions then
+  send no `X-Coddy-Session-ID` and answer for the server's default workspace (the MCP tab does the
+  same). A save of the settings reads the list again, so the rows follow a changed
+  `skills.project_trust`; the Subagents catalog does the same for `subagents.project_trust`.
+- The install search (`GET /coddy/skills/available`), the update check (`GET /coddy/skills/updates`)
+  and **Update** go to the same session, so a project marketplace approved there is offered and one
+  held there is neither checked nor updated from.
 - On a phone the row's controls wrap under the key and the add field takes the full width.
 
 ![Settings, Skills: the marketplaces list](../assets/skills/skills-marketplaces-dark-1280.png)

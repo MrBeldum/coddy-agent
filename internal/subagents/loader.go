@@ -142,6 +142,12 @@ func lexicalPath(p string) string {
 // relative entry (a folder of the workspace, like ${CWD}/...). An entry of
 // the workspace with no workspace behind the call expands to "", so it reads
 // nothing rather than a folder at the root of the disk or of the process.
+// ExpandDir is a definition directory as the loader reads it: ${CODDY_HOME},
+// ${HOME}, ~, ${CWD} and a relative entry against the workspace cwd; "" for a
+// workspace entry without a workspace. The --dry-run probe stats the same
+// folder.
+func ExpandDir(path, cwd, home string) string { return expandDir(path, cwd, home) }
+
 func expandDir(path, cwd, home string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -9,6 +10,10 @@ import {
 import { initLocale } from "../i18n/i18n";
 import type { JsonSchema } from "./SchemaForm";
 import { SubagentsSection } from "./SubagentsSection";
+import {
+  noteSettingsConfigSaved,
+  resetSettingsConfigForTests,
+} from "./settingsConfigStore";
 
 beforeEach(() => {
   initLocale("en");
@@ -18,6 +23,7 @@ afterEach(() => {
   cleanup();
   initLocale("en");
   vi.unstubAllGlobals();
+  resetSettingsConfigForTests();
 });
 
 const schema: JsonSchema = {
@@ -419,4 +425,17 @@ test("the subagent settings sit in their own fieldset above the definitions", as
   );
   const rule = /^\.settings-subagents-section\s*\{([^}]*)\}/m.exec(css);
   expect(rule?.[1]).toMatch(/gap:\s*12px/);
+});
+
+// A save of the settings may change subagents.project_trust: the catalog is
+// read again, so the shields and badges follow the saved policy.
+test("a save of the settings reads the catalog again", async () => {
+  const urls = stubFetch();
+  renderSection("/work/repo");
+  await screen.findByTestId("subagents-list");
+  expect(urls).toHaveLength(1);
+  act(() => {
+    noteSettingsConfigSaved({ subagents: { project_trust: "allow" } });
+  });
+  await waitFor(() => expect(urls).toHaveLength(2));
 });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Chevron } from "../components/Chevron";
 import { FieldHint, LegendWithHint } from "./FieldHint";
 import { IconShield, IconSync } from "./icons";
+import { liveSessionId } from "./marketplaces";
 import { IconTrash } from "./SchemaForm";
 import { Switch } from "./Switch";
 import { useT } from "../i18n/I18nProvider";
@@ -33,7 +34,9 @@ type MCPList = {
 type MCPListResult = { list: MCPList } | { error: string };
 
 function sessionHeaders(sessionID: string, contentType = false): HeadersInit | undefined {
-  const id = sessionID.trim();
+  // A draft kept in the browser is no session of the server's: naming it
+  // would get a 404 instead of the server's default workspace.
+  const id = liveSessionId(sessionID) ?? "";
   if (!id && !contentType) return undefined;
   const headers: Record<string, string> = {};
   if (id) headers["X-Coddy-Session-ID"] = id;

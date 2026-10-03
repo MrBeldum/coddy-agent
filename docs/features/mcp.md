@@ -61,7 +61,11 @@ The rules are the same in both files and for a server an ACP client sends. The f
 reference: Settings shows it as written, and the approval of a project declaration digests
 the reference rather than the value. Since a header value is never displayed, every approval
 surface names the variables a declaration reads (`reads: ${AWS_SECRET_ACCESS_KEY}`), so a
-checkout whose server would send one of them is seen doing so before it is approved.
+checkout whose server would send one of them is seen doing so before it is approved. An
+approval records those names too, and one given by an earlier release, when `${NAME}` in a
+project file stayed literal, approved a declaration that read nothing: a project server whose
+values name a variable is asked about once more, while an approval of one that reads nothing
+stays good.
 
 ```json
 {
@@ -83,7 +87,9 @@ agent with its file tools, another process. Only the servers whose declaration o
 moved are reconciled, the way a switch in Settings is: a server added starts, one removed
 closes, one redeclared starts again from the new declaration, and the others keep their
 processes. A tool switch reconnects nothing. A session in the middle of a turn gets a new
-server when its next turn starts. A change to a project's `.coddy/mcp.json` reaches a
+server when its next turn starts. A file that does not read, caught mid-write or saved with a
+typo, stops nothing: the running servers stay, the log says why, and the next save that reads
+is compared with what was running. A change to a project's `.coddy/mcp.json` reaches a
 session when it starts, when it switches to that workspace, and when the server is saved,
 switched or approved through `/mcp` or Settings.
 
@@ -104,8 +110,15 @@ load of such a file moves the list into `~/.coddy/mcp.json` and takes the key ou
   the servers that moved and the ones the file already had.
 
 When `~/.coddy/mcp.json` cannot be read, nothing moves: the log says why, and the old list
-stays in `config.yaml`, unused, until the file is repaired. `coddy -t` reports the key as a
-warning saying where the servers go and writes nothing. The **MCP servers** tab of the web
+stays in `config.yaml`, unused, until the file is repaired; a save from Settings keeps it there
+as it is. The block ends where the parser puts the next key, so a comment at column 0 among
+the items, a list written without indentation or a flow list closed at column 0 goes whole. A
+key inside a flow mapping (`{mcp_servers: [...], ...}` on one line) is not a block of lines:
+its servers move, the key stays, and the log asks to delete it by hand. A `config.yaml` read
+from the workspace because the home has none is never rewritten and its servers never move:
+that file may have come with a checkout, and its servers would become yours in every
+workspace. `coddy -t` reports a leftover key as a warning saying where the servers go and
+writes nothing. The **MCP servers** tab of the web
 settings keeps its address, `#/settings/mcp_servers`.
 
 ## Workspace trust for project-local servers

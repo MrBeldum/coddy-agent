@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { IconTrash } from "./SchemaForm";
 import { LegendWithHint } from "./FieldHint";
 import { IconCheck, IconShield, IconSync } from "./icons";
@@ -7,11 +13,16 @@ import { translate } from "../i18n/i18n";
 import {
   entryKey,
   fetchMarketplaces,
+  liveSessionId,
   sessionHeaders,
   showsEntryTrustControl,
   type MarketplaceEntry,
   type MarketplaceListing,
 } from "./marketplaces";
+import {
+  snapshotSettingsConfig,
+  subscribeSettingsConfig,
+} from "./settingsConfigStore";
 
 // Flash key of the "Sync all" action, distinct from any entry key.
 const SYNC_ALL_KEY = " all";
@@ -87,6 +98,17 @@ export function MarketplacesEditor(props: {
   const [flash, setFlash] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [scope, setScope] = useState<"global" | "local">("global");
+  // A project entry is written into the session's workspace; before the chat
+  // has a session the server would take its own default folder, which is not
+  // the one on screen, so only your file can be written then.
+  const projectScopeAvailable = liveSessionId(sessionId) !== undefined;
+  const effectiveScope = projectScopeAvailable ? scope : "global";
+  // The saved settings: skills.project_trust decides which rows hold, so a
+  // save reads the list again.
+  const savedSettings = useSyncExternalStore(
+    subscribeSettingsConfig,
+    snapshotSettingsConfig,
+  ).config;
   // A listing asked for a session left since must not paint over the
   // listing of the current one.
   const genRef = useRef(0);
@@ -106,7 +128,7 @@ export function MarketplacesEditor(props: {
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, savedSettings]);
 
   const flashDone = useCallback((key: string) => {
     setFlash(key);
@@ -132,22 +154,31 @@ export function MarketplacesEditor(props: {
       const path = key
         ? `/coddy/skills/sync?source=${encodeURIComponent(key)}`
         : "/coddy/skills/sync";
-      const res = await send(sessionId, path, "POST");
-      if (!res.ok) setError(res.error || translate("skills.error.sync"));
-      else {
-        await onSynced();
-        flashDone(key ?? SYNC_ALL_KEY);
+      try {
+        const res = await send(sessionId, path, "POST");
+        if (!res.ok) setError(res.error || translate("skills.error.sync"));
+        else {
+          await onSynced();
+          flashDone(key ?? SYNC_ALL_KEY);
+        }
+      } catch {
+        // The refresh after the sync failed (the connection dropped): say
+        // so, and never leave every Sync button disabled.
+        setError(translate("skills.error.sync"));
+      } finally {
+        setSyncing(false);
       }
-      setSyncing(false);
     })();
   };
 
   const onRemove = (e: MarketplaceEntry) => {
     const key = entryKey(e);
     withBusy(key, async () => {
+      // Only the file of the row: removing your entry leaves the project's
+      // checked-in copy alone, and the reverse.
       const res = await send(
         sessionId,
-        `/coddy/skills/sources?source=${encodeURIComponent(key)}`,
+        `/coddy/skills/sources?source=${encodeURIComponent(key)}&origin=${encodeURIComponent(e.origin)}`,
         "DELETE",
       );
       if (!res.ok)
@@ -183,7 +214,7 @@ export function MarketplacesEditor(props: {
     withBusy(ADD_KEY, async () => {
       const res = await send(sessionId, "/coddy/skills/sources", "POST", {
         source,
-        scope,
+        scope: effectiveScope,
       });
       if (!res.ok) {
         setError(res.error || translate("skills.sources.error.add", { source }));
@@ -291,11 +322,13 @@ export function MarketplacesEditor(props: {
                   disabled={syncing || held}
                   onClick={() => onSync(key)}
                   title={
-                    held
-                      ? t("skills.sources.heldSyncTitle")
-                      : flash === key
-                        ? t("skills.sources.syncedTitle")
-                        : t("skills.sources.syncTitle", { source: key })
+                    e.status === "denied"
+                      ? t("skills.sources.deniedSyncTitle")
+                      : held
+                        ? t("skills.sources.heldSyncTitle")
+                        : flash === key
+                          ? t("skills.sources.syncedTitle")
+                          : t("skills.sources.syncTitle", { source: key })
                   }
                   aria-label={t("skills.sources.syncAria")}
                   data-testid={`skills-marketplace-sync-${key}`}
@@ -358,7 +391,13 @@ export function MarketplacesEditor(props: {
           />
           <select
             className="settings-input skills-marketplace-scope"
-            value={scope}
+            value={effectiveScope}
+            disabled={!projectScopeAvailable}
+            title={
+              projectScopeAvailable
+                ? undefined
+                : t("skills.sources.scope.noSessionTitle")
+            }
             onChange={(ev) => setScope(ev.target.value === "local" ? "local" : "global")}
             aria-label={t("skills.sources.scopeAria")}
             data-testid="skills-marketplace-scope"

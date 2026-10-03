@@ -33,6 +33,7 @@ func resolveConfigFile(cli CLIPaths) (Paths, error) {
 			cwdCfg := filepath.Join(paths.CWD, defaultConfigName)
 			if _, err := os.Stat(cwdCfg); err == nil {
 				paths.ConfigPath = cwdCfg
+				paths.ConfigFromWorkspace = true
 			}
 		}
 	}

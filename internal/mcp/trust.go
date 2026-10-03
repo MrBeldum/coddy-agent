@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -241,11 +242,15 @@ func (s *TrustStore) Records(workspace string) []TrustRecord {
 
 // Approved reports whether this exact declaration is approved for workspace.
 // A corrupt store reads as "not approved": failing closed is the only safe
-// direction here.
+// direction here. The receipt must also name the variables of the
+// environment the declaration reads: one written before ${NAME} expanded in
+// a project file carries none, so it approved a declaration that read
+// nothing, and one that now sends a variable's value is asked about again.
 func (s *TrustStore) Approved(workspace string, srv config.MCPServerConfig) bool {
 	digest := Fingerprint(srv)
+	reads := ReadsEnvironment(srv)
 	for _, rec := range s.Records(workspace) {
-		if rec.Server == srv.Name && rec.Digest == digest {
+		if rec.Server == srv.Name && rec.Digest == digest && slices.Equal(rec.ReadsEnv, reads) {
 			return true
 		}
 	}
