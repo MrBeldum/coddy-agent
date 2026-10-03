@@ -2726,7 +2726,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/skills/{name}": map[string]interface{}{
 				"delete": map[string]interface{}{
 					"summary":     "Remove a remote skill",
-					"description": "Deletes any on-disk skill by name (its directory, and its remote provenance entry when synced). Bundled (read-only) skills cannot be deleted and return 400; so do skills outside the configured skill directories.",
+					"description": "Deletes any on-disk skill by name (its directory, and its remote provenance entry when synced). Bundled (read-only) skills cannot be deleted and return 400; so do skills outside the configured skill directories. The skill is looked up in the workspace of the session in **X-Coddy-Session-ID**, else the folder in **`cwd`**, else the server default cwd, the way the skills list resolves it. A skill linked into a skills directory from elsewhere is removed as the link: what it points at stays on disk.",
 					"operationId": "removeRemoteSkill",
 					"parameters": []interface{}{
 						map[string]interface{}{
@@ -2734,6 +2734,7 @@ func openAPISpec() map[string]interface{} {
 							"schema":      map[string]string{"type": "string"},
 							"description": "Canonical skill name (single segment, no slashes).",
 						},
+						listingCWDParam(),
 					},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Remote skill removed."},

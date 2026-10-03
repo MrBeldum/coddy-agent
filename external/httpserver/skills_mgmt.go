@@ -222,7 +222,17 @@ func (s *Server) coddySkillsDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if err := skills.DeleteSkill(s.activeCfg(), s.defaultCWD, name); err != nil {
+	// The skill is looked up in the workspace of the list it was picked from:
+	// a project skill of the chat's folder is not in the server's default cwd.
+	// The reach is the listing's (a session, else cwd, else the default) and
+	// DeleteSkill still removes only a path inside a configured skills
+	// directory of that workspace; for a skill linked in from elsewhere that
+	// path is the link, so what it points at stays on disk.
+	cwd, ok := s.resolveListingCWD(w, r)
+	if !ok {
+		return
+	}
+	if err := skills.DeleteSkill(s.activeCfg(), cwd, name); err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusBadRequest)
 		return

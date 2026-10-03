@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SkillsSection } from "./SkillsSection";
 import type { JsonSchema } from "./SchemaForm";
 
@@ -24,7 +24,7 @@ const BY_FOLDER: Record<string, string[]> = {
 };
 
 function stubFetch() {
-  const fetchMock = vi.fn(async (input: string) => {
+  const fetchMock = vi.fn(async (input: string, _init?: RequestInit) => {
     const url = new URL(String(input), "http://x");
     if (url.pathname === "/coddy/skills") {
       const names = BY_FOLDER[url.searchParams.get("cwd") ?? ""] ?? [];
@@ -118,4 +118,27 @@ test("a list asked for a folder left since does not paint over the current one",
   releaseData();
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(screen.queryByText("rgs-confluence")).toBeNull();
+});
+
+test("deleting a project skill asks in the workspace the list was read for", async () => {
+  const fetchMock = stubFetch();
+  render(
+    <SkillsSection
+      schema={schema}
+      value={{}}
+      onChange={() => {}}
+      workspacePath="/projects/data"
+    />,
+  );
+  await waitFor(() => expect(screen.getByText("rgs-confluence")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: /rgs-confluence/i }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          (init as RequestInit | undefined)?.method === "DELETE" &&
+          String(input) === "/coddy/skills/rgs-confluence?cwd=%2Fprojects%2Fdata",
+      ),
+    ).toBe(true),
+  );
 });

@@ -725,6 +725,61 @@ func (s *skCWDFeatureState) mentionCandidatesExclude(insert string) error {
 	return nil
 }
 
+// projectLinksSkillFromOutside puts a skill folder outside every project and
+// links it into the project's skills directory, the way an operator shares one
+// skill between projects.
+func (s *skCWDFeatureState) projectLinksSkillFromOutside(project, skill string) error {
+	if s.dirEntry == "" {
+		return fmt.Errorf("skills directory entry not configured")
+	}
+	dir, ok := s.projects[project]
+	if !ok {
+		return fmt.Errorf("unknown project %q", project)
+	}
+	target := filepath.Join(s.root, "outside", skill)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return err
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: Shared skill %s\n---\n\n# %s\n\nShared body.\n", skill, skill, skill)
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte(body), 0o644); err != nil {
+		return err
+	}
+	skillsDir := skills.ExpandConfiguredPath(s.dirEntry, dir, s.home)
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(target, filepath.Join(skillsDir, skill))
+}
+
+func (s *skCWDFeatureState) deleteSkillForSession(skill string) error {
+	if err := s.do(http.MethodDelete, "/coddy/skills/"+url.PathEscape(skill), nil, true); err != nil {
+		return err
+	}
+	if s.status != http.StatusOK {
+		return fmt.Errorf("delete status %d body %v", s.status, s.body)
+	}
+	return nil
+}
+
+func (s *skCWDFeatureState) skillLinkGone(skill, project string) error {
+	dir, ok := s.projects[project]
+	if !ok {
+		return fmt.Errorf("unknown project %q", project)
+	}
+	link := filepath.Join(skills.ExpandConfiguredPath(s.dirEntry, dir, s.home), skill)
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		return fmt.Errorf("skill link %s still there (err %v)", link, err)
+	}
+	return nil
+}
+
+func (s *skCWDFeatureState) linkedSkillStillOnDisk(skill string) error {
+	if _, err := os.Stat(filepath.Join(s.root, "outside", skill, "SKILL.md")); err != nil {
+		return fmt.Errorf("the linked skill %q went with its link: %v", skill, err)
+	}
+	return nil
+}
+
 func (s *skCWDFeatureState) listSkillsForSession() error {
 	if err := s.do(http.MethodGet, "/coddy/skills", nil, true); err != nil {
 		return err
@@ -863,6 +918,10 @@ func initializeSkillsSessionWorkspaceScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^I search the mentions "([^"]*)" without a session for the picked folder "([^"]*)"$`, s.searchMentionsPicked)
 	sc.Step(`^the mention candidates include "([^"]*)"$`, s.mentionCandidatesInclude)
 	sc.Step(`^the mention candidates do not include "([^"]*)"$`, s.mentionCandidatesExclude)
+	sc.Step(`^the project folder "([^"]*)" links the skill "([^"]*)" from outside the project$`, s.projectLinksSkillFromOutside)
+	sc.Step(`^I delete the skill "([^"]*)" for that session$`, s.deleteSkillForSession)
+	sc.Step(`^the skill link "([^"]*)" is gone from the project folder "([^"]*)"$`, s.skillLinkGone)
+	sc.Step(`^the linked skill "([^"]*)" is still on disk outside the project$`, s.linkedSkillStillOnDisk)
 	sc.Step(`^I list skills for that session$`, s.listSkillsForSession)
 	sc.Step(`^I prompt that session with "([^"]*)"$`, s.promptSession)
 	sc.Step(`^I read the server configuration$`, s.readServerConfiguration)

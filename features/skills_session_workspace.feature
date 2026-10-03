@@ -52,6 +52,21 @@ Feature: Project-local skills follow the session workspace
     When I search the mentions "agent:" without a session for the picked folder "ops"
     Then the mention candidates do not include "@agent:app-reviewer"
 
+  Scenario: A project skill linked from outside the project is listed and loaded
+    Given the project folder "app" links the skill "shared-app" from outside the project
+    And a session anchored on the project folder "app"
+    When I list slash commands for that session
+    Then the slash commands include "shared-app"
+    When I prompt that session with "/shared-app go"
+    Then the turn runs with the skill "shared-app" loaded
+
+  Scenario: Deleting a linked project skill removes the link and keeps what it points at
+    Given the project folder "app" links the skill "shared-app" from outside the project
+    And a session anchored on the project folder "app"
+    When I delete the skill "shared-app" for that session
+    Then the skill link "shared-app" is gone from the project folder "app"
+    And the linked skill "shared-app" is still on disk outside the project
+
   Scenario: The workspace of an existing session wins over a picked folder
     Given a session anchored on the project folder "app"
     When I list slash commands for that session with the picked folder "ops"

@@ -379,8 +379,12 @@ export function SkillsSection(props: {
     setBusy((p) => ({ ...p, [skill.name]: true }));
     setError(null);
     void (async () => {
+      // The same workspace the list was read for: a project skill of the
+      // chat's folder is found there, not in the server's default cwd.
+      const path = (workspacePath || "").trim();
       const res = await apiSend(
-        `/coddy/skills/${encodeURIComponent(skill.name)}`,
+        `/coddy/skills/${encodeURIComponent(skill.name)}` +
+          (path ? `?cwd=${encodeURIComponent(path)}` : ""),
         "DELETE",
       );
       if (!res.ok) {
