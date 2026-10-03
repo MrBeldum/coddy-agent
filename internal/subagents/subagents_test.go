@@ -825,7 +825,6 @@ func TestLoaderWalksNestedDirectoriesAndSkipsDotEntries(t *testing.T) {
 	}
 }
 
-
 // ---- default folders ----
 
 // chainDef is a definition named chain whose description says which folder

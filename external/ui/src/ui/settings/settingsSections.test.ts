@@ -17,7 +17,6 @@ const rootSchema: JsonSchema = {
     "compaction",
     "memory",
     "tools",
-    "mcp_servers",
     "skills",
     "subagents",
     "hooks",
@@ -41,11 +40,6 @@ const rootSchema: JsonSchema = {
     },
     agent: { type: "object", title: "ReAct loop", properties: {} },
     tools: { type: "object", title: "Tools and permissions", properties: {} },
-    mcp_servers: {
-      type: "array",
-      title: "MCP servers",
-      items: { type: "object" },
-    },
     skills: { type: "object", title: "Skills", properties: {} },
     memory: { type: "object", title: "Memory copilot", properties: {} },
     scheduler: { type: "object", title: "Scheduler", properties: {} },
@@ -136,11 +130,13 @@ test("array sections carry their label field", () => {
   expect(byId.models?.labelField).toBe("model");
 });
 
-test("mcp_servers is its own managed tab", () => {
-  const byId = Object.fromEntries(
-    deriveSettingsSections(rootSchema).map((s) => [s.id, s]),
-  );
-  expect(byId.mcp_servers?.kind).toBe("mcp");
+// The servers live in mcp.json files, not in the settings document, so no
+// schema property names the tab: it follows Tools.
+test("the MCP servers tab follows Tools though no schema property names it", () => {
+  const sections = deriveSettingsSections(rootSchema);
+  const ids = sections.map((s) => s.id);
+  expect(ids.indexOf("mcp_servers")).toBe(ids.indexOf("tools") + 1);
+  expect(sections.find((s) => s.id === "mcp_servers")?.kind).toBe("mcp");
 });
 
 test("System group folds the rarely edited tail keys", () => {

@@ -230,28 +230,22 @@ skills:
   # `--skills-auto-discovery=false` CLI flag on `coddy acp` / `coddy serve`.
   auto_discovery: true
 
-# MCP servers connected for every new session (the "global" scope, together with
-# ~/.coddy/mcp.json - a Cursor-compatible "mcpServers" object like Cursor's
-# ~/.cursor/mcp.json). Project-local servers live in <workspace>/.coddy/mcp.json
-# (the "local" scope). Later levels override same-named servers from earlier ones.
-# Remove the [] below when uncommenting an example entry.
-mcp_servers: []
-  # Example: filesystem MCP server
-  # - name: "filesystem"
-  #   command: "npx"
-  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
-  #   env: []
-  #   # Optional switches, also togglable from Settings -> MCP in the web UI:
-  #   disabled: false
-  #   disabled_tools: ["write_file"]
-
-  # Example: GitHub MCP server
-  # - name: "github"
-  #   command: "npx"
-  #   args: ["-y", "@modelcontextprotocol/server-github"]
-  #   env:
-  #     - name: "GITHUB_PERSONAL_ACCESS_TOKEN"
-  #       value: "${GITHUB_TOKEN}"
+# MCP servers are not declared in this file. They live in two Cursor-compatible
+# files, a "mcpServers" object keyed by server name like Cursor's
+# ~/.cursor/mcp.json:
+#   ${CODDY_HOME}/mcp.json       the global servers, started for every session;
+#   <workspace>/.coddy/mcp.json  the project's, which win a name over the global
+#                                ones and run only once approved (mcp.project_trust).
+# A value may name an environment variable as ${NAME} (or ${NAME:-default}),
+# resolved when the server starts, the same in both files, so a token stays
+# out of the file:
+#   {"mcpServers": {"github": {"command": "npx",
+#     "args": ["-y", "@modelcontextprotocol/server-github"],
+#     "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}}}}
+# Add and edit them in Settings -> MCP servers or in the files themselves,
+# switch them there or with /mcp in a chat or the console. An old mcp_servers
+# list in this file is moved into ${CODDY_HOME}/mcp.json on the next start
+# (config.yaml.bak-<time> keeps the old file).
 
 # MCP settings that are not tied to a single server entry.
 mcp:
@@ -386,13 +380,14 @@ tools:
 # the parent session with its own child session and transcript. Definitions found inside
 # the workspace travel with the checkout, so "ask" refuses to spawn one until you approve
 # that file for that workspace on the machine running coddy (`coddy agents trust <name>`
-# there, or `POST /coddy/subagents/{name}/trust`). See docs/features/subagents.md.
+# there, or `POST /coddy/subagents/{name}/trust`). Four folders are always read, the
+# later winning a name: ~/.agents/agents, the project's .agents/agents,
+# ${CODDY_HOME}/agents and the project's .coddy/agents; dirs only adds folders after
+# them. See docs/features/subagents.md.
 # subagents:
 #   enable: true
 #   dirs:
-#     - "${CODDY_HOME}/agents"       # your own definitions (user scope)
 #     - "${CWD}/.claude/agents"      # project scope, Claude Code compatible
-#     - "${CWD}/.coddy/agents"       # project scope
 #   project_trust: ask              # ask | allow | deny
 #   max_concurrent: 4               # subagent runs in flight across the whole process
 #   max_depth: 1                    # 1 = children cannot spawn further (a definition's

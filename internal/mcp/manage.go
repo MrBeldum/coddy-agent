@@ -1,7 +1,8 @@
 // Management operations shared by the HTTP API and CLI: merged server list
-// with scope/origin labels, enable/disable persistence into config.yaml,
-// <home>/mcp.json, or operator-owned project overrides, and mcp.json
-// server CRUD.
+// with scope/origin labels, enable/disable persistence into <home>/mcp.json
+// or operator-owned project overrides, and mcp.json server CRUD. MCP servers
+// come from two files only - <home>/mcp.json and the project's
+// .coddy/mcp.json, the project winning a name - never from config.yaml.
 package mcp
 
 import (
@@ -17,13 +18,12 @@ import (
 
 // Scopes reported by ListManagedServers (user-facing grouping).
 const (
-	ScopeGlobal = "global" // config.yaml mcp_servers or <home>/mcp.json
+	ScopeGlobal = "global" // <home>/mcp.json
 	ScopeLocal  = "local"  // <cwd>/.coddy/mcp.json
 )
 
 // Origins identify the file that owns a server definition.
 const (
-	OriginConfig  = "config"  // config.yaml (edited via the config API, not here)
 	OriginHome    = "home"    // <home>/mcp.json (global, Cursor-style)
 	OriginProject = "project" // <cwd>/.coddy/mcp.json (project-local)
 	// OriginClient marks a declaration an ACP client sent with session/new or
@@ -38,9 +38,9 @@ type ManagedServer struct {
 	Origin string
 }
 
-// ListManagedServers merges config.yaml, global, and project servers for cwd
-// in that precedence order (later overrides earlier by name), labeling each
-// entry with the file that owns its definition.
+// ListManagedServers merges the global and the project servers for cwd in
+// that precedence order (the project overrides a name), labeling each entry
+// with the file that owns its definition.
 func ListManagedServers(cfg *config.Config, cwd string) ([]ManagedServer, error) {
 	global, err := config.LoadMCPJSONServers(config.GlobalMCPJSONPath(cfg.Paths.Home))
 	if err != nil {
@@ -50,7 +50,7 @@ func ListManagedServers(cfg *config.Config, cwd string) ([]ManagedServer, error)
 	if err != nil {
 		return nil, err
 	}
-	return applyProjectSwitches(cfg.Paths.Home, cwd, mergeManaged(cfg.MCPServers, global, project))
+	return applyProjectSwitches(cfg.Paths.Home, cwd, mergeManaged(global, project))
 }
 
 // loadMCPJSONTolerant reads one mcp.json, logging and skipping a broken file.
@@ -65,18 +65,18 @@ func loadMCPJSONTolerant(path string, log *slog.Logger) []config.MCPServerConfig
 	return servers
 }
 
-// GlobalServers lists the servers of the global configuration - config.yaml
-// merged with <home>/mcp.json - with no workspace's project file over them.
-// A broken <home>/mcp.json is logged and skipped, as at session start.
+// GlobalServers lists the servers of <home>/mcp.json, with no workspace's
+// project file over them. A broken file is logged and skipped, as at session
+// start.
 func GlobalServers(cfg *config.Config, log *slog.Logger) []ManagedServer {
-	return mergeManaged(cfg.MCPServers, loadMCPJSONTolerant(config.GlobalMCPJSONPath(cfg.Paths.Home), log), nil)
+	return mergeManaged(loadMCPJSONTolerant(config.GlobalMCPJSONPath(cfg.Paths.Home), log), nil)
 }
 
 // ListManagedServersTolerant is ListManagedServers with a broken mcp.json
 // logged and skipped instead of failing the whole list. Session bootstrap
 // uses it so one unreadable file cannot stop a session from starting.
 func ListManagedServersTolerant(cfg *config.Config, cwd string, log *slog.Logger) []ManagedServer {
-	merged := mergeManaged(cfg.MCPServers,
+	merged := mergeManaged(
 		loadMCPJSONTolerant(config.GlobalMCPJSONPath(cfg.Paths.Home), log),
 		loadMCPJSONTolerant(config.MCPJSONPath(cwd), log))
 	servers, err := applyProjectSwitches(cfg.Paths.Home, cwd, merged)
@@ -100,20 +100,17 @@ func ListManagedServersTolerant(cfg *config.Config, cwd string, log *slog.Logger
 	return servers
 }
 
-// mergeManaged overlays the two mcp.json levels onto config.yaml and labels
+// mergeManaged overlays the project's mcp.json onto the global one and labels
 // every merged entry with the file that owns its definition.
-func mergeManaged(fromConfig, global, project []config.MCPServerConfig) []ManagedServer {
-	origins := make(map[string]string, len(fromConfig)+len(global)+len(project))
-	for _, srv := range fromConfig {
-		origins[srv.Name] = OriginConfig
-	}
+func mergeManaged(global, project []config.MCPServerConfig) []ManagedServer {
+	origins := make(map[string]string, len(global)+len(project))
 	for _, srv := range global {
 		origins[srv.Name] = OriginHome
 	}
 	for _, srv := range project {
 		origins[srv.Name] = OriginProject
 	}
-	merged := config.MergeMCPServers(config.MergeMCPServers(fromConfig, global), project)
+	merged := config.MergeMCPServers(global, project)
 	out := make([]ManagedServer, 0, len(merged))
 	for _, srv := range merged {
 		origin := origins[srv.Name]
@@ -140,8 +137,8 @@ func findManaged(cfg *config.Config, cwd, name string) (*ManagedServer, error) {
 	return nil, fmt.Errorf("mcp server %q not found", name)
 }
 
-// owningJSONPath returns the mcp.json path that defines srv, or "" when the
-// definition lives in config.yaml.
+// owningJSONPath returns the mcp.json path that defines srv, or "" when no
+// file does (a declaration an ACP client sent).
 func owningJSONPath(cfg *config.Config, cwd string, srv *ManagedServer) string {
 	switch srv.Origin {
 	case OriginProject:
@@ -166,9 +163,7 @@ func SetServerDisabled(cfg *config.Config, cwd, name string, disabled bool) erro
 	if path := owningJSONPath(cfg, cwd, srv); path != "" {
 		return config.SetMCPJSONServerDisabled(path, name, disabled)
 	}
-	return mutateGlobalServer(cfg, name, func(s *config.MCPServerConfig) {
-		s.Disabled = disabled
-	})
+	return fmt.Errorf("mcp server %q is not declared in an mcp.json file", name)
 }
 
 // SetToolDisabled persists a per-tool switch using the same scope rule.
@@ -188,9 +183,7 @@ func SetToolDisabled(cfg *config.Config, cwd, name, tool string, disabled bool) 
 	if path := owningJSONPath(cfg, cwd, srv); path != "" {
 		return config.SetMCPJSONToolDisabled(path, name, tool, disabled)
 	}
-	return mutateGlobalServer(cfg, name, func(s *config.MCPServerConfig) {
-		s.DisabledTools = config.SetToolDisabledList(s.DisabledTools, tool, disabled)
-	})
+	return fmt.Errorf("mcp server %q is not declared in an mcp.json file", name)
 }
 
 // UpsertServer creates or updates one entry in the mcp.json file selected by
@@ -234,8 +227,7 @@ func approveOwnDeclaration(cfg *config.Config, cwd, name string) error {
 	return fmt.Errorf("mcp server %q not found in %s after saving it", name, path)
 }
 
-// DeleteServer removes an mcp.json-defined server from its owning file.
-// Config.yaml-defined servers are refused; they are edited via the config API.
+// DeleteServer removes a server from the mcp.json file that declares it.
 func DeleteServer(cfg *config.Config, cwd, name string) error {
 	srv, err := findManaged(cfg, cwd, name)
 	if err != nil {
@@ -243,7 +235,7 @@ func DeleteServer(cfg *config.Config, cwd, name string) error {
 	}
 	path := owningJSONPath(cfg, cwd, srv)
 	if path == "" {
-		return fmt.Errorf("mcp server %q is defined in config.yaml; edit mcp_servers there", name)
+		return fmt.Errorf("mcp server %q is not declared in an mcp.json file", name)
 	}
 	removed, err := config.DeleteMCPJSONServer(path, name)
 	if err != nil {
@@ -276,8 +268,8 @@ func SetProjectTrust(cfg *config.Config, policy string) error {
 	if err := check.Validate(); err != nil {
 		return err
 	}
-	// Same read-modify-write discipline as mutateGlobalServer: apply the trust
-	// change to a fresh on-disk config under the lock, then mirror it back.
+	// Read-modify-write under the config file lock: apply the trust change to
+	// a fresh on-disk config, then mirror it back.
 	// Only the policy moves; the other mcp settings stay as the file has them.
 	return config.WithConfigFileLock(func() error {
 		fresh, err := freshGlobalConfig(cfg)
@@ -289,43 +281,6 @@ func SetProjectTrust(cfg *config.Config, policy string) error {
 			return err
 		}
 		cfg.MCP.ProjectTrust = check.ProjectTrust
-		return nil
-	})
-}
-
-// mutateGlobalServer edits one config.yaml server and persists the whole
-// config atomically (same flow as the skills source editor). The whole
-// read-modify-write runs under the process-wide config file lock: the mutation
-// applies to a FRESH on-disk config, not to the caller's potentially stale
-// runtime object, so it cannot erase changes another writer (a staged
-// config_commit, the HTTP PUT handler) landed while this call waited for the
-// lock. The result is mirrored back into the caller's object afterwards.
-func mutateGlobalServer(cfg *config.Config, name string, mutate func(*config.MCPServerConfig)) error {
-	return config.WithConfigFileLock(func() error {
-		fresh, err := freshGlobalConfig(cfg)
-		if err != nil {
-			return err
-		}
-		idx := -1
-		for i := range fresh.MCPServers {
-			if fresh.MCPServers[i].Name == name {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			return fmt.Errorf("mcp server %q not found in config.yaml", name)
-		}
-		mutate(&fresh.MCPServers[idx])
-		if err := persistConfigYAML(fresh); err != nil {
-			return err
-		}
-		for i := range cfg.MCPServers {
-			if cfg.MCPServers[i].Name == name {
-				cfg.MCPServers[i] = fresh.MCPServers[idx]
-				break
-			}
-		}
 		return nil
 	})
 }

@@ -278,6 +278,7 @@ import type { BackgroundTask } from "./tasks/types";
 import type { SchedulerInfo, SchedulerJob } from "./scheduler/types";
 import { Settings } from "./settings/Settings";
 import { noteSettingsConfigReloaded } from "./settings/settingsConfigStore";
+import { MCP_SECTION_ID } from "./settings/settingsSections";
 import { wideRailMinWidthMediaQuery } from "./shellBreakpoint";
 
 const HDR = "X-Coddy-Session-ID";
@@ -6727,7 +6728,7 @@ export function App() {
               setSchedulerEditor(null);
               setTasksOpen(false);
               setSessionsOpen(false);
-              setSettingsSectionHash("mcp_servers");
+              setSettingsSectionHash(MCP_SECTION_ID);
             }}
             attachedFiles={composerFiles}
             onAttachedFilesChange={setComposerFiles}

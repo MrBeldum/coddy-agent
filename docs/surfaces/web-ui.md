@@ -1166,10 +1166,10 @@ section kind `mcp`; visual contract in `DESIGN.md`). Screenshot:
 `docs/assets/screenshot-fullhd-settings-mcp.png` (a connected global server plus
 a project-local one awaiting workspace approval):
 
-- `GET /coddy/mcp` backs the list: merged `config.yaml` + global `~/.coddy/mcp.json`
-  + project `./.coddy/mcp.json` servers, each with `source` (`global` / `local`
-  scope badge), `origin` (`config` / `home` / `project`) and `source_path` (the
-  real file, which is what the badge tooltip names), `readonly` (config.yaml entries), probe
+- `GET /coddy/mcp` backs the list: merged global `~/.coddy/mcp.json` + project
+  `./.coddy/mcp.json` servers (config.yaml declares none), each with `source`
+  (`global` / `local` scope badge), `origin` (`home` / `project`) and
+  `source_path` (the real file, which is what the badge tooltip names), probe
   `status`, and its tool inventory.
 - Status dot per server: connected (green), error (red, tooltip shows the probe
   error), disabled (gray), unknown transport type (amber, `unsupported`),
@@ -1193,7 +1193,8 @@ a project-local one awaiting workspace approval):
   `source_path` it was declared in plus the declaration the approval covers
   (`.mcp-trust-facts`, from `declarationFacts` in `mcpServerJson.ts`):
   transport, `runs` (command + args) or `contacts` (url), the **names** of the
-  env vars and headers, and the workspace. Values are never rendered. The shield
+  env vars and headers, the variables of the Coddy process its values read
+  (`reads`, from the row's `reads`), and the workspace. Values are never rendered. The shield
   renders **only under `ask`** (`showsTrustControl` in `mcpServerJson.ts`):
   `allow` starts every project server anyway and `deny` starts none, so there is
   no per-server decision left to offer. Such a row is not probed, so it lists no
@@ -1211,8 +1212,7 @@ a project-local one awaiting workspace approval):
 - Expanding a row lists tools with per-tool switches
   (`POST /coddy/mcp/{name}/tools/{tool}/enable|disable`); tool switches are
   locked while the server is disabled.
-- Edit and Delete are locked for `readonly` (config.yaml) rows; mcp.json rows
-  of both scopes stay editable. Delete calls `DELETE /coddy/mcp/{name}`, Edit
+- Every row is editable, both scopes. Delete calls `DELETE /coddy/mcp/{name}`, Edit
   opens the JSON editor card inline with the scope pinned to the owning file.
 - Add server opens the editor prefilled with a Cursor-style entry template and
   a Local/Global scope picker (default Local); Save issues

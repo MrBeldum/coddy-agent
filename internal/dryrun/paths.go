@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
-	"github.com/EvilFreelancer/coddy-agent/internal/skills"
 	"github.com/EvilFreelancer/coddy-agent/internal/hooks"
+	"github.com/EvilFreelancer/coddy-agent/internal/skills"
 )
 
 // paths checks every filesystem location the configuration names. A
@@ -206,28 +206,48 @@ func (r *runner) caFileCheck(path, file string) Check {
 }
 
 // mcpCommands resolves the executable of every stdio MCP server of
-// config.yaml in PATH, the way the spawn would, without spawning it.
+// <home>/mcp.json in PATH, the way the spawn would, without spawning it.
 func (r *runner) mcpCommands() {
-	for i := range r.req.Cfg.MCPServers {
-		srv := &r.req.Cfg.MCPServers[i]
-		path := "mcp_servers[" + srv.Name + "]"
-		cmd := strings.TrimSpace(srv.Command)
+	file, servers, err := r.globalMCPServers()
+	if err != nil {
+		r.rep.add(r.check(StatusError, "mcp.json", "", err.Error(),
+			"repair "+file+`: it must be a JSON object with an "mcpServers" object of servers`))
+		return
+	}
+	for i := range servers {
+		srv := &servers[i]
+		path := mcpCheckPath(srv.Name)
+		cmd := strings.TrimSpace(config.ExpandMCPValue(srv.Command, r.req.Paths.CWD))
 		switch {
 		case srv.Disabled:
-			r.rep.add(r.check(StatusSkipped, path, path, "disabled in config", ""))
+			r.rep.add(r.check(StatusSkipped, path, path, "disabled in "+file, ""))
 		case cmd == "" && strings.TrimSpace(srv.URL) == "":
-			r.rep.add(r.check(StatusError, path, path, "neither command nor url is set", "give the server a command (stdio) or a url (http)"))
+			r.rep.add(r.check(StatusError, path, path, "neither command nor url is set", "give "+srv.Name+" a command (stdio) or a url (http) in "+file))
 		case cmd != "":
 			resolved, err := exec.LookPath(cmd)
 			if err != nil {
-				fix := "install it or write an absolute path in " + path + ".command"
+				fix := "install it or write an absolute path as the command of " + srv.Name + " in " + file
 				if strings.ContainsAny(cmd, " \t") {
-					fix = "command must be the executable alone; put its arguments in " + path + ".args"
+					fix = "command must be the executable alone; put its arguments in the args of " + srv.Name + " in " + file
 				}
-				r.rep.add(r.check(StatusError, path, path+".command", fmt.Sprintf("command %q not found in PATH", cmd), fix))
+				r.rep.add(r.check(StatusError, path, path, fmt.Sprintf("command %q not found in PATH", cmd), fix))
 				continue
 			}
-			r.rep.add(r.check(StatusOK, path, path+".command", fmt.Sprintf("command %q resolves to %s", cmd, resolved), ""))
+			r.rep.add(r.check(StatusOK, path, path, fmt.Sprintf("command %q resolves to %s", cmd, resolved), ""))
 		}
 	}
+}
+
+// globalMCPServers reads <home>/mcp.json, the file the MCP servers every
+// session starts with are declared in. Project files are not read: their
+// servers sit behind the workspace trust gate.
+func (r *runner) globalMCPServers() (string, []config.MCPServerConfig, error) {
+	file := config.GlobalMCPJSONPath(r.req.Cfg.Paths.Home)
+	servers, err := config.LoadMCPJSONServers(file)
+	return file, servers, err
+}
+
+// mcpCheckPath names one server of <home>/mcp.json in the report.
+func mcpCheckPath(name string) string {
+	return "mcp.json[" + name + "]"
 }

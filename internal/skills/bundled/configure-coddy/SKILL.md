@@ -1,8 +1,8 @@
 ---
 name: configure-coddy
 metadata:
-  version: 1.1.3
-description: "Change Coddy's own configuration when the user asks for it: edit settings, providers, models, logging, permissions, or find, install, update, and remove MCP servers and skills. Stages UCI-style commands and commits only after the user confirms saving. Load when the user explicitly asks to change a Coddy setting, or when the request implies it (install an MCP server, add a skill, switch a model, roll back the config). Do not load for ordinary coding or unrelated tasks."
+  version: 1.2.0
+description: "Change Coddy's own configuration when the user asks for it: edit settings, providers, models, logging, permissions, or find, install, update, and remove MCP servers and skills. Stages UCI-style commands for config.yaml and commits only after the user confirms saving; MCP servers are entries of the mcp.json files. Load when the user explicitly asks to change a Coddy setting, or when the request implies it (install an MCP server, add a skill, switch a model, roll back the config). Do not load for ordinary coding or unrelated tasks."
 ---
 
 # Configure Coddy
@@ -17,10 +17,10 @@ Configuration edits never apply immediately. The flow is always:
 2. **Stage** edits with `config_set`. Nothing on disk changes; commands accumulate for this session.
 3. **Review** with `config_changes` and summarize the pending commands to the user in plain language.
 4. **Ask the user to save.** In any language, e.g. "I staged these changes: ... Save them?". Wait for a clear agreement ("да, сохраняй", "yes, save it", "go ahead").
-5. **Commit** with `config_commit` only after that agreement. The commit validates the batch, snapshots the previous file, writes atomically, and hot-reloads the running session - new skills, rules, tools, and MCP servers become usable in the same turn, no restart needed.
+5. **Commit** with `config_commit` only after that agreement. The commit validates the batch, snapshots the previous file, writes atomically, and hot-reloads the running session - new skills, rules and tools become usable in the same turn, no restart needed. MCP servers are not part of config.yaml (see MCP servers below).
 6. If the user declines or changes their mind, drop the staged commands with `config_revert` (optionally scoped to one path).
 
-`config_commit` also goes through Coddy's permission gate: it prompts even in `accept_edits` mode (a config commit can start MCP processes and change the permission policy itself), and the dialog lists the staged commands with secrets redacted. Never weaken the permission policy merely to avoid that prompt, and never call `config_commit` before the user agreed to save.
+`config_commit` also goes through Coddy's permission gate: it prompts even in `accept_edits` mode (a config commit can start MCP processes through `mcp.project_trust` and change the permission policy itself), and the dialog lists the staged commands with secrets redacted. Never weaken the permission policy merely to avoid that prompt, and never call `config_commit` before the user agreed to save.
 
 ## Command syntax (uci-like)
 
@@ -31,15 +31,15 @@ Configuration edits never apply immediately. The flow is always:
 | `set agent.max_turns=40` | Set a scalar field |
 | `set logger.level=debug` | String fields take the literal text |
 | `add_list logger.levels={"component":"gateway.telegram","level":"debug"}` | Raise one subsystem without turning the whole process to debug |
-| `set mcp_servers[name=context7]={"command":"npx","args":["-y","@upstash/context7-mcp"]}` | Set (or append) a named sequence entry; value is JSON |
+| `set providers[name=openrouter]={"type":"openai","api_base":"https://openrouter.ai/api/v1"}` | Set (or append) a named sequence entry; value is JSON |
 | `add_list skills.dirs=/home/dev/.agents/skills` | Append to a list |
 | `del_list skills.dirs=/home/dev/.agents/skills` | Remove a matching list entry |
-| `delete mcp_servers[name=context7]` | Delete a field or entry |
+| `delete providers[name=openrouter]` | Delete a field or entry |
 | `delete models[model=valera/qwen3.8-27b].reasoning_levels` | Drop an optional key so its default applies again (here: reasoning levels go back to auto-detection) |
 
-Paths are dotted: `agent.max_turns` walks mappings, `skills.dirs.0` indexes a list, `mcp_servers[name=context7].command` selects a named list entry. Unknown schema paths and values that make the config invalid are rejected at staging time, before anything is written.
+Paths are dotted: `agent.max_turns` walks mappings, `skills.dirs.0` indexes a list, `providers[name=openrouter].api_base` selects a named list entry. Unknown schema paths and values that make the config invalid are rejected at staging time, before anything is written.
 
-`config_get` redacts credentials, proxy URLs, MCP environment values, and header values as `<redacted>`; a proxy set to `inherit` or `none` is shown as it is, since it names a route rather than a credential. Never write a returned `<redacted>` placeholder back into the config. Prefer `${ENV_VAR}` references for secrets.
+`config_get` redacts credentials, proxy URLs and header values as `<redacted>`; a proxy set to `inherit` or `none` is shown as it is, since it names a route rather than a credential. Never write a returned `<redacted>` placeholder back into the config. Prefer `${ENV_VAR}` references for secrets.
 
 ## Rolling back a committed config
 
@@ -56,7 +56,6 @@ The active YAML file covers these areas (full field tables: `coddy_docs_read` wi
 - `instructions` - instruction files appended to the prompt in the order listed, defaulting to `["AGENTS.md", "DESIGN.md"]`; `${CODDY_HOME}`, `${CWD}` and `~` expand, an absolute entry is read as it stands. The operator's own `${CODDY_HOME}/AGENTS.md` and `${CODDY_HOME}/DESIGN.md` are read above the project's pair whenever they exist and are not configured here;
 - `skills` - discovery dirs, remote sources, `auto_discovery` for the model-driven `load_skill` tool;
 - `rules` - rules discovery: `auto_discover` reads one project folder, the first of `.coddy/rules`, the shared `.agents/rules`, `.cursor/rules`, `.claude/rules` and `.codex/rules` that holds a rule file, plus nested `AGENTS.md` for the folders a tool enters and the operator's own `${CODDY_HOME}/rules`, which applies in every workspace; `systems` narrows that to some of `user`, `coddy`, `agents-dir`, `cursor`, `claude`, `codex`, `agents`, and a project folder it leaves out drops out of the chain;
-- `mcp_servers` - MCP servers started per session (stdio command, args, env, disabled flag);
 - `mcp` - trust policy for project-local `.coddy/mcp.json` declarations (`project_trust`) and how long an MCP server no session holds keeps running before it is stopped (`idle_timeout_seconds`, 300 by default, `0` stops it at once; the servers are shared - one process per global declaration for the whole Coddy process, one per workspace for a project server - and the global ones that `coddy serve`, the console and `coddy acp` start stay up regardless). To keep project servers up for an hour after their last session, stage `set mcp.idle_timeout_seconds=3600`;
 - `tools` - permission mode, command allowlist, background execution, output limits, SSH timeouts, `tools.preview_server` (the `preview_server` tool that serves a project directory on a free port for the operator's browser: `enable`, the bind `host` - `127.0.0.1` by default, and anything that is not loopback exposes the served files, so confirm it before you stage `set tools.preview_server.host=0.0.0.0` - and `public_host`, the host written into the address handed out when the browser is on another machine; both are bare hosts, a port is a configuration error because the port is always a free one), and `tools.websearch`: the search engines the `websearch` tool asks in merge order (`engines`, `brave` then `bing` by default; `ddg` and `google` exist but are not asked by default because from a server one answers an anti-bot page and the other renders its results in the browser; `searxng` needs `searxng_url`), the per-engine and total budgets (`engine_timeout_seconds`, `total_timeout_seconds`), `max_concurrent_engines`, `snippet_chars`, `cache_ttl_seconds` (negative turns caching off), `searxng_url` for the operator's own instance (its `settings.yml` must list `json` under `search.formats`) and `brave_api_key` for the official Brave Search API. Prefer the `BRAVE_API_KEY` environment variable (or `${CODDY_HOME}/.env`) to staging the key: an empty `brave_api_key` reads it, and a key never pasted into a staged command never passes through the model. An unknown engine name is a configuration error, and so is `searxng` without an address. To point search at a self-hosted aggregator, stage `set tools.websearch.searxng_url=http://localhost:8080` and `set tools.websearch.engines=["searxng","brave"]`. `tools.http_request.allowlist` names the destinations the `http_request` tool reaches without a permission prompt: a host (`api.github.com`), a subdomain wildcard (`*.example.com`), either with an optional port, an origin (`http://localhost:8080`) or an address prefix (`https://api.example.com/v1/`); `"*"` allows everything. An entry also covers uploads and an unchecked certificate for that destination, a proxy needs an entry of its own, and an entry that cannot match (a path without a scheme, credentials, a wildcard in the middle) is a configuration error. Widening it removes a prompt the operator relies on, so confirm the exact entry before you stage `add_list tools.http_request.allowlist=api.github.com`. `tools.http_request.default_headers` is a map of headers every `http_request` call sends unless the call names the header itself (the call's value wins, and an empty value leaves the header out): stage one header with `set tools.http_request.default_headers.User-Agent=Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0.0.0` and drop it with `delete tools.http_request.default_headers.User-Agent`. A name is letters, digits, `-` and `_`, starting with a letter; `Host`, `Content-Type`, `Content-Length`, `Transfer-Encoding`, the hop-by-hop headers (`Connection`, `Upgrade`, ...) and `Proxy-Authorization` are refused, and `webfetch` and the model providers never send these headers. They reach every destination the tool calls, so never stage a credential (`Authorization`, `Cookie`, an API key) there unless the operator asked for exactly that. `config_get` shows you the names of the configured headers and never their values, so change them one header at a time: a value staged back as `<redacted>` is refused;
 - `subagents` - child agents the model delegates to with `spawn_agent`: definition directories (`dirs`), the trust policy for definitions found inside the workspace (`project_trust`: `ask` refuses to spawn a project file until it is approved on the machine running coddy, with `coddy agents trust <name>` there, or `POST /coddy/subagents/{name}/trust` with the session workspace as `cwd` (the web UI's Settings → Subagents lists the definitions but approves none); from a remote console prefer the POST route or stage `set subagents.project_trust=allow`; `allow` trusts them, `deny` never reads them), the process-wide pool size (`max_concurrent`), nesting (`max_depth`), the default run timeout and the child ReAct cap. To let a trusted checkout's definitions run without approvals, stage `set subagents.project_trust=allow`; to shrink the pool, `set subagents.max_concurrent=2`;
@@ -78,19 +77,26 @@ built with is refused at startup with the build tag named; a configuration
 change that enables one is applied to the running process where it can be, and
 logged as needing a restart where it cannot (the HTTP and relay listeners).
 
-Fields behind a build tag are parsed and ignored by binaries built without it; process-level listener changes (HTTP port, gateway tokens) may still need the relevant command restarted. The hot reload is guaranteed for the current session's agent configuration, skills, rules, built-in tools, and configured MCP clients.
+Fields behind a build tag are parsed and ignored by binaries built without it; process-level listener changes (HTTP port, gateway tokens) may still need the relevant command restarted. The hot reload is guaranteed for the current session's agent configuration, skills, rules, built-in tools, and the MCP trust policy.
 
 Maintenance contract: this catalog and the command examples must be updated in the same change as any `internal/config` schema edit, together with `internal/config/config.schema.json` (embedded into the binary; `coddy -t` checks a file against it) and https://coddy.dev/docs/reference/config (see the workflow rules).
 
 ## MCP servers
 
-For third-party MCP servers, use `websearch` and `webfetch` to verify the official repository or registry entry, the current install command, required environment variables, and trust implications. Never invent a package name. Explain any new executable, network service, filesystem access, or secret the component will receive. A typical named entry:
+MCP servers are not part of config.yaml, and no `config_set` path reaches them. They are declared in two Cursor-compatible JSON files:
 
-```text
-set mcp_servers[name=context7]={"command":"npx","args":["-y","@upstash/context7-mcp"],"env":[{"name":"API_KEY","value":"${CONTEXT7_API_KEY}"}]}
+- `${CODDY_HOME}/mcp.json` (`~/.coddy/mcp.json` by default) - the global servers, started for every session. Use it unless the user asks for one project;
+- `<workspace>/.coddy/mcp.json` - the project's servers. They win a name over the global ones, travel with the checkout, and start only once the user approves them for that workspace under `mcp.project_trust` (Settings -> MCP servers, `/mcp`, or `coddy mcp trust <name>`).
+
+Both hold one `mcpServers` object keyed by server name:
+
+```json
+{"mcpServers": {"context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp"], "env": {"CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"}}}}
 ```
 
-The selector forces the stored `name` to match. After the user confirms and `config_commit` succeeds, the server's tools become available in the same turn under the server namespace. If the commit returns an MCP connection warning, diagnose it before claiming the installation succeeded. To remove a server, stage `delete mcp_servers[name=...]` and commit the same way.
+A remote server has `"type": "http"` (or `"sse"`) and a `url`, with `headers` as an object. A value may name an environment variable as `${NAME}` or `${NAME:-default}`, resolved when the server starts, the same in both files; use it for every secret, so no token lands in the file, and `${CWD}` for the session workspace.
+
+For third-party MCP servers, use `websearch` and `webfetch` to verify the official repository or registry entry, the current install command, required environment variables, and trust implications. Never invent a package name. Explain any new executable, network service, filesystem access, or secret the component will receive, and write nothing before the user agreed. Then read the file (it may not exist yet), add the entry beside the ones already there and write it back as valid JSON. A running Coddy picks the edit up within a few seconds; the server's tools reach the session on its next turn, under the server's name, so tell the user that rather than calling them in the same turn. To remove a server, delete its entry the same way. The user can also add, edit and remove servers in Settings -> MCP servers, and switch a server or one of its tools off with `/mcp`.
 
 ## Skills
 

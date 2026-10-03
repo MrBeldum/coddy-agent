@@ -3839,15 +3839,14 @@ func TestCoddyMCPRoutesEdgeCases(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODDY_HOME", home)
 	cfgPath := filepath.Join(home, "config.yaml")
-	cfgYAML := `
-mcp_servers:
-  - name: broken
-    command: /nonexistent-mcp-binary
-  - name: remote
-    type: websocket
-    url: https://example.com/ws
-`
-	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	homeMCP := `{"mcpServers": {
+  "broken": {"command": "/nonexistent-mcp-binary"},
+  "remote": {"type": "websocket", "url": "https://example.com/ws"}
+}}`
+	if err := os.WriteFile(config.GlobalMCPJSONPath(home), []byte(homeMCP), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -3881,19 +3880,18 @@ mcp_servers:
 	}
 
 	// The list reports both servers: broken stdio probes to an error status,
-	// the http entry is unsupported without probing. Config.yaml entries are
-	// global-scoped, config-owned, and read-only for edit/delete.
+	// the websocket entry is unsupported without probing. <home>/mcp.json
+	// entries are global-scoped and home-owned.
 	status, b := do(http.MethodGet, "/coddy/mcp", "")
 	if status != http.StatusOK {
 		t.Fatalf("GET /coddy/mcp status %d %s", status, b)
 	}
 	var list struct {
 		Items []struct {
-			Name     string `json:"name"`
-			Source   string `json:"source"`
-			Origin   string `json:"origin"`
-			Readonly bool   `json:"readonly"`
-			Status   string `json:"status"`
+			Name   string `json:"name"`
+			Source string `json:"source"`
+			Origin string `json:"origin"`
+			Status string `json:"status"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(b, &list); err != nil {
@@ -3904,8 +3902,8 @@ mcp_servers:
 	}
 	byName := map[string]string{}
 	for _, it := range list.Items {
-		if it.Source != "global" || it.Origin != "config" || !it.Readonly {
-			t.Errorf("server %q = %s/%s readonly=%v, want global/config readonly", it.Name, it.Source, it.Origin, it.Readonly)
+		if it.Source != "global" || it.Origin != "home" {
+			t.Errorf("server %q = %s/%s, want global/home", it.Name, it.Source, it.Origin)
 		}
 		byName[it.Name] = it.Status
 	}
@@ -3955,8 +3953,8 @@ mcp_servers:
 	for _, it := range list.Items {
 		if it.Name == "homer" {
 			foundHomer = true
-			if it.Source != "global" || it.Origin != "home" || it.Readonly {
-				t.Errorf("homer = %s/%s readonly=%v, want global/home editable", it.Source, it.Origin, it.Readonly)
+			if it.Source != "global" || it.Origin != "home" {
+				t.Errorf("homer = %s/%s, want global/home", it.Source, it.Origin)
 			}
 		}
 	}
@@ -3964,9 +3962,9 @@ mcp_servers:
 		t.Error("homer missing from list after scope=global PUT")
 	}
 
-	// Config-defined servers cannot be deleted over the API; mcp.json ones can.
-	if status, _ := do(http.MethodDelete, "/coddy/mcp/broken", ""); status != http.StatusBadRequest {
-		t.Errorf("DELETE config-sourced status %d, want 400", status)
+	// An unknown server cannot be deleted; a declared one can.
+	if status, _ := do(http.MethodDelete, "/coddy/mcp/ghost", ""); status != http.StatusBadRequest {
+		t.Errorf("DELETE unknown status %d, want 400", status)
 	}
 	if status, _ := do(http.MethodDelete, "/coddy/mcp/homer", ""); status != http.StatusOK {
 		t.Errorf("DELETE home-sourced status %d, want 200", status)

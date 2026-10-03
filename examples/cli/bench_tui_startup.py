@@ -85,7 +85,7 @@ def render_config(home: Path, skills_dirs: list[Path], sources: list[str]) -> No
     """Write the demo config into `home` with the skills block replaced."""
     text = DEMO_CONFIG.read_text().replace("__E2E_LOG_PATH__", str(home / "e2e.log"))
     start = text.index("skills:\n")
-    end = text.index("mcp_servers:")
+    end = text.index("\ntools:\n") + 1
     block = "skills:\n  dirs:\n" + "".join(f'    - "{d}"\n' for d in skills_dirs)
     if sources:
         block += "  sources:\n" + "".join(f'    - "{s}"\n' for s in sources)

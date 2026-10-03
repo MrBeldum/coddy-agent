@@ -18,13 +18,15 @@ Operator hooks (`docs/features/hooks.md`) follow the agent into its children. `S
 
 ### Directories and precedence
 
-Definitions are searched in the directories of `subagents.dirs`, lowest priority first; a later directory replaces an earlier one **by name**. The default list:
+Definitions are searched in four default directories, always read, lowest priority first, and then in the extra directories of `subagents.dirs`; a later directory replaces an earlier one **by name**:
 
-1. `${CODDY_HOME}/agents` - user scope, the operator's own files;
-2. `${CWD}/.claude/agents` - project scope, read for compatibility (same frontmatter shape, Claude Code's files load unchanged);
-3. `${CWD}/.coddy/agents` - project scope.
+1. `${HOME}/.agents/agents` - user scope, the folder other agents share in the user's home;
+2. `${CWD}/.agents/agents` - project scope, the shared folder of the workspace;
+3. `${CODDY_HOME}/agents` - user scope, the operator's own Coddy files;
+4. `${CWD}/.coddy/agents` - project scope, the workspace's Coddy files;
+5. every entry of `subagents.dirs`, in order, after the defaults and winning a name over them (empty by default).
 
-`${CODDY_HOME}`, `${CWD}` and a leading `~` expand; a relative entry is resolved against the session cwd. Three built-ins sit below every directory, so a user file with the same name replaces a built-in.
+The chain is the same as the skills' ([Skills](skills.md#directory-layout)): Claude Code's `.claude/agents` is not read unless `subagents.dirs` names it (`"${CWD}/.claude/agents"`; its frontmatter loads unchanged). A directory named twice is read once, at its last place. `${HOME}`, `${CODDY_HOME}`, `${CWD}` and a leading `~` expand; a relative entry is resolved against the session cwd. Three built-ins sit below every directory, so a user file with the same name replaces a built-in.
 
 Scope is decided on **canonical paths**: the expanded directory and the session cwd both go through the same normalisation the MCP trust store uses (absolute, symlinks resolved, cleaned). A directory at or under the canonical cwd is **project scope** and follows `subagents.project_trust` (below); everything else is **user scope**. A workspace reached through a symlink therefore still owns its `.coddy/agents`.
 
@@ -309,7 +311,7 @@ The runtime starts one child of its own: with `memory.enable` on, every user tur
 
 Subagents live where the session manager lives. With the console or `coddy acp` in `--remote` mode (`docs/surfaces/console.md`, Remote mode) the manager, the child sessions, the pool tasks and the trust receipts are all on the `coddy serve` host:
 
-- definitions are read from the **server's** `subagents.dirs` (`${CODDY_HOME}/agents` of the server home and the `.claude/agents` / `.coddy/agents` of the session's cwd on the server);
+- definitions are read from the **server's** folders (the server user's `~/.agents/agents`, `${CODDY_HOME}/agents` of the server home, the `.agents/agents` and `.coddy/agents` of the session's cwd on the server, then its `subagents.dirs`);
 - a project definition is approved **on the server**: `coddy agents trust <name> --cwd <workspace>` on that host, or `POST /coddy/subagents/{name}/trust` with the bearer token. The local `coddy agents` subcommands read and write the local home only and know nothing about `--remote`;
 - a child's permission prompts travel the same way as the parent's: the relay forwards them under the parent session, the HTTP bridge emits the `permission` SSE event (even when the server itself runs with `tools.permission_mode: bypass`, because the child's own mode is what decides), the remote console or ACP client shows the prompt with the `[subagent <name>]` prefix and answers it over `POST /coddy/sessions/{parent}/permission`;
 - a **detached** child that asks after its spawning turn ended reaches the remote console too: the server announces the prompt on `GET /coddy/events`, and the console opens the modal for the sessions it opened and answers with `POST /coddy/sessions/{child}/permission`. The same prompt waits in the parent chat of the SPA served by that host, and in the Telegram chat when the session is one; the first answer wins. The remote ACP client does not show it, and until somebody answers the run waits up to its hard timeout;
@@ -335,10 +337,7 @@ All knobs are ordinary `config.yaml` keys under `subagents:`; the field table is
 ```yaml
 subagents:
   enable: true
-  dirs:
-    - "${CODDY_HOME}/agents"
-    - "${CWD}/.claude/agents"
-    - "${CWD}/.coddy/agents"
+  dirs: []                    # extra folders after the four defaults, e.g. "${CWD}/.claude/agents"
   project_trust: ask          # ask | allow | deny
   max_concurrent: 4           # child runs in flight across the whole process
   max_depth: 1                # 1: children cannot spawn; 0: nobody spawns

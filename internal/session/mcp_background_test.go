@@ -91,7 +91,7 @@ func newBackgroundFixture(t *testing.T, runner AgentRunner, setup func(*Manager)
 		release: filepath.Join(dir, "release"),
 		started: filepath.Join(dir, "started"),
 	}
-	f.mgr = NewManager(reloadTestConfig(gatedMCPServer("gated", f.started, f.release)), f.sender, runner, slog.Default(), t.TempDir(), nil)
+	f.mgr = NewManager(reloadTestConfig(t, gatedMCPServer("gated", f.started, f.release)), f.sender, runner, slog.Default(), t.TempDir(), nil)
 	f.mgr.SetBackgroundMCPConnect(true)
 	if setup != nil {
 		setup(f.mgr)
@@ -241,8 +241,7 @@ func TestCancelDuringWaitEndsTurn(t *testing.T) {
 // the dial is pending supersedes it; the late result is closed, not installed.
 func TestReloadDuringPendingConnectLeavesNoDuplicates(t *testing.T) {
 	f := newBackgroundFixture(t, nil, func(m *Manager) { m.SetMCPConnectTimeoutForTest(2 * time.Second) })
-	next := reloadTestConfig(gatedMCPServer("gated", f.started, f.release), reloadTestMCPServer("good"))
-	f.mgr.ReplaceConfig(next)
+	replaceMCPServers(t, f.mgr, gatedMCPServer("gated", f.started, f.release), reloadTestMCPServer("good"))
 	f.releaseServer()
 	if !waitUntil(t, 10*time.Second, func() bool { return !f.st.backgroundMCPRunning() }) {
 		t.Fatal("the superseded dial never settled")
@@ -269,8 +268,8 @@ func TestReloadDuringPendingConnectLeavesNoDuplicates(t *testing.T) {
 // otherwise the console's footer would count a server nobody dials any more.
 func TestReloadDuringPendingConnectTellsTheSurface(t *testing.T) {
 	f := newBackgroundFixture(t, nil, func(m *Manager) { m.SetMCPConnectTimeoutForTest(300 * time.Millisecond) })
-	f.mgr.ReplaceConfig(reloadTestConfig(reloadTestMCPServer("good")))
-	// The reload has sent its snapshot by the time ReplaceConfig returns. The
+	replaceMCPServers(t, f.mgr, reloadTestMCPServer("good"))
+	// The reload has sent its snapshot by the time it returns. The
 	// connect's first update, read before the reload, can still land after
 	// it, and the surface drops that one by its generation.
 	got, ok := f.sender.shown()
@@ -309,7 +308,7 @@ func TestCloseAllUnblocksWait(t *testing.T) {
 // TestForegroundConnectRecordsNothing: without the flag the session connects
 // in session/new and has no background record.
 func TestForegroundConnectRecordsNothing(t *testing.T) {
-	mgr := NewManager(reloadTestConfig(reloadTestMCPServer("good")), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, reloadTestMCPServer("good")), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -381,9 +380,8 @@ func TestHeldServerIsReportedNotDialed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, ".coddy", "mcp.json"), []byte(project), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := reloadTestConfig(reloadTestMCPServer("good"))
+	cfg := reloadTestConfig(t, reloadTestMCPServer("good"))
 	cfg.MCP.ProjectTrust = config.ProjectTrustAsk
-	cfg.Paths.Home = t.TempDir()
 	mgr := NewManager(cfg, mcpTestSender{}, nil, slog.Default(), cwd, nil)
 	mgr.SetBackgroundMCPConnect(true)
 	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: cwd})
@@ -431,7 +429,7 @@ func TestReloadClearsTheConnectRecord(t *testing.T) {
 	}) {
 		t.Fatal("the gated server did not start")
 	}
-	f.mgr.ReplaceConfig(reloadTestConfig(reloadTestMCPServer("good")))
+	replaceMCPServers(t, f.mgr, reloadTestMCPServer("good"))
 	if _, recorded := f.st.MCPConnectSnapshot(); recorded {
 		t.Fatal("the connect record outlived the reload that replaced the servers")
 	}
@@ -460,7 +458,7 @@ func TestApprovedProjectServerConnectsInTheBackground(t *testing.T) {
 	if err := config.UpsertMCPJSONServer(config.MCPJSONPath(cwd), "project-tool", entry); err != nil {
 		t.Fatal(err)
 	}
-	cfg := reloadTestConfig()
+	cfg := reloadTestConfig(t)
 	cfg.MCP.ProjectTrust = config.ProjectTrustAsk
 	cfg.Paths.Home = home
 	servers, err := mcp.ListManagedServers(cfg, cwd)
@@ -527,7 +525,7 @@ func TestRevokedWhileConnectingIsNotInstalled(t *testing.T) {
 	if err := config.UpsertMCPJSONServer(config.MCPJSONPath(cwd), "project-tool", entry); err != nil {
 		t.Fatal(err)
 	}
-	cfg := reloadTestConfig()
+	cfg := reloadTestConfig(t)
 	cfg.MCP.ProjectTrust = config.ProjectTrustAsk
 	cfg.Paths.Home = home
 	servers, err := mcp.ListManagedServers(cfg, cwd)

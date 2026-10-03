@@ -15,6 +15,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/mcp"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/shell"
 )
@@ -473,12 +474,25 @@ func (a *App) populateHeader() {
 		}
 		rulesCount = len(st.GetRulesCatalog())
 	}
-	var mcpNames []string
-	for _, srv := range a.config().MCPServers {
-		mcpNames = append(mcpNames, srv.Name)
-	}
-	a.header.SetSections(contextFiles, skillNames, rulesCount, mcpNames)
+	a.header.SetSections(contextFiles, skillNames, rulesCount, a.headerMCPNames())
 	a.seedMCPStatus()
+}
+
+// headerMCPNames lists the MCP servers a session in the console's workspace
+// starts: the enabled servers of <home>/mcp.json and the project's
+// .coddy/mcp.json that the workspace trust gate lets run.
+func (a *App) headerMCPNames() []string {
+	cfg := a.config()
+	cwd := cfg.Paths.CWD
+	gate := mcp.NewTrustGate(cfg)
+	var names []string
+	for _, srv := range mcp.ListManagedServersTolerant(cfg, cwd, nil) {
+		if srv.Config.Disabled || gate.Evaluate(cwd, srv) != mcp.TrustStateAllowed {
+			continue
+		}
+		names = append(names, srv.Config.Name)
+	}
+	return names
 }
 
 // initialTurnStatus is the first step of a turn: waiting for the model, or,

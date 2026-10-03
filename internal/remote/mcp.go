@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 
+	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/mcp"
 )
 
@@ -42,7 +43,16 @@ func (h *Handler) MCPServers(ctx context.Context, _ string) ([]mcp.ServerStatus,
 		for key := range item.Headers {
 			headerKeys = append(headerKeys, key)
 		}
-		row.Declaration = mcp.DeclarationSummary(item.Transport, item.Command, item.Args, item.URL, envKeys, headerKeys, response.Workspace, item.SourcePath)
+		// The variables the declaration reads come from its values, by the
+		// same grammar the server resolves them with.
+		decl := config.MCPServerConfig{Command: item.Command, Args: item.Args, URL: item.URL}
+		for key, value := range item.Env {
+			decl.Env = append(decl.Env, config.EnvVarConfig{Name: key, Value: value})
+		}
+		for key, value := range item.Headers {
+			decl.Headers = append(decl.Headers, config.HTTPHeaderConfig{Name: key, Value: value})
+		}
+		row.Declaration = mcp.DeclarationSummary(item.Transport, item.Command, item.Args, item.URL, envKeys, headerKeys, mcp.ReadsEnvironment(decl), response.Workspace, item.SourcePath)
 		rows = append(rows, row)
 	}
 	return rows, nil

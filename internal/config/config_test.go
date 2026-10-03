@@ -1439,7 +1439,7 @@ func TestAgentWaitForLimitResetDefaults(t *testing.T) {
 
 // Regression for coddy-project/coddy-agent#146: ${CWD} is a session placeholder.
 // A config file that spells it out (skills.dirs, subagents.dirs, hooks.files,
-// prompts.dir, mcp_servers) must keep it verbatim through load so every session
+// prompts.dir) must keep it verbatim through load so every session
 // resolves it against its own workspace, while the process-scoped directories
 // (sessions, scheduler, memory, log file) still resolve it against the default
 // working directory at load time. An environment variable that happens to be
@@ -1480,20 +1480,6 @@ hooks:
 prompts:
   dir: "${CWD}/prompts"
 
-mcp_servers:
-  - name: fs
-    command: "${CWD}/bin/mcp-fs"
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "${CWD}"]
-    env:
-      - name: PROJECT
-        value: "${CWD}"
-  - name: docs
-    type: http
-    url: "http://127.0.0.1:8080/mcp?root=${CWD}"
-    headers:
-      - name: X-Workspace
-        value: "${CWD}"
-
 sessions:
   dir: "${CWD}/sessions"
 
@@ -1524,11 +1510,6 @@ logger:
 		{"subagents.dirs[0]", cfg.Subagents.Dirs[0], "${CWD}/.coddy/agents"},
 		{"hooks.files[0]", cfg.Hooks.Files[0], "${CWD}/.coddy/hooks.json"},
 		{"prompts.dir", cfg.Prompts.Dir, "${CWD}/prompts"},
-		{"mcp_servers[0].command", cfg.MCPServers[0].Command, "${CWD}/bin/mcp-fs"},
-		{"mcp_servers[0].args[2]", cfg.MCPServers[0].Args[2], "${CWD}"},
-		{"mcp_servers[0].env[0].value", cfg.MCPServers[0].Env[0].Value, "${CWD}"},
-		{"mcp_servers[1].url", cfg.MCPServers[1].URL, "http://127.0.0.1:8080/mcp?root=${CWD}"},
-		{"mcp_servers[1].headers[0].value", cfg.MCPServers[1].Headers[0].Value, "${CWD}"},
 	}
 	for _, tc := range perSession {
 		// ${CODDY_HOME} is substituted with forward slashes; compare slash-normalised.
@@ -1541,14 +1522,6 @@ logger:
 	sessionCWD := filepath.Join(dir, "project")
 	if got, want := cfg.Prompts.ResolvedDir(sessionCWD), filepath.Join(sessionCWD, "prompts"); got != want {
 		t.Errorf("prompts.ResolvedDir(session): got %q want %q", got, want)
-	}
-	// internal/mcp resolves command, args, env, url and headers with the same
-	// config.ExpandCWD at connect time (see stdioSpec and expandHeaders there).
-	if got, want := config.ExpandCWD(cfg.MCPServers[0].Args[2], sessionCWD), sessionCWD; got != want {
-		t.Errorf("mcp arg ExpandCWD(session): got %q want %q", got, want)
-	}
-	if got, want := config.ExpandCWD(cfg.MCPServers[1].URL, sessionCWD), "http://127.0.0.1:8080/mcp?root="+sessionCWD; got != want {
-		t.Errorf("mcp url ExpandCWD(session): got %q want %q", got, want)
 	}
 
 	processScoped := []struct {

@@ -2,8 +2,8 @@
 
 package httpserver
 
-// MCP management REST surface (/coddy/mcp*): merged server list (config.yaml
-// + global <home>/mcp.json + project .coddy/mcp.json) with tool inventories
+// MCP management REST surface (/coddy/mcp*): merged server list (global
+// <home>/mcp.json + project .coddy/mcp.json) with tool inventories
 // probed over each server's transport, server/tool disable toggles persisted
 // into the owning file, and CRUD for mcp.json entries in either scope.
 // Mirrors the skills management surface in skills_mgmt.go.
@@ -53,14 +53,14 @@ type mcpToolRow struct {
 type mcpServerRow struct {
 	Name          string            `json:"name"`
 	Source        string            `json:"source"`    // global | local (scope)
-	Origin        string            `json:"origin"`    // config | home | project (owning file)
-	Readonly      bool              `json:"readonly"`  // config.yaml entries: no edit/delete here
+	Origin        string            `json:"origin"`    // home | project (owning file)
 	Transport     string            `json:"transport"` // stdio | http
 	Command       string            `json:"command,omitempty"`
 	Args          []string          `json:"args,omitempty"`
 	URL           string            `json:"url,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	Headers       map[string]string `json:"headers,omitempty"`
+	Reads         []string          `json:"reads,omitempty"`       // variables of the process its values read
 	SourcePath    string            `json:"source_path,omitempty"` // file that defines the entry
 	Enabled       bool              `json:"enabled"`
 	Status        string            `json:"status"` // connected | error | disabled | unsupported | needs_approval | denied
@@ -191,7 +191,6 @@ func (s *Server) coddyMCPGet(w http.ResponseWriter, r *http.Request) {
 			Name:          srv.Config.Name,
 			Source:        srv.Scope,
 			Origin:        srv.Origin,
-			Readonly:      srv.Origin == mcp.OriginConfig,
 			Transport:     transport,
 			Command:       srv.Config.Command,
 			Args:          srv.Config.Args,
@@ -201,6 +200,7 @@ func (s *Server) coddyMCPGet(w http.ResponseWriter, r *http.Request) {
 			Trusted:       trust == mcp.TrustStateAllowed,
 			Gated:         srv.Origin == mcp.OriginProject,
 			Fingerprint:   mcp.Fingerprint(srv.Config),
+			Reads:         mcp.ReadsEnvironment(srv.Config),
 			Tools:         []mcpToolRow{},
 			DisabledTools: srv.Config.DisabledTools,
 		}
@@ -279,7 +279,7 @@ func mcpSourcePath(cfg *config.Config, cwd, origin string) string {
 	case mcp.OriginHome:
 		return config.GlobalMCPJSONPath(cfg.Paths.Home)
 	default:
-		return cfg.Paths.ConfigPath
+		return ""
 	}
 }
 
@@ -474,9 +474,8 @@ func (s *Server) coddyMCPServerPut(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
 
-// coddyMCPServerDelete removes an mcp.json-defined server from its owning
-// file and closes it in live sessions. Config.yaml-defined servers are
-// refused (edit Settings instead).
+// coddyMCPServerDelete removes a server from the mcp.json file that declares
+// it and closes it in live sessions.
 func (s *Server) coddyMCPServerDelete(w http.ResponseWriter, r *http.Request) {
 	cwd, ok := s.mcpWorkspace(w, r)
 	if !ok {

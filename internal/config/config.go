@@ -70,6 +70,9 @@ func readConfigFile(paths Paths, explicitFile bool) (*Config, error) {
 	if enc := utf16Encoding(data); enc != "" {
 		return nil, fmt.Errorf("config %s: the file is %s text, not UTF-8; %s", paths.ConfigPath, enc, utf16Fix)
 	}
+	// Keys that left config.yaml move into their own files before anything
+	// reads the text (legacy_keys.go).
+	data = migrateLegacyKeys(paths, data)
 
 	originalData := append([]byte(nil), data...)
 	expanded := expandConfigBody(string(data), paths)

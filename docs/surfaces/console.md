@@ -111,7 +111,10 @@ Top to bottom:
   (`escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ctrl+o more`);
   a dim welcome line; `[Context]` (the files `instructions.files` names) and
   `[Skills]` (the loaded skills, the bundled ones first).
-  `ctrl+o` expands the full hint list and adds `[Rules]` and `[MCP]` sections.
+  `ctrl+o` expands the full hint list and adds `[Rules]` and `[MCP]` sections;
+  `[MCP]` names the servers a session of this workspace starts: the enabled ones
+  of `~/.coddy/mcp.json` and of the project's `.coddy/mcp.json` that the trust
+  gate lets run.
 - **Transcript**: user messages in full-width background boxes; assistant
   markdown (headings, bold/italic, inline code, ``` fences with borders,
   `│ ` quotes, lists, box-drawing tables, OSC 8 links); italic gray thinking
@@ -411,7 +414,9 @@ offers the staged config tools (`config_get`, `config_set`,
 **Agent self-configuration** in `docs/reference/config.md`), and a commit or
 rollback hot-reloads the running console, so the model catalog (`ctrl+l`,
 `ctrl+p`), the footer, and the header's `[Context]`, `[Skills]`, `[Rules]`,
-and `[MCP]` sections follow the new file without a restart. `-p/--prompt`
+and `[MCP]` sections follow the new file without a restart. MCP servers are
+not in that file: the console watches `~/.coddy/mcp.json` and an edit of it
+reaches the session within a couple of seconds ([MCP](../features/mcp.md#edits-made-outside-coddy)). `-p/--prompt`
 offers the same tools; under `--remote` the server owns the reload.
 
 | Key | Action |

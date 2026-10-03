@@ -53,8 +53,7 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 		Skills: SkillsJSON{
 			Dirs: []string{},
 		},
-		MCPServers: []MCPServerJSON{},
-		MCP:        MCPJSON{ProjectTrust: ProjectTrustAsk, IdleTimeoutSeconds: intPtr(MCPDefaultIdleTimeoutSeconds)},
+		MCP: MCPJSON{ProjectTrust: ProjectTrustAsk, IdleTimeoutSeconds: intPtr(MCPDefaultIdleTimeoutSeconds)},
 		Tools: ToolsJSON{
 			PermissionMode:   PermModeAsk,
 			CommandAllowlist: nil,

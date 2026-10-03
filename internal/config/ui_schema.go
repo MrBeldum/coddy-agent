@@ -245,56 +245,6 @@ func UISchemaMap() map[string]interface{} {
 			"Leave on to receive the answer token by token over SSE. Turn off to send one blocking request and wait for the whole answer, for servers or proxies that handle event streams badly; the transcript then fills in at once instead of typing out. Not available for codex models, whose backend is streaming-only.",
 			true),
 	}
-	envProps := map[string]interface{}{
-		"name":  strProp("Variable name", "Environment variable name passed to the MCP process."),
-		"value": strProp("Value", "Variable value."),
-	}
-	headerProps := map[string]interface{}{
-		"name":  strProp("Header name", "HTTP header name for MCP HTTP transports."),
-		"value": strProp("Header value", "HTTP header value."),
-	}
-	mcpProps := map[string]interface{}{
-		"type":    strProp("Server type", "stdio runs a local command; http speaks streamable HTTP to the url (with legacy-SSE fallback); sse forces the legacy HTTP+SSE transport."),
-		"name":    strProp("Server name", "Stable id referenced by the agent; must be unique in this list."),
-		"command": strProp("Command", "Executable for stdio transport (leave empty when using http url). ${CWD} expands to the session cwd."),
-		"args": map[string]interface{}{
-			"type":        "array",
-			"title":       "Arguments",
-			"description": "Argv passed after command for stdio MCP servers. ${CWD} expands to the session cwd.",
-			"items":       map[string]interface{}{"type": "string"},
-		},
-		"env": map[string]interface{}{
-			"type":        "array",
-			"title":       "Environment",
-			"description": "Extra environment variables for the stdio child process. ${CWD} in a value expands to the session cwd.",
-			"items": map[string]interface{}{
-				"type":                 "object",
-				"properties":           envProps,
-				"required":             []interface{}{"name", "value"},
-				"additionalProperties": false,
-			},
-		},
-		"url": strProp("MCP URL", "HTTP(S) endpoint when type selects an HTTP-based MCP server. ${CWD} expands to the session cwd."),
-		"headers": map[string]interface{}{
-			"type":        "array",
-			"title":       "HTTP headers",
-			"description": "Optional headers sent with MCP HTTP requests. ${CWD} in a value expands to the session cwd.",
-			"items": map[string]interface{}{
-				"type":                 "object",
-				"properties":           headerProps,
-				"required":             []interface{}{"name", "value"},
-				"additionalProperties": false,
-			},
-		},
-		"disabled": boolProp("Disabled", "Skip connecting this server without removing its definition."),
-		"disabled_tools": map[string]interface{}{
-			"type":        "array",
-			"title":       "Disabled tools",
-			"description": "Tool names of this server hidden from the agent.",
-			"items":       map[string]interface{}{"type": "string"},
-		},
-	}
-
 	isolationEnum := []string{string(IsolationIndividual), string(IsolationShared), string(IsolationAdmin)}
 	telegramUserGroupProps := map[string]interface{}{
 		"name": strProp("Group name", "Name referenced by access as group:<name>."),
@@ -563,14 +513,6 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"enable", "files", "project_trust", "default_timeout_seconds", "stop_loop_limit", "max_output_chars"},
 			nil),
-		"mcp_servers": map[string]interface{}{
-			"type":        "array",
-			"title":       "MCP servers",
-			"description": "Model Context Protocol servers started or contacted for new sessions.",
-			"items": objectSchema("", "", mcpProps,
-				[]string{"type", "name", "command", "args", "env", "url", "headers", "disabled", "disabled_tools"},
-				[]string{"name"}),
-		},
 		// mcp.project_trust is deliberately absent here: it is edited in the
 		// MCP servers tab next to the servers it governs (POST
 		// /coddy/mcp/project-trust), not as a settings-document section. It
@@ -759,7 +701,7 @@ func UISchemaMap() map[string]interface{} {
 	rootOrder := []string{
 		"providers", "models",
 		"agent", "compaction", "memory",
-		"tools", "mcp_servers", "skills", "subagents", "hooks",
+		"tools", "skills", "subagents", "hooks",
 		"scheduler", "gateways",
 		"logger", "sessions", "prompts", "instructions",
 	}

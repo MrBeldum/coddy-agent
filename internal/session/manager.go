@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -68,6 +68,15 @@ type Manager struct {
 	// management surface may already have changed in place
 	// (mcp.SetProjectTrust mirrors the policy into the live configuration).
 	mcpTrust atomic.Value
+	// mcpDecls is what <home>/mcp.json declared when the live sessions were
+	// last reconciled with it (ReloadMCPDeclarations): server name -> the
+	// digest of its declaration and its switch.
+	mcpDeclMu sync.Mutex
+	mcpDecls  map[string]string
+	// mcpWatchStop ends the watcher of <home>/mcp.json that
+	// StartGlobalMCPServers starts; nil until then.
+	mcpWatchMu   sync.Mutex
+	mcpWatchStop context.CancelFunc
 
 	// stubTurnMu guards in-process turns when flock is unavailable or SessionDir is empty.
 	stubTurnMu sync.Map // sessionID -> *sync.Mutex
@@ -173,6 +182,7 @@ func NewManager(cfg *config.Config, server acp.UpdateSender, runner AgentRunner,
 	m.mcpPool.SetStopDelay(cfg.MCP.EffectiveIdleTimeout())
 	m.mcpPool.SetWanted(m.mcpServerWanted)
 	m.mcpTrust.Store(cfg.MCP.ResolvedProjectTrust())
+	m.mcpDecls = globalMCPDeclarations(cfg, m.log)
 	m.cfgAt.Store(cfg)
 	return m
 }
@@ -199,7 +209,7 @@ func (m *Manager) ReplaceConfig(next *config.Config) {
 		return
 	}
 	previous, previousTrust := m.storeConfig(next)
-	if previous != nil && !mcpSettingsChanged(previous, next, previousTrust) {
+	if previous != nil && !mcpTrustChanged(next, previousTrust) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
@@ -207,15 +217,74 @@ func (m *Manager) ReplaceConfig(next *config.Config) {
 	m.reloadConfiguredMCPServers(ctx)
 }
 
-// mcpSettingsChanged reports whether a new configuration changes which
-// configured MCP servers the live sessions should run: the servers
-// config.yaml declares, or the trust policy that decides which project
-// servers may run at all (previousTrust, the policy the sessions were
-// reconciled under). A policy moved to deny must take the project servers
-// away from the sessions holding them, not only from new ones.
-func mcpSettingsChanged(previous, next *config.Config, previousTrust string) bool {
-	return !reflect.DeepEqual(previous.MCPServers, next.MCPServers) ||
-		previousTrust != next.MCP.ResolvedProjectTrust()
+// mcpTrustChanged reports whether a new configuration changes which
+// configured MCP servers the live sessions may run. config.yaml declares no
+// server (they live in <home>/mcp.json and the project's .coddy/mcp.json,
+// see ReloadMCPDeclarations), so what it can change is the trust policy that
+// decides whether project servers run at all: previousTrust is the policy
+// the sessions were reconciled under. A policy moved to deny must take the
+// project servers away from the sessions holding them, not only from new
+// ones.
+func mcpTrustChanged(next *config.Config, previousTrust string) bool {
+	return previousTrust != next.MCP.ResolvedProjectTrust()
+}
+
+// ReloadMCPDeclarations brings the live sessions in line with
+// <home>/mcp.json after it changed on disk: an editor, another process, a
+// file dropped in by a deployment. Only the servers whose declaration or
+// switch moved are reconciled, each as RefreshMCPServer does it, so a
+// stateful neighbour keeps its process; a server that left the file is
+// closed in every session that ran it. A per-tool switch needs nothing here,
+// since every turn rebuilds its tool filter from the file. The management
+// surfaces reconcile the server they changed themselves, and a reload that
+// follows their write finds the session already in line.
+func (m *Manager) ReloadMCPDeclarations(ctx context.Context) {
+	next := globalMCPDeclarations(m.activeCfg(), m.log)
+	m.mcpDeclMu.Lock()
+	previous := m.mcpDecls
+	m.mcpDecls = next
+	m.mcpDeclMu.Unlock()
+	changed := changedMCPDeclarations(previous, next)
+	if len(changed) == 0 {
+		return
+	}
+	m.log.Info("global MCP servers changed on disk, reconciling the sessions",
+		"path", config.GlobalMCPJSONPath(m.activeCfg().Paths.Home), "servers", changed)
+	for _, name := range changed {
+		m.RefreshMCPServer(ctx, name)
+	}
+}
+
+// globalMCPDeclarations is what <home>/mcp.json declares, by server name:
+// the digest of the declaration and its server switch. Per-tool switches
+// are left out; they apply on the next turn without reconnecting anything.
+func globalMCPDeclarations(cfg *config.Config, log *slog.Logger) map[string]string {
+	out := map[string]string{}
+	if cfg == nil {
+		return out
+	}
+	for _, srv := range mcp.GlobalServers(cfg, log) {
+		out[srv.Config.Name] = fmt.Sprintf("%s disabled=%t", mcp.Fingerprint(srv.Config), srv.Config.Disabled)
+	}
+	return out
+}
+
+// changedMCPDeclarations lists, sorted, the names whose declaration differs
+// between two snapshots, a name present in only one of them included.
+func changedMCPDeclarations(previous, next map[string]string) []string {
+	var out []string
+	for name, decl := range next {
+		if previous[name] != decl {
+			out = append(out, name)
+		}
+	}
+	for name := range previous {
+		if _, ok := next[name]; !ok {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // mcpRefreshTimeout bounds RefreshMCPServer: the dials of the one server in
@@ -449,7 +518,7 @@ func (m *Manager) ReloadConfigForSession(ctx context.Context, st *State) ([]stri
 		}
 		m.sendAvailableSlashCommands(st.GetID(), st)
 	}
-	if previous == nil || mcpSettingsChanged(previous, next, previousTrust) {
+	if previous == nil || mcpTrustChanged(next, previousTrust) {
 		reloadCtx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
 		defer cancel()
 		m.reloadConfiguredMCPServersExcept(reloadCtx, st)

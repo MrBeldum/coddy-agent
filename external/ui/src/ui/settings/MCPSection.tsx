@@ -494,7 +494,6 @@ export function MCPSection(props: { activeSessionId?: string }) {
           <ul className="mcp-list" data-testid="mcp-list">
             {servers.map((row) => {
               const isOpen = !!expanded[row.name];
-              const editable = !row.readonly;
               return (
                 <li
                   key={row.name}
@@ -597,15 +596,10 @@ export function MCPSection(props: { activeSessionId?: string }) {
                     <button
                       type="button"
                       className="settings-btn settings-btn-icon"
-                      disabled={!editable}
                       onClick={() => openEdit(row)}
-                      title={
-                        editable
-                          ? t("mcp.edit.title", {
-                              origin: originLabel(row.origin, row.source_path),
-                            })
-                          : t("mcp.edit.readonlyTitle")
-                      }
+                      title={t("mcp.edit.title", {
+                        origin: originLabel(row.origin, row.source_path),
+                      })}
                       aria-label={t("mcp.edit.aria", { name: row.name })}
                       data-testid={`mcp-edit-${row.name}`}
                     >
@@ -614,15 +608,11 @@ export function MCPSection(props: { activeSessionId?: string }) {
                     <button
                       type="button"
                       className="settings-btn settings-btn-icon settings-btn-danger"
-                      disabled={!editable || !!busy[row.name]}
+                      disabled={!!busy[row.name]}
                       onClick={() => onDelete(row)}
-                      title={
-                        editable
-                          ? t("mcp.delete.title", {
-                              origin: originLabel(row.origin, row.source_path),
-                            })
-                          : t("mcp.delete.readonlyTitle")
-                      }
+                      title={t("mcp.delete.title", {
+                        origin: originLabel(row.origin, row.source_path),
+                      })}
                       aria-label={t("mcp.delete.aria", { name: row.name })}
                       data-testid={`mcp-delete-${row.name}`}
                     >

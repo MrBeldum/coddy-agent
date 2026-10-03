@@ -196,9 +196,11 @@ Some features live under **`external/`** and define tools that are **not** regis
 
 ### MCP Client (`internal/mcp`)
 
-Connects to external MCP servers from three config levels (`config.yaml`
-`mcp_servers`, the global `${CODDY_HOME}/mcp.json`, the project `./.coddy/mcp.json`;
-later levels override by name) plus servers specified in `session/new`.
+Connects to external MCP servers declared in two files (the global
+`${CODDY_HOME}/mcp.json` and the project `./.coddy/mcp.json`, which overrides a name)
+plus servers specified in `session/new`. `config.yaml` declares none: an old
+`mcp_servers` list is moved into the global file on load (`internal/config/legacy_keys.go`),
+and the session manager watches that file (`ReloadMCPDeclarations`).
 Transports (dispatched by `mcp.Connect` over a shared `transport` interface):
 - stdio - local subprocess, newline-delimited JSON-RPC; the process lifetime is
   transport-owned (the connect ctx only bounds the handshake)
@@ -220,7 +222,7 @@ Loads `SKILL.md` from the default skill folders and then the extra `skills.dirs`
 
 ### Subagents (`internal/subagents`)
 
-Loads subagent definitions - markdown files with YAML frontmatter whose body is a child agent's role - from **`subagents.dirs`** (defaults **`${CODDY_HOME}/agents`**, **`${CWD}/.claude/agents`**, **`${CWD}/.coddy/agents`**; later dirs override earlier ones by name, and the three built-ins **`general`**, **`explore`** and the hidden **`crossreview`** sit below all of them), decides each file's **scope** on canonical paths (**`project`** inside the workspace, **`user`** elsewhere), holds the **trust receipts** for project-scope files (**`TrustStore`**, **`<home>/subagents-trust.json`**, keyed by canonical workspace, name and file digest; policy **`subagents.project_trust`**), bounds concurrent runs with a process-wide **`Limiter`**, and renders the **catalog** (the prompt block for the parent model, the table for **`coddy agents list`**, the rows for **`GET /coddy/subagents`**). It also owns the pure narrowing rules: permission mode never widens, the child's tool set is an intersection with the parent's, timeouts resolve like the pool's. The package knows nothing about sessions or the loop; **`internal/agent/subagent.go`** applies its decisions, runs the child through the session manager and registers the run in **`internal/bgtask`** with **`Pool.Launch`**. Guide: **`docs/features/subagents.md`**.
+Loads subagent definitions - markdown files with YAML frontmatter whose body is a child agent's role - from four default folders, always read (**`${HOME}/.agents/agents`**, **`${CWD}/.agents/agents`**, **`${CODDY_HOME}/agents`**, **`${CWD}/.coddy/agents`**), and then the extra **`subagents.dirs`** (**`config.Subagents.SearchDirs`**; later dirs override earlier ones by name, a folder named twice is read at its last place, and the three built-ins **`general`**, **`explore`** and the hidden **`crossreview`** sit below all of them), decides each file's **scope** on canonical paths (**`project`** inside the workspace, **`user`** elsewhere), holds the **trust receipts** for project-scope files (**`TrustStore`**, **`<home>/subagents-trust.json`**, keyed by canonical workspace, name and file digest; policy **`subagents.project_trust`**), bounds concurrent runs with a process-wide **`Limiter`**, and renders the **catalog** (the prompt block for the parent model, the table for **`coddy agents list`**, the rows for **`GET /coddy/subagents`**). It also owns the pure narrowing rules: permission mode never widens, the child's tool set is an intersection with the parent's, timeouts resolve like the pool's. The package knows nothing about sessions or the loop; **`internal/agent/subagent.go`** applies its decisions, runs the child through the session manager and registers the run in **`internal/bgtask`** with **`Pool.Launch`**. Guide: **`docs/features/subagents.md`**.
 
 ### Hooks (`internal/hooks`)
 

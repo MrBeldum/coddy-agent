@@ -835,11 +835,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.switch.disableAria": "Disable MCP server {name}",
   "mcp.switch.enableAria": "Enable MCP server {name}",
   "mcp.edit.title": "Edit entry ({origin})",
-  "mcp.edit.readonlyTitle":
-    "Defined in config.yaml — edit it in the config sections",
   "mcp.edit.aria": "Edit {name}",
   "mcp.delete.title": "Delete from {origin}",
-  "mcp.delete.readonlyTitle": "Defined in config.yaml — cannot delete here",
   "mcp.delete.aria": "Delete {name}",
   "mcp.note.denied":
     "Project MCP servers are switched off by mcp.project_trust: deny. This entry is never started.",
@@ -858,11 +855,11 @@ export const messagesEn: Record<string, string> = {
   "mcp.editor.save": "Save",
   "mcp.editor.cancel": "Cancel",
   "mcp.discovery.description":
-    "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from config.yaml and ~/.coddy/mcp.json are yours and are never gated.",
+    "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from ~/.coddy/mcp.json are yours and are never gated.",
   "mcp.servers.description":
-    "Model Context Protocol servers from three levels: config.yaml (mcp_servers) and the global ~/.coddy/mcp.json, merged with the local ./.coddy/mcp.json of the project (Cursor-compatible; later levels override by name). Switch off a whole server or individual tools. A global server's switch is saved in the file that defines it, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn.",
+    "Model Context Protocol servers come from two files: the global ~/.coddy/mcp.json and the project's ./.coddy/mcp.json, which overrides a server of the same name (Cursor-compatible). Switch off a whole server or individual tools. A global server's switch is saved in ~/.coddy/mcp.json, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn, and an edit of ~/.coddy/mcp.json made outside this screen within a few seconds.",
   "mcp.empty":
-    "No MCP servers configured. Add one here (saved to the local ./.coddy/mcp.json or the global ~/.coddy/mcp.json) or declare it under mcp_servers in config.yaml.",
+    "No MCP servers configured. Add one here: it is saved to the project's ./.coddy/mcp.json or the global ~/.coddy/mcp.json.",
   "mcp.note.declaredBy":
     "Declared by {path}, which travels with the checkout, so it is neither started nor contacted yet. Approving covers exactly this declaration:",
   "mcp.note.namesOnly":
@@ -879,7 +876,7 @@ export const messagesEn: Record<string, string> = {
   "mcp.fact.contacts": "contacts",
   "mcp.fact.env": "env",
   "mcp.fact.headers": "headers",
-  "mcp.origin.config": "config.yaml",
+  "mcp.fact.reads": "reads",
   "mcp.origin.home": "~/.coddy/mcp.json",
   "mcp.origin.project": "./.coddy/mcp.json",
   // Settings -> Subagents: the definition catalog

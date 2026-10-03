@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -154,16 +155,16 @@ func TestProbeBadCommand(t *testing.T) {
 
 // ---- management operations ----
 
-// writeTestConfig writes a config.yaml with one server and loads it, pinning
-// Paths.Home to the temp dir so the global <home>/mcp.json lands there too.
+// writeTestConfig writes a config.yaml and loads it, pinning Paths.Home to
+// the temp dir so the global <home>/mcp.json lands there too. config.yaml
+// declares no MCP server: they live in the mcp.json files.
 func writeTestConfig(t *testing.T) (*config.Config, string, string) {
 	t.Helper()
 	home := t.TempDir()
 	cfgPath := home + "/config.yaml"
 	yaml := `
-mcp_servers:
-  - name: cfg-srv
-    command: cfg-mcp
+agent:
+  max_turns: 7
 `
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
@@ -182,11 +183,11 @@ func TestListManagedServersScopesAndOrigins(t *testing.T) {
 	globalPath := config.GlobalMCPJSONPath(home)
 	projectPath := config.MCPJSONPath(cwd)
 
-	// Global file adds home-srv and overrides cfg-srv; project file adds
-	// proj-srv and overrides home-srv.
+	// The global file declares home-srv and shared; the project file adds
+	// proj-srv and overrides shared.
 	for name, srv := range map[string]config.MCPJSONServer{
 		"home-srv": {Command: "home-mcp"},
-		"cfg-srv":  {Command: "home-override"},
+		"shared":   {Command: "home-shared"},
 	} {
 		if err := config.UpsertMCPJSONServer(globalPath, name, srv); err != nil {
 			t.Fatal(err)
@@ -194,7 +195,7 @@ func TestListManagedServersScopesAndOrigins(t *testing.T) {
 	}
 	for name, srv := range map[string]config.MCPJSONServer{
 		"proj-srv": {Command: "proj-mcp"},
-		"home-srv": {Command: "proj-override"},
+		"shared":   {Command: "proj-override"},
 	} {
 		if err := config.UpsertMCPJSONServer(projectPath, name, srv); err != nil {
 			t.Fatal(err)
@@ -213,30 +214,33 @@ func TestListManagedServersScopesAndOrigins(t *testing.T) {
 	for _, s := range servers {
 		got[s.Config.Name] = so{s.Scope, s.Origin, s.Config.Command}
 	}
-	if got["cfg-srv"] != (so{ScopeGlobal, OriginHome, "home-override"}) {
-		t.Errorf("cfg-srv = %+v, want global/home with home override", got["cfg-srv"])
+	if got["home-srv"] != (so{ScopeGlobal, OriginHome, "home-mcp"}) {
+		t.Errorf("home-srv = %+v, want global/home", got["home-srv"])
 	}
-	if got["home-srv"] != (so{ScopeLocal, OriginProject, "proj-override"}) {
-		t.Errorf("home-srv = %+v, want local/project with project override", got["home-srv"])
+	if got["shared"] != (so{ScopeLocal, OriginProject, "proj-override"}) {
+		t.Errorf("shared = %+v, want local/project with the project override", got["shared"])
 	}
 	if got["proj-srv"] != (so{ScopeLocal, OriginProject, "proj-mcp"}) {
 		t.Errorf("proj-srv = %+v, want local/project", got["proj-srv"])
 	}
 
-	// Without any overrides the config.yaml entry stays config-owned/global.
-	if _, err := config.DeleteMCPJSONServer(globalPath, "cfg-srv"); err != nil {
+	// Without the project file the global declaration is the one listed.
+	if err := os.Remove(projectPath); err != nil {
 		t.Fatal(err)
 	}
 	servers, _ = ListManagedServers(cfg, cwd)
+	if len(servers) != 2 {
+		t.Fatalf("servers without the project file = %+v, want 2", servers)
+	}
 	for _, s := range servers {
-		if s.Config.Name == "cfg-srv" && (s.Scope != ScopeGlobal || s.Origin != OriginConfig) {
-			t.Errorf("cfg-srv = %s/%s, want global/config", s.Scope, s.Origin)
+		if s.Origin != OriginHome || s.Scope != ScopeGlobal {
+			t.Errorf("%s = %s/%s, want global/home", s.Config.Name, s.Scope, s.Origin)
 		}
 	}
 }
 
 func TestSetServerDisabledPersistsToOwningFile(t *testing.T) {
-	cfg, cfgPath, home := writeTestConfig(t)
+	cfg, _, home := writeTestConfig(t)
 	cwd := t.TempDir()
 	if err := config.UpsertMCPJSONServer(config.GlobalMCPJSONPath(home), "home-srv", config.MCPJSONServer{Command: "home-mcp"}); err != nil {
 		t.Fatal(err)
@@ -272,25 +276,13 @@ func TestSetServerDisabledPersistsToOwningFile(t *testing.T) {
 		t.Errorf("home-srv not disabled in global mcp.json: %+v", entries)
 	}
 
-	// Config-owned toggle lands in config.yaml.
-	if err := SetServerDisabled(cfg, cwd, "cfg-srv", true); err != nil {
-		t.Fatalf("disable config server: %v", err)
-	}
-	reloaded, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(reloaded.MCPServers) != 1 || !reloaded.MCPServers[0].Disabled {
-		t.Errorf("config.yaml servers = %+v, want cfg-srv disabled", reloaded.MCPServers)
-	}
-
 	if err := SetServerDisabled(cfg, cwd, "ghost", true); err == nil {
 		t.Error("unknown server must error")
 	}
 }
 
 func TestSetToolDisabledPersistsToOwningFile(t *testing.T) {
-	cfg, cfgPath, home := writeTestConfig(t)
+	cfg, _, home := writeTestConfig(t)
 	cwd := t.TempDir()
 	if err := config.UpsertMCPJSONServer(config.GlobalMCPJSONPath(home), "home-srv", config.MCPJSONServer{Command: "home-mcp"}); err != nil {
 		t.Fatal(err)
@@ -304,24 +296,13 @@ func TestSetToolDisabledPersistsToOwningFile(t *testing.T) {
 		t.Errorf("home-srv disabledTools = %v, want [echo]", got)
 	}
 
-	if err := SetToolDisabled(cfg, cwd, "cfg-srv", "reverse", true); err != nil {
-		t.Fatalf("disable config tool: %v", err)
-	}
-	reloaded, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := reloaded.MCPServers[0].DisabledTools; len(got) != 1 || got[0] != "reverse" {
-		t.Errorf("config.yaml disabled_tools = %v, want [reverse]", got)
-	}
-
 	// Re-enable removes the entry again.
-	if err := SetToolDisabled(cfg, cwd, "cfg-srv", "reverse", false); err != nil {
+	if err := SetToolDisabled(cfg, cwd, "home-srv", "echo", false); err != nil {
 		t.Fatal(err)
 	}
-	reloaded, _ = config.Load(cfgPath)
-	if got := reloaded.MCPServers[0].DisabledTools; len(got) != 0 {
-		t.Errorf("config.yaml disabled_tools = %v, want empty", got)
+	entries, _ = config.ReadMCPJSONFile(config.GlobalMCPJSONPath(home))
+	if got := entries["home-srv"].DisabledTools; len(got) != 0 {
+		t.Errorf("home-srv disabledTools = %v, want empty", got)
 	}
 }
 
@@ -371,9 +352,6 @@ func TestDeleteServerPerOrigin(t *testing.T) {
 		t.Errorf("home-srv still present: %+v", entries)
 	}
 
-	if err := DeleteServer(cfg, cwd, "cfg-srv"); err == nil {
-		t.Error("config-defined server must refuse API deletion")
-	}
 	if err := DeleteServer(cfg, cwd, "ghost"); err == nil {
 		t.Error("unknown server must error")
 	}
@@ -865,6 +843,20 @@ func TestTrustStoreApprovalIsPerWorkspaceAndDeclaration(t *testing.T) {
 	if strings.Contains(strings.Join(recs[0].EnvKeys, ","), "secret") {
 		t.Fatal("receipt leaked an env value")
 	}
+	// A declaration that reads the environment names what it reads, by name.
+	reader := projectServer("reader", "run-me")
+	reader.Headers = []config.HTTPHeaderConfig{{Name: "X-Data", Value: "${AWS_SECRET_ACCESS_KEY}"}}
+	if err := store.Approve(ws, "/ws/.coddy/mcp.json", reader); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range store.Records(ws) {
+		if rec.Server == "reader" && (len(rec.ReadsEnv) != 1 || rec.ReadsEnv[0] != "AWS_SECRET_ACCESS_KEY") {
+			t.Fatalf("receipt of a reading declaration = %+v", rec)
+		}
+	}
+	if _, err := store.Revoke(ws, "reader"); err != nil {
+		t.Fatal(err)
+	}
 
 	removed, err := store.Revoke(ws, "demo")
 	if err != nil || !removed {
@@ -883,12 +875,11 @@ func TestTrustGateGatesOnlyProjectEntries(t *testing.T) {
 
 	project := ManagedServer{Config: projectServer("demo", "run-me"), Scope: ScopeLocal, Origin: OriginProject}
 	fromHome := ManagedServer{Config: projectServer("demo", "run-me"), Scope: ScopeGlobal, Origin: OriginHome}
-	fromConfig := ManagedServer{Config: projectServer("demo", "run-me"), Scope: ScopeGlobal, Origin: OriginConfig}
 
 	if got := gate.Evaluate(ws, project); got != TrustStateNeedsApproval {
 		t.Fatalf("project entry = %q, want %q", got, TrustStateNeedsApproval)
 	}
-	for _, srv := range []ManagedServer{fromHome, fromConfig} {
+	for _, srv := range []ManagedServer{fromHome} {
 		if got := gate.Evaluate(ws, srv); got != TrustStateAllowed {
 			t.Fatalf("operator-authored entry from %q = %q, want %q", srv.Origin, got, TrustStateAllowed)
 		}
@@ -971,70 +962,6 @@ func TestHelperTrustMarker(t *testing.T) {
 	}
 }
 
-// A config.yaml mutation from the MCP management surface must serialize with
-// the staged config transactions (config_commit / config_rollback / HTTP PUT):
-// they all write the same file, and an unserialized writer could overwrite a
-// transaction mid-flight.
-func TestGlobalServerMutationSerializesWithConfigTransactions(t *testing.T) {
-	cfg, cfgPath, home := writeTestConfig(t)
-	cwd := t.TempDir()
-	paths := config.Paths{Home: home, CWD: home, ConfigPath: cfgPath}
-
-	cmds, err := config.ParseUCICommands([]string{"set agent.max_turns=2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	inReload := make(chan struct{})
-	release := make(chan struct{})
-	commitDone := make(chan error, 1)
-	go func() {
-		_, _, err := config.CommitUCICommandsAndReload(paths, cmds, func() ([]string, error) {
-			close(inReload)
-			<-release
-			return nil, nil
-		})
-		commitDone <- err
-	}()
-	// The staged transaction wrote the file and is parked mid-reload, still
-	// holding the config file lock.
-	<-inReload
-
-	mutDone := make(chan error, 1)
-	go func() {
-		mutDone <- SetServerDisabled(cfg, cwd, "cfg-srv", true)
-	}()
-	select {
-	case <-mutDone:
-		t.Fatal("MCP config mutation entered while a config transaction held the lock")
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	close(release)
-	if err := <-commitDone; err != nil {
-		t.Fatal(err)
-	}
-	if err := <-mutDone; err != nil {
-		t.Fatal(err)
-	}
-
-	// Serialization alone is not enough: the MCP mutation waited behind the
-	// staged commit, so it must have applied on top of the committed file, not
-	// persisted its stale pre-commit snapshot over it. Both changes survive.
-	final, err := config.LoadWithPaths(paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if final.Agent.MaxTurns != 2 {
-		t.Fatalf("MCP mutation erased the staged commit: max_turns = %d, want 2", final.Agent.MaxTurns)
-	}
-	if len(final.MCPServers) != 1 || !final.MCPServers[0].Disabled {
-		t.Fatalf("MCP mutation lost: servers = %+v, want cfg-srv disabled", final.MCPServers)
-	}
-	if !cfg.MCPServers[0].Disabled {
-		t.Fatal("mutation was not mirrored back into the caller's config object")
-	}
-}
-
 // A project-local stdio server follows the session workspace: ${CWD} in the
 // command resolves like it does in the arguments and the environment
 // (coddy-project/coddy-agent#146 kept the placeholder in the loaded config).
@@ -1054,6 +981,45 @@ func TestStdioSpecResolvesPlaceholdersAgainstSessionCWD(t *testing.T) {
 	}
 	if len(env) != 1 || env[0] != "PROJECT=/work/app/src" {
 		t.Fatalf("env = %v", env)
+	}
+}
+
+// A value that names an environment variable starts the server with its
+// value, whichever file declared it, while the declaration keeps the
+// reference (what Settings shows and an approval digests): a secret kept in
+// the environment is never written into the file.
+func TestServerStartsWithTheEnvironmentItsDeclarationNames(t *testing.T) {
+	t.Setenv("CODDY_MCP_TEST_TOKEN", "tok-1")
+	srv := config.MCPServerConfig{
+		Name:    "github",
+		Command: "npx",
+		Args:    []string{"--token=${CODDY_MCP_TEST_TOKEN}", "${CODDY_MCP_TEST_UNSET:-fallback}"},
+		Env:     []config.EnvVarConfig{{Name: "GITHUB_TOKEN", Value: "${CODDY_MCP_TEST_TOKEN}"}},
+		Headers: []config.HTTPHeaderConfig{{Name: "Authorization", Value: "Bearer ${env:CODDY_MCP_TEST_TOKEN}"}},
+	}
+	_, args, env := stdioSpec(srv, "/work/app")
+	if len(args) != 2 || args[0] != "--token=tok-1" || args[1] != "fallback" {
+		t.Fatalf("args = %v", args)
+	}
+	if len(env) != 1 || env[0] != "GITHUB_TOKEN=tok-1" {
+		t.Fatalf("env = %v", env)
+	}
+	if h := expandHeaders(srv, "/work/app"); h["Authorization"] != "Bearer tok-1" {
+		t.Fatalf("headers = %v", h)
+	}
+	if srv.Env[0].Value != "${CODDY_MCP_TEST_TOKEN}" {
+		t.Fatalf("the declaration itself changed: %+v", srv.Env)
+	}
+	// What an approval shows: the variables the declaration reads, by name.
+	if got := ReadsEnvironment(srv); !reflect.DeepEqual(got, []string{"CODDY_MCP_TEST_TOKEN", "CODDY_MCP_TEST_UNSET"}) {
+		t.Fatalf("ReadsEnvironment = %v", got)
+	}
+
+	// A rotated secret is another connection, not the old one reused.
+	before := PoolKey(ManagedServer{Config: srv, Origin: OriginProject}, "/work/app")
+	t.Setenv("CODDY_MCP_TEST_TOKEN", "tok-2")
+	if PoolKey(ManagedServer{Config: srv, Origin: OriginProject}, "/work/app") == before {
+		t.Fatal("the pool key did not follow the value the server starts with")
 	}
 }
 
@@ -1126,15 +1092,16 @@ func TestStatusShowsUntrustedProjectDeclarationWithoutSecretsOrProbe(t *testing.
 }
 
 // A broken <home>/mcp-overrides.json must not take the operator's own servers
-// with it: config.yaml and <home>/mcp.json entries keep their declarations and
-// their switches (a tool switched off stays off), and the project entries,
-// whose switches can no longer be read, stay off until the file is repaired.
+// with it: <home>/mcp.json entries keep their declarations and their switches
+// (a tool switched off stays off), and the project entries, whose switches
+// can no longer be read, stay off until the file is repaired.
 func TestCorruptOverridesKeepGlobalServersAndSwitchProjectOnesOff(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
-	cfg := &config.Config{MCPServers: []config.MCPServerConfig{
-		{Name: "yaml-srv", Command: "yaml-mcp", DisabledTools: []string{"danger"}},
-	}}
+	cfg := &config.Config{}
 	cfg.Paths.Home = home
+	if err := config.UpsertMCPJSONServer(config.GlobalMCPJSONPath(home), "guarded", config.MCPJSONServer{Command: "guarded-mcp", DisabledTools: []string{"danger"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := config.UpsertMCPJSONServer(config.GlobalMCPJSONPath(home), "home-srv", config.MCPJSONServer{Command: "home-mcp"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1156,7 +1123,7 @@ func TestCorruptOverridesKeepGlobalServersAndSwitchProjectOnesOff(t *testing.T) 
 	if len(byName) != 3 {
 		t.Fatalf("tolerant list dropped servers: %+v", managed)
 	}
-	if byName["yaml-srv"].Disabled || byName["home-srv"].Disabled {
+	if byName["guarded"].Disabled || byName["home-srv"].Disabled {
 		t.Fatalf("global servers switched off by a broken overrides file: %+v", managed)
 	}
 	if !byName["proj"].Disabled {
@@ -1167,10 +1134,10 @@ func TestCorruptOverridesKeepGlobalServersAndSwitchProjectOnesOff(t *testing.T) 
 		configs = append(configs, srv.Config)
 	}
 	allowed := config.BuildMCPToolFilter(configs)
-	if allowed("yaml-srv", "danger") {
-		t.Fatal("a tool switched off in config.yaml came back on")
+	if allowed("guarded", "danger") {
+		t.Fatal("a tool switched off in <home>/mcp.json came back on")
 	}
-	if !allowed("yaml-srv", "read") || !allowed("home-srv", "read") {
+	if !allowed("guarded", "read") || !allowed("home-srv", "read") {
 		t.Fatal("global tools hidden by a broken overrides file")
 	}
 	if allowed("proj", "read") {

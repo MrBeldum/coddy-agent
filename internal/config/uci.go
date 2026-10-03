@@ -14,7 +14,7 @@ import (
 )
 
 // UCI-style staged configuration editing. Paths are dotted like OpenWrt's uci
-// CLI ("agent.max_turns", "mcp_servers[name=context7].command") and edits are
+// CLI ("agent.max_turns", "providers[name=local].api_base") and edits are
 // expressed as commands (set / add_list / del_list / delete) that are staged by
 // the session and only applied together by CommitUCICommands.
 
@@ -196,7 +196,7 @@ func unquoteUCIValue(value string) string {
 }
 
 // parseDottedConfigPath tokenizes a uci-like dotted path. Selector segments
-// ("mcp_servers[name=context7]") reuse the slash-path selector grammar, and
+// ("providers[name=local]") reuse the slash-path selector grammar, and
 // dots inside a selector belong to the selector value.
 func parseDottedConfigPath(input string) ([]configPathToken, error) {
 	path := strings.TrimSpace(input)

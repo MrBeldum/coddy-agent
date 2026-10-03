@@ -35,7 +35,7 @@ type configPathToken struct {
 }
 
 // ReadConfigPath reads one path from the active YAML file. Paths are dotted
-// uci-style ("mcp_servers[name=context7].command"); legacy slash paths are
+// uci-style ("providers[name=local].api_base"); legacy slash paths are
 // still accepted. Secret-shaped values are redacted.
 func ReadConfigPath(paths Paths, path string) (*ConfigPathValue, error) {
 	tokens, err := parseAnyConfigPath(path)

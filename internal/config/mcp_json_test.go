@@ -3,28 +3,31 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
 func TestMCPServerConfigDisabledYAML(t *testing.T) {
+	// The YAML shape of a declaration is what an old config.yaml mcp_servers
+	// list is read as when it moves into mcp.json (legacy_keys.go).
 	src := `
-mcp_servers:
-  - name: files
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-filesystem"]
-    disabled: true
-    disabled_tools: ["write_file", "move_file"]
+- name: files
+  command: npx
+  args: ["-y", "@modelcontextprotocol/server-filesystem"]
+  disabled: true
+  disabled_tools: ["write_file", "move_file"]
 `
-	var cfg Config
-	if err := yaml.Unmarshal([]byte(src), &cfg); err != nil {
+	var servers []MCPServerConfig
+	if err := yaml.Unmarshal([]byte(src), &servers); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(cfg.MCPServers) != 1 {
-		t.Fatalf("servers = %d, want 1", len(cfg.MCPServers))
+	if len(servers) != 1 {
+		t.Fatalf("servers = %d, want 1", len(servers))
 	}
-	srv := cfg.MCPServers[0]
+	srv := servers[0]
 	if !srv.Disabled {
 		t.Errorf("Disabled = false, want true")
 	}
@@ -271,5 +274,177 @@ func TestSetMCPJSONToolDisabled(t *testing.T) {
 	entries, _ = ReadMCPJSONFile(path)
 	if got := entries["demo"].DisabledTools; len(got) != 0 {
 		t.Fatalf("DisabledTools = %v, want empty", got)
+	}
+}
+
+// The YAML mcp_servers key is gone: a config that still has it moves its
+// servers into <home>/mcp.json on load, as written (${VAR} references
+// included), leaves a server the file already declares alone, and loses the
+// key; the rest of the file stays byte for byte, and a backup of the old file
+// is kept beside it.
+func TestLegacyMCPServersMoveIntoHomeMCPJSON(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertMCPJSONServer(GlobalMCPJSONPath(home), "kept", MCPJSONServer{Command: "already-there"}); err != nil {
+		t.Fatal(err)
+	}
+	head := "# yaml-language-server: $schema=https://coddy.dev/config.schema.json\nproviders:\n  - name: local\n    type: openai\n    api_key: test-key\nmodels:\n  - model: local/m\nagent:\n  model: local/m\n\n"
+	legacy := "# MCP servers the agent connects to\nmcp_servers:\n  - name: github\n    command: npx\n    args: [\"-y\", \"@modelcontextprotocol/server-github\"]\n    env:\n      - name: GITHUB_TOKEN\n        value: ${GITHUB_TOKEN}\n  - name: docs\n    url: https://example.test/mcp\n    headers:\n      - name: Authorization\n        value: Bearer ${DOCS_TOKEN}\n    disabled_tools: [search]\n  - name: kept\n    command: from-yaml\n"
+	tail := "\n# Rules\nrules:\n  enable: true\n"
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(head+legacy+tail), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_TOKEN", "secret-should-not-be-written")
+
+	if _, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadMCPJSONFile(GlobalMCPJSONPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh := got["github"]; gh.Command != "npx" || !reflect.DeepEqual(gh.Args, []string{"-y", "@modelcontextprotocol/server-github"}) || gh.Env["GITHUB_TOKEN"] != "${GITHUB_TOKEN}" {
+		t.Fatalf("github moved as %+v", gh)
+	}
+	if d := got["docs"]; d.URL != "https://example.test/mcp" || d.Headers["Authorization"] != "Bearer ${DOCS_TOKEN}" || !reflect.DeepEqual(d.DisabledTools, []string{"search"}) {
+		t.Fatalf("docs moved as %+v", d)
+	}
+	if k := got["kept"]; k.Command != "already-there" {
+		t.Fatalf("a server the file declares must stay as it is, got %+v", k)
+	}
+	raw, err := os.ReadFile(GlobalMCPJSONPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret-should-not-be-written") {
+		t.Fatal("an environment value was written into mcp.json")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != head+strings.TrimPrefix(tail, "\n") {
+		t.Fatalf("config.yaml after the move:\n%s\nwant the file without the mcp_servers block, one blank line between the sections around it", after)
+	}
+	backups, _ := filepath.Glob(path + ".bak-*")
+	if len(backups) != 1 {
+		t.Fatalf("want one backup of the old config, got %v", backups)
+	}
+	if b, _ := os.ReadFile(backups[0]); string(b) != head+legacy+tail {
+		t.Fatal("the backup must hold the old file as it was")
+	}
+
+	// A second load finds nothing to move and writes nothing.
+	if _, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path}); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := filepath.Glob(path + ".bak-*"); len(again) != 1 {
+		t.Fatalf("a load with nothing to move made another backup: %v", again)
+	}
+}
+
+// An empty mcp_servers (the old example config had one) is just dropped.
+func TestLegacyEmptyMCPServersKeyIsDropped(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	body := "agent:\n  model: local/m\nmcp_servers: []\nrules:\n  enable: true\n"
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if string(after) != "agent:\n  model: local/m\nrules:\n  enable: true\n" {
+		t.Fatalf("config.yaml after dropping an empty key:\n%s", after)
+	}
+
+	// The key last in the file leaves no blank line behind it.
+	last := "agent:\n  model: local/m\n\nmcp_servers: []\n"
+	if err := os.WriteFile(path, []byte(last), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadWithPaths(Paths{Home: home, CWD: dir, ConfigPath: path}); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != "agent:\n  model: local/m\n" {
+		t.Fatalf("config.yaml after dropping the last key:\n%q", after)
+	}
+	if _, err := os.Stat(GlobalMCPJSONPath(home)); !os.IsNotExist(err) {
+		t.Fatal("an empty key must not create an mcp.json")
+	}
+}
+
+// A moved value keeps meaning what config.yaml made of it: an environment
+// reference stays a reference (mcp.json resolves ${NAME} when the server
+// starts, so no secret is written), a bare $NAME becomes ${NAME}, the "$$"
+// escape becomes a literal "$" ("$${" when a brace follows, mcp.json's own
+// escape), and ${CODDY_HOME} is written out as the home it named.
+func TestLegacyMCPValueKeepsItsMeaning(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	cases := map[string]string{
+		"${GITHUB_TOKEN}":       "${GITHUB_TOKEN}",
+		"Bearer $TOKEN":         "Bearer ${TOKEN}",
+		"pa$$word":              "pa$word",
+		"$${LITERAL}":           "$${LITERAL}",
+		"${CODDY_HOME}/bin/srv": yamlSafePath(home) + "/bin/srv",
+		"${CWD}/tools":          "${CWD}/tools",
+		"plain":                 "plain",
+		"costs 5$":              "costs 5$",
+	}
+	for in, want := range cases {
+		if got := legacyMCPValue(in, home); got != want {
+			t.Errorf("legacyMCPValue(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// And a server starts with the value config.yaml used to give it.
+	t.Setenv("TOKEN", "t0k")
+	t.Setenv("GITHUB_TOKEN", "gh")
+	cwd := filepath.Join(t.TempDir(), "work")
+	for in := range cases {
+		want := ExpandCWD(expandConfigText(in, Paths{Home: home}), cwd)
+		if got := ExpandMCPValue(legacyMCPValue(in, home), cwd); got != want {
+			t.Errorf("%q starts the server with %q, config.yaml gave it %q", in, got, want)
+		}
+	}
+}
+
+// mcp.json values resolve when a server starts: ${CWD} is the session
+// workspace, ${NAME} and ${env:NAME} the environment (${NAME:-default} when
+// it is unset or empty), "$${" a literal "${", and any other "$" is literal.
+func TestExpandMCPValue(t *testing.T) {
+	t.Setenv("MCP_TEST_TOKEN", "abc")
+	t.Setenv("MCP_TEST_EMPTY", "")
+	cwd := filepath.Join(t.TempDir(), "work")
+	cases := []struct{ in, want string }{
+		{"${CWD}/bin", cwd + "/bin"},
+		{"Bearer ${MCP_TEST_TOKEN}", "Bearer abc"},
+		{"${env:MCP_TEST_TOKEN}", "abc"},
+		{"${MCP_TEST_UNSET}", ""},
+		{"${MCP_TEST_UNSET:-fallback}", "fallback"},
+		{"${MCP_TEST_EMPTY:-fallback}", "fallback"},
+		{"${MCP_TEST_TOKEN:-fallback}", "abc"},
+		{"$${MCP_TEST_TOKEN}", "${MCP_TEST_TOKEN}"},
+		{"pa$word $MCP_TEST_TOKEN", "pa$word $MCP_TEST_TOKEN"},
+		{"${unclosed", "${unclosed"},
+		{"plain", "plain"},
+	}
+	for _, c := range cases {
+		if got := ExpandMCPValue(c.in, cwd); got != c.want {
+			t.Errorf("ExpandMCPValue(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	// The variables a value reads, by name, as an approval shows them.
+	if got := MCPValueVariables("${CWD}/x ${A} ${env:B} ${C:-d} $${E} $F ${unclosed"); !reflect.DeepEqual(got, []string{"A", "B", "C"}) {
+		t.Errorf("MCPValueVariables = %v, want [A B C]", got)
 	}
 }
