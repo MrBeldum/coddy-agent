@@ -45,6 +45,8 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 			PlanPrompt:  "plan.md",
 			AskPrompt:   "ask.md",
 		},
+		// instructions.files only adds files after the AGENTS.md and
+		// DESIGN.md documents, which are read without being listed.
 		Instructions: InstructionsJSON{
 			Files: DefaultInstructionFiles(),
 		},

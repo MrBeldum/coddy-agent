@@ -16,6 +16,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/mcp"
+	"github.com/EvilFreelancer/coddy-agent/internal/rules"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/shell"
 )
@@ -464,11 +465,23 @@ func (a *App) refreshFooterModel() {
 }
 
 func (a *App) populateHeader() {
-	var contextFiles []string
-	contextFiles = append(contextFiles, a.config().Instructions.Files...)
 	var skillNames []string
 	rulesCount := 0
-	if st := a.mgr.SessionByID(a.sessionID); st != nil {
+	cfg := a.config()
+	cwd := cfg.Paths.CWD
+	st := a.mgr.SessionByID(a.sessionID)
+	if st != nil {
+		cwd = st.GetCWD()
+	}
+	// The documents the session's prompt carries: the AGENTS.md and DESIGN.md
+	// of the agent home and of the workspace, then the files instructions.files
+	// adds, each once (rules.LoadStanding).
+	var contextFiles []string
+	standing := rules.LoadStanding(cfg.Paths.Home, cwd, session.ResolveInstructionFiles(cfg.Instructions.Files, cwd, cfg.Paths.Home))
+	for _, doc := range append(standing.Docs, standing.User...) {
+		contextFiles = append(contextFiles, doc.Label)
+	}
+	if st != nil {
 		for _, sk := range st.GetSkills() {
 			skillNames = append(skillNames, sk.Name)
 		}

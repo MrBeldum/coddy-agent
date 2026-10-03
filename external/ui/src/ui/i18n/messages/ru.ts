@@ -677,7 +677,7 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.system.instructions.label": "Инструкции",
   "settings.schema.system.instructions.files.label": "Файлы инструкций",
   "settings.schema.system.instructions.files.desc":
-    'Имена файлов относительно рабочего каталога сессии, читаемые как инструкции. По умолчанию ["AGENTS.md"].',
+    "Дополнительные файлы, которые попадают в промпт после документов AGENTS.md и DESIGN.md. Эти документы читаются всегда, из домашнего каталога агента, из папки сессии и из вложенных папок. По умолчанию список пуст, относительный путь читается от папки сессии, а файл, который уже есть в промпте, второй раз не читается.",
   "settings.schema.logger.label": "Логирование",
   "settings.schema.logger.level.label": "Уровень",
   "settings.schema.logger.level.desc":

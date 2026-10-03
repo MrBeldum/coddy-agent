@@ -109,7 +109,9 @@ Top to bottom:
 
 - **Header**: `coddy` (bold accent) + dim version; a dim hint line
   (`escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ctrl+o more`);
-  a dim welcome line; `[Context]` (the files `instructions.files` names) and
+  a dim welcome line; `[Context]` (the documents the session's prompt carries:
+  your and the workspace's `AGENTS.md` and `DESIGN.md` that exist, then the
+  files `instructions.files` adds, each once) and
   `[Skills]` (the loaded skills, the bundled ones first).
   `ctrl+o` expands the full hint list and adds `[Rules]` and `[MCP]` sections;
   `[MCP]` names the servers a session of this workspace starts: the enabled ones

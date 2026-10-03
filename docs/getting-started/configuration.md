@@ -257,6 +257,9 @@ prompts:
   #   {{.CWD}}      - session working directory
   #   {{.Tools}}    - markdown list of tool names and short descriptions for the current mode
   #   {{.Skills}}   - markdown block for active skills (omit section when empty via {{if .Skills}})
+  #   {{.Rules}}    - the AGENTS.md and DESIGN.md of the agent home and of the workspace, then the always-on rules
+  #   {{.Instructions}} - the files of instructions.files. A template that prints neither block still gets the
+  #                   documents and those files: in {{.Instructions}} when it has it, otherwise appended after it
   #   {{.TodoList}} - current session todo checklist as markdown lines (empty until coddy todo tools update state)
   #   {{.Memory}}   - session notes. The memory subagent's report is not rendered here: it travels in the <turn_context> block
   #   {{.UTCNow}}   - date and time in UTC (RFC3339), refreshed whenever the system prompt is rendered
@@ -329,16 +332,16 @@ skills:
 # One project folder is read under the session CWD: the first of .coddy/rules,
 # the shared .agents/rules, .cursor/rules, .claude/rules and .codex/rules that
 # holds a rule file, so another agent's mirror of the same rules is not loaded
-# twice. Your own ~/.coddy/rules joins it in every workspace, and nested
-# **/AGENTS.md are read for the folders a tool enters. Your own
-# ~/.coddy/AGENTS.md is read too, ahead of the project's, and has no key here.
-# .mdc files are read as Cursor rules, .md files as Claude Code rules.
+# twice. Your own ~/.coddy/rules joins it in every workspace. The AGENTS.md and
+# DESIGN.md documents - yours in ~/.coddy, the workspace's, and the nested ones
+# of the folders a tool enters - are read whatever these keys say and have no
+# key here. .mdc files are read as Cursor rules, .md files as Claude Code rules.
 # The rules that always apply go into {{.Rules}} in the system prompt (separate
 # from skills); a rule scoped to paths arrives with the tool result or message
 # that touches a matching path. See docs/features/rules.md.
 rules:
   auto_discover: true
-  systems: []   # optional: user, coddy, agents-dir, cursor, claude, codex, agents
+  systems: []   # optional: user, coddy, agents-dir, cursor, claude, codex ("agents" no longer affects the AGENTS.md files; alone it loads no rule folder)
 
 # MCP servers are not declared here: they live in ~/.coddy/mcp.json (every
 # session) and <workspace>/.coddy/mcp.json (that project, once approved), a

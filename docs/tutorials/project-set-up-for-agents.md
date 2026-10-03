@@ -4,7 +4,7 @@ A repository can carry everything an agent needs to work in it well: the convent
 
 ```text
 my-project/
-  AGENTS.md                       # project docs preamble, in every prompt
+  AGENTS.md                       # the second document layer, in every prompt
   .coddy/
     rules/
       go-style.md                 # a rule, attached once a Go file comes into play
@@ -19,7 +19,7 @@ my-project/
       reviewer.md                 # a subagent definition, held until approved
 ```
 
-1. **`AGENTS.md` at the root.** It is read into every prompt unconditionally, as the project docs preamble ([Project docs preamble](../features/rules.md#project-docs-preamble)), and so is a `DESIGN.md` beside it. Keep it a short map: where things live, how to build and test, what a change must carry. Nested `AGENTS.md` files deeper in the tree are read on demand, the moment a tool enters their folder, and never walked for.
+1. **`AGENTS.md` at the root.** It is read into every prompt unconditionally, as the second layer of the documents after your own ([AGENTS.md and DESIGN.md](../features/rules.md#agentsmd-and-designmd)), and so is a `DESIGN.md` beside it. Keep it a short map: where things live, how to build and test, what a change must carry. Nested `AGENTS.md` files deeper in the tree are read on demand, the moment a tool enters their folder, and never walked for.
 
 2. **Rules in `.coddy/rules/`.** A `.md` file is a Claude Code rule (`paths` gates it, and it is unconditional without them); a `.mdc` file is a Cursor rule (`description`, `globs`, `alwaysApply`). Both dialects are accepted in every rule folder ([Rule file formats](../features/rules.md#rule-file-formats)). Coddy reads one project folder: `.coddy/rules` when the project has it, else the first of `.agents/rules`, `.cursor/rules`, `.claude/rules` and `.codex/rules` that holds a rule file, so rules mirrored for other agents are not loaded twice ([Discovery](../features/rules.md#discovery)). A gated rule reaches the model once, with the tool result or the message that first touches a matching file.
 

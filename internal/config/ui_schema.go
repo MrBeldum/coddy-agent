@@ -581,12 +581,12 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"dir", "agent_prompt", "plan_prompt", "ask_prompt"},
 			nil),
-		"instructions": objectSchema("Instructions", "Files read from the session working directory and appended to the system prompt as project instructions (AGENTS.md-compatible).",
+		"instructions": objectSchema("Instructions", "Files you add to the system prompt as project instructions, after the AGENTS.md and DESIGN.md of the agent home, of the session folder and of the folders a tool enters, which are always read.",
 			map[string]interface{}{
 				"files": map[string]interface{}{
 					"type":        "array",
 					"title":       "Instruction files",
-					"description": "Instruction files, read in the order listed. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. Defaults to [\"AGENTS.md\", \"DESIGN.md\"]; the agent home has its own pair, read ahead of this list whenever it exists.",
+					"description": "Extra instruction files, appended after the AGENTS.md and DESIGN.md documents in the order listed; empty by default. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. A file the prompt already carries is not read twice.",
 					"items":       map[string]interface{}{"type": "string"},
 				},
 			},

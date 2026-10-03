@@ -1706,19 +1706,15 @@ agent:
 
 // TestInstructionsDefaultMatchesTheSchema is the guard against the drift this
 // test was written for: the loader, the UI defaults and the embedded schema all
-// have to name the same pair, or a config.yaml validates against a default the
-// binary does not apply.
+// have to name the same default, or a config.yaml validates against a default
+// the binary does not apply. Since issue #425 that default is nothing: the
+// AGENTS.md and DESIGN.md documents are read without being listed, and the
+// list only adds.
 func TestInstructionsDefaultMatchesTheSchema(t *testing.T) {
-	want := []string{"AGENTS.md", "DESIGN.md"}
 	assertFiles := func(what string, got []string) {
 		t.Helper()
-		if len(got) != len(want) {
-			t.Fatalf("%s = %v, want %v", what, got, want)
-		}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Fatalf("%s = %v, want %v", what, got, want)
-			}
+		if got == nil || len(got) != 0 {
+			t.Fatalf("%s = %#v, want an empty list", what, got)
 		}
 	}
 

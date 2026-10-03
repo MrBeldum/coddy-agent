@@ -666,7 +666,7 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.system.instructions.label": "Instructions",
   "settings.schema.system.instructions.files.label": "Instruction files",
   "settings.schema.system.instructions.files.desc":
-    'Filenames relative to session CWD to read as instructions. Defaults to ["AGENTS.md"].',
+    "Extra files added to the prompt after the AGENTS.md and DESIGN.md documents, which are always read (the agent home's, the session folder's, the nested ones). Empty by default; a relative path is read from the session folder, and a file already in the prompt is not read twice.",
   "settings.schema.logger.label": "Logger",
   "settings.schema.logger.level.label": "Level",
   "settings.schema.logger.level.desc":

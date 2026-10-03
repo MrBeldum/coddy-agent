@@ -194,7 +194,9 @@ sessions:
 prompts:
   # Directory containing prompt templates (Go text/template).
   # Leave empty to use built-in templates. Paths support ~ and ${CWD} (session cwd at render time).
-  # Template fields: {{.CWD}}, {{.Tools}}, {{.Skills}}, {{.TodoList}}, {{.Memory}}, {{.UTCNow}}
+  # Template fields: {{.CWD}}, {{.Tools}}, {{.Skills}}, {{.Rules}} (the AGENTS.md and DESIGN.md of
+  # the agent home and the workspace, then the always-on rules), {{.Instructions}} (the files of
+  # instructions.files), {{.TodoList}}, {{.Memory}}, {{.UTCNow}}
   # (use {{if .TodoList}} ... {{end}} for optional checklist injection; see docs/getting-started/configuration.md)
   # Coddy prepends its identity line ("You are Coddy, ...") to any template that does not
   # already open with it, so gateways can attribute the traffic. See internal/prompts/identity.go
@@ -204,6 +206,20 @@ prompts:
   # agent_prompt: "agent.md"
   # plan_prompt: "plan.md"
   # ask_prompt: "ask.md"
+  # A template that does not print the AGENTS.md and DESIGN.md documents still
+  # gets them: in {{.Instructions}} when it has that slot, otherwise appended
+  # right after it together with the files below.
+
+# AGENTS.md and DESIGN.md are always read, in three layers, and are not named
+# here: ${CODDY_HOME}/AGENTS.md and DESIGN.md, then the session folder's pair,
+# then the pair of every folder on the way down to a file the agent works with.
+# No setting turns them off. instructions.files only ADDS files after them, in
+# the order listed; ${CODDY_HOME}, ${CWD} and ~ expand, a relative entry is read
+# from the session folder, and a file already in the prompt is not read twice.
+# instructions:
+#   files:
+#     - "${CODDY_HOME}/team.md"
+#     - "/srv/agents/house-style.md"
 
 skills:
   # Four folders are always read, lowest -> highest priority (a later one
