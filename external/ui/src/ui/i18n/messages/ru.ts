@@ -828,6 +828,8 @@ export const messagesRu: Record<string, string> = {
   "mcp.error.delete": "Не удалось удалить {name}",
   "mcp.error.invalidEntry": "Некорректная запись.",
   "mcp.error.saveServer": "Не удалось сохранить сервер",
+  "mcp.error.saveChanged":
+    "Запись изменилась в файле после открытия редактора. Закройте его и откройте запись снова, чтобы увидеть, что в ней сейчас.",
   "mcp.error.load": "Не удалось загрузить серверы MCP: {message}",
   "mcp.error.request": "Ошибка запроса MCP: {message}",
   "mcp.discovery.legend": "Обнаружение MCP",
@@ -884,6 +886,8 @@ export const messagesRu: Record<string, string> = {
   "mcp.note.workspaceFallback": "рабочее пространство сессии",
   "mcp.editor.formatDescription":
     "Одна запись mcpServers в формате Cursor: command/args/env (объект), необязательные disabled и disabledTools. Сохраняется в {path}.",
+  "mcp.editor.valuesHint":
+    "Значения env и заголовков не показываются. {placeholder} оставляет сохранённое значение, новое значение заменяет его, а убранный ключ удаляется из записи.",
 
   "mcp.trustOption.ask":
     "Спрашивать — одобрять каждый проектный сервер однократно",

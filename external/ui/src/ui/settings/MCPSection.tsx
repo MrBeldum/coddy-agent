@@ -84,7 +84,7 @@ async function apiSend(
 	path: string,
 	method: "POST" | "PUT" | "DELETE",
 	body?: unknown,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; status?: number }> {
 	const init: RequestInit = { method };
 	const headers = sessionHeaders(sessionID, body !== undefined);
 	if (headers) init.headers = headers;
@@ -95,9 +95,13 @@ async function apiSend(
   if (!res.ok) {
     try {
       const j = (await res.json()) as { error?: { message?: string } };
-      return { ok: false, error: j.error?.message || `HTTP ${res.status}` };
+      return {
+        ok: false,
+        error: j.error?.message || `HTTP ${res.status}`,
+        status: res.status,
+      };
     } catch {
-      return { ok: false, error: `HTTP ${res.status}` };
+      return { ok: false, error: `HTTP ${res.status}`, status: res.status };
     }
   }
   return { ok: true };
@@ -153,15 +157,22 @@ type EditorState = {
   text: string;
   isNew: boolean;
   scope: MCPScope;
+  /**
+   * Fingerprint of the listed declaration an edit started from. The save
+   * sends it back, so the server keeps the values the list hides only for
+   * that declaration and refuses (409) one the file rewrote since.
+   */
+  fingerprint?: string;
 };
 
 /**
  * MCPSection is the Settings -> MCP servers tab: the merged server list from
- * config.yaml, the global mcp.json of the agent home, and the local ./.coddy/mcp.json
- * in the Cursor style — status dot, scope badge, server switch, expandable
+ * the global mcp.json of the agent home and the local ./.coddy/mcp.json in
+ * the Cursor style — status dot, scope badge, server switch, expandable
  * per-tool switches, and a JSON editor for mcp.json entries of either scope.
- * All actions talk to /coddy/mcp* directly; nothing here touches the
- * settings document.
+ * The list never carries an env or header value, only "<redacted>" in its
+ * place, which a save sends back to keep the stored value. All actions talk
+ * to /coddy/mcp* directly; nothing here touches the settings document.
  */
 export function MCPSection(props: { activeSessionId?: string }) {
 	const { t } = useT();
@@ -345,6 +356,7 @@ export function MCPSection(props: { activeSessionId?: string }) {
       text: serverRowToEntryJson(row),
       isNew: false,
       scope: row.origin === "home" ? "global" : "local",
+      ...(row.fingerprint ? { fingerprint: row.fingerprint } : {}),
     });
   };
 
@@ -364,13 +376,23 @@ export function MCPSection(props: { activeSessionId?: string }) {
     setEditorError(null);
     void (async () => {
       try {
+		const query = new URLSearchParams({ scope: editor.scope });
+		if (!editor.isNew && editor.fingerprint) {
+			query.set("fingerprint", editor.fingerprint);
+		}
 		const res = await apiSend(
 			activeSessionId,
-			`/coddy/mcp/${encodeURIComponent(editor.name.trim())}?scope=${editor.scope}`,
+			`/coddy/mcp/${encodeURIComponent(editor.name.trim())}?${query.toString()}`,
           "PUT",
           entry,
         );
-        if (!res.ok) {
+        if (res.status === 409) {
+          // The file holds another declaration than the one this edit
+          // started from: the editor text is stale, so it stays open with
+          // the reason and the list shows what the file holds now.
+          setEditorError(translate("mcp.error.saveChanged"));
+          await loadServers();
+        } else if (!res.ok) {
           setEditorError(res.error || translate("mcp.error.saveServer"));
         } else {
           setEditor(null);
@@ -456,7 +478,13 @@ export function MCPSection(props: { activeSessionId?: string }) {
           </p>
         ) : null}
 
-        {editor && editor.isNew ? (
+        {/*
+          A new entry is edited above the list, and so is one whose row the
+          last reload no longer lists (deleted from its file while the card
+          was open), so its text and the reason of the refused save stay.
+        */}
+        {editor &&
+        (editor.isNew || !servers.some((r) => r.name === editor.name)) ? (
           <MCPEditorCard
             editor={editor}
             error={editorError}
@@ -786,6 +814,14 @@ function MCPEditorCard(props: {
           path: editor.scope === "global" ? globalPath : "./.coddy/mcp.json",
         })}
       </p>
+      {editor.isNew ? null : (
+        <p
+          className="settings-field-desc"
+          data-testid="mcp-editor-values-hint"
+        >
+          {t("mcp.editor.valuesHint", { placeholder: "<redacted>" })}
+        </p>
+      )}
       {error ? <p className="settings-error">{error}</p> : null}
       <div className="mcp-editor-actions">
         <button

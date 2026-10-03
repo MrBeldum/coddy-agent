@@ -186,45 +186,99 @@ func SetToolDisabled(cfg *config.Config, cwd, name, tool string, disabled bool) 
 	return fmt.Errorf("mcp server %q is not declared in an mcp.json file", name)
 }
 
-// UpsertServer creates or updates one entry in the mcp.json file selected by
-// scope: ScopeGlobal writes <home>/mcp.json, ScopeLocal writes
-// <cwd>/.coddy/mcp.json.
-func UpsertServer(cfg *config.Config, cwd, name, scope string, entry config.MCPJSONServer) error {
+// SaveServer writes one entry into the mcp.json file scope selects -
+// ScopeGlobal writes <home>/mcp.json, ScopeLocal <cwd>/.coddy/mcp.json -
+// replacing the entry of that name, in one read-modify-write of the file.
+//
+// The list never shows an env or header value (it shows config.RedactedValue
+// in its place), so a value spelled that way keeps the one the file stores
+// for that name; a key left out is removed, as the entry is replaced whole.
+// shown is the fingerprint of the declaration the client was shown: when it
+// is set and the stored entry is no longer that declaration, nothing is
+// written (ErrDeclarationChanged). A project entry keeps values only against
+// it, so a value the checkout put in the file after the listing is never
+// written back and approved by a save nobody saw it in.
+//
+// A project entry saved under mcp.project_trust ask is approved as written:
+// the operator typing the entry is the decision the trust gate asks for.
+func SaveServer(cfg *config.Config, cwd, name, scope string, entry config.MCPJSONServer, shown string) error {
+	var path string
 	switch scope {
 	case ScopeLocal:
-		if err := config.UpsertMCPJSONServer(config.MCPJSONPath(cwd), name, entry); err != nil {
-			return err
-		}
-		// Writing a project entry through this API is the operator typing the
-		// command themselves, which is exactly the decision the trust gate
-		// asks for; recording it here avoids asking twice for the same thing.
-		return approveOwnDeclaration(cfg, cwd, name)
+		path = config.MCPJSONPath(cwd)
 	case ScopeGlobal:
-		return config.UpsertMCPJSONServer(config.GlobalMCPJSONPath(cfg.Paths.Home), name, entry)
+		path = config.GlobalMCPJSONPath(cfg.Paths.Home)
 	default:
 		return fmt.Errorf("unknown mcp scope %q (use %q or %q)", scope, ScopeGlobal, ScopeLocal)
 	}
-}
-
-// approveOwnDeclaration records trust for a project entry the operator just
-// wrote, reading it back so the digest matches what the loader will produce.
-// Under mcp.project_trust: deny nothing is recorded, because that policy has
-// no approval path at all.
-func approveOwnDeclaration(cfg *config.Config, cwd, name string) error {
-	if cfg.MCP.ResolvedProjectTrust() != config.ProjectTrustAsk {
-		return nil
-	}
-	path := config.MCPJSONPath(cwd)
-	servers, err := config.LoadMCPJSONServers(path)
+	written, err := config.UpdateMCPJSONServer(path, name, func(stored config.MCPJSONServer, exists bool) (config.MCPJSONServer, error) {
+		if shown != "" && (!exists || Fingerprint(config.MCPServerFromJSON(name, stored)) != shown) {
+			return config.MCPJSONServer{}, fmt.Errorf("mcp %s: %w; review it and save again", name, ErrDeclarationChanged)
+		}
+		next, kept, err := keepRedactedValues(name, entry, stored)
+		if err != nil {
+			return config.MCPJSONServer{}, err
+		}
+		if kept && scope == ScopeLocal && shown == "" {
+			return config.MCPJSONServer{}, fmt.Errorf("mcp server %q: keeping a stored value of a project entry needs the fingerprint the list showed for it", name)
+		}
+		return next, nil
+	})
 	if err != nil {
 		return err
 	}
-	for _, srv := range servers {
-		if srv.Name == name {
-			return NewTrustStore(cfg.Paths.Home).Approve(cwd, path, srv)
-		}
+	if scope == ScopeLocal {
+		return approveWritten(cfg, cwd, path, name, written)
 	}
-	return fmt.Errorf("mcp server %q not found in %s after saving it", name, path)
+	return nil
+}
+
+// keepRedactedValues fills every env or header value of entry spelled
+// config.RedactedValue with the value stored holds for that name, and reports
+// whether it kept any. A placeholder for a name stored has no value for is an
+// error naming it: that value was never in the file, so it has to be typed.
+func keepRedactedValues(name string, entry, stored config.MCPJSONServer) (config.MCPJSONServer, bool, error) {
+	kept := false
+	fill := func(kind string, values, from map[string]string) (map[string]string, error) {
+		if len(values) == 0 {
+			return values, nil
+		}
+		out := make(map[string]string, len(values))
+		for key, value := range values {
+			if value != config.RedactedValue {
+				out[key] = value
+				continue
+			}
+			old, ok := from[key]
+			if !ok {
+				return nil, fmt.Errorf("mcp server %q: %s %s is %s, but the file stores no value for it; type the value", name, kind, key, config.RedactedValue)
+			}
+			out[key] = old
+			kept = true
+		}
+		return out, nil
+	}
+	env, err := fill("env", entry.Env, stored.Env)
+	if err != nil {
+		return config.MCPJSONServer{}, false, err
+	}
+	headers, err := fill("header", entry.Headers, stored.Headers)
+	if err != nil {
+		return config.MCPJSONServer{}, false, err
+	}
+	entry.Env, entry.Headers = env, headers
+	return entry, kept, nil
+}
+
+// approveWritten records trust for the project entry a save just wrote: the
+// entry itself, not the file read again, which the checkout may have changed
+// since. Under mcp.project_trust allow or deny nothing is recorded: neither
+// has an approval to record.
+func approveWritten(cfg *config.Config, cwd, path, name string, written config.MCPJSONServer) error {
+	if cfg.MCP.ResolvedProjectTrust() != config.ProjectTrustAsk {
+		return nil
+	}
+	return NewTrustStore(cfg.Paths.Home).Approve(cwd, path, config.MCPServerFromJSON(name, written))
 }
 
 // DeleteServer removes a server from the mcp.json file that declares it.

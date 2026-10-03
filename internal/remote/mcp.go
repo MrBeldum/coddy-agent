@@ -21,6 +21,7 @@ func (h *Handler) MCPServers(ctx context.Context, _ string) ([]mcp.ServerStatus,
 			Transport  string            `json:"transport"`
 			Env        map[string]string `json:"env"`
 			Headers    map[string]string `json:"headers"`
+			Reads      []string          `json:"reads"`
 			SourcePath string            `json:"source_path"`
 		} `json:"items"`
 		Workspace    string `json:"workspace"`
@@ -43,16 +44,22 @@ func (h *Handler) MCPServers(ctx context.Context, _ string) ([]mcp.ServerStatus,
 		for key := range item.Headers {
 			headerKeys = append(headerKeys, key)
 		}
-		// The variables the declaration reads come from its values, by the
-		// same grammar the server resolves them with.
-		decl := config.MCPServerConfig{Command: item.Command, Args: item.Args, URL: item.URL}
-		for key, value := range item.Env {
-			decl.Env = append(decl.Env, config.EnvVarConfig{Name: key, Value: value})
+		// The server names the variables the declaration reads, since it
+		// lists no env or header value (only "<redacted>" in its place). A
+		// server from before that sends the values and no reads: they come
+		// from the values then, by the grammar the server resolves them with.
+		reads := item.Reads
+		if len(reads) == 0 {
+			decl := config.MCPServerConfig{Command: item.Command, Args: item.Args, URL: item.URL}
+			for key, value := range item.Env {
+				decl.Env = append(decl.Env, config.EnvVarConfig{Name: key, Value: value})
+			}
+			for key, value := range item.Headers {
+				decl.Headers = append(decl.Headers, config.HTTPHeaderConfig{Name: key, Value: value})
+			}
+			reads = mcp.ReadsEnvironment(decl)
 		}
-		for key, value := range item.Headers {
-			decl.Headers = append(decl.Headers, config.HTTPHeaderConfig{Name: key, Value: value})
-		}
-		row.Declaration = mcp.DeclarationSummary(item.Transport, item.Command, item.Args, item.URL, envKeys, headerKeys, mcp.ReadsEnvironment(decl), response.Workspace, item.SourcePath)
+		row.Declaration = mcp.DeclarationSummary(item.Transport, item.Command, item.Args, item.URL, envKeys, headerKeys, reads, response.Workspace, item.SourcePath)
 		rows = append(rows, row)
 	}
 	return rows, nil

@@ -815,6 +815,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.error.delete": "Failed to delete {name}",
   "mcp.error.invalidEntry": "Invalid entry.",
   "mcp.error.saveServer": "Failed to save server",
+  "mcp.error.saveChanged":
+    "The entry changed in its file since this editor opened. Cancel and open it again to see what it holds now.",
   "mcp.error.load": "Could not load the MCP servers: {message}",
   "mcp.error.request": "MCP request failed: {message}",
   "mcp.discovery.legend": "MCP discovery",
@@ -870,6 +872,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.note.workspaceFallback": "the session workspace",
   "mcp.editor.formatDescription":
     "One mcpServers entry in Cursor format: command/args/env (object), optional disabled and disabledTools. Saved to {path}.",
+  "mcp.editor.valuesHint":
+    "Env and header values are never shown. {placeholder} keeps the saved value, a new value replaces it, and a key you remove is deleted from the entry.",
 
   "mcp.trustOption.ask": "Ask — approve each project server once",
   "mcp.trustOption.allow": "Allow — start project servers automatically",

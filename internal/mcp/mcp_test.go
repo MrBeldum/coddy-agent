@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -306,11 +307,11 @@ func TestSetToolDisabledPersistsToOwningFile(t *testing.T) {
 	}
 }
 
-func TestUpsertServerScopes(t *testing.T) {
+func TestSaveServerScopes(t *testing.T) {
 	cfg, _, home := writeTestConfig(t)
 	cwd := t.TempDir()
 
-	if err := UpsertServer(cfg, cwd, "glob", ScopeGlobal, config.MCPJSONServer{Command: "glob-mcp"}); err != nil {
+	if err := SaveServer(cfg, cwd, "glob", ScopeGlobal, config.MCPJSONServer{Command: "glob-mcp"}, ""); err != nil {
 		t.Fatalf("upsert global: %v", err)
 	}
 	entries, _ := config.ReadMCPJSONFile(config.GlobalMCPJSONPath(home))
@@ -318,7 +319,7 @@ func TestUpsertServerScopes(t *testing.T) {
 		t.Errorf("global mcp.json = %+v, want glob", entries)
 	}
 
-	if err := UpsertServer(cfg, cwd, "loc", ScopeLocal, config.MCPJSONServer{Command: "loc-mcp"}); err != nil {
+	if err := SaveServer(cfg, cwd, "loc", ScopeLocal, config.MCPJSONServer{Command: "loc-mcp"}, ""); err != nil {
 		t.Fatalf("upsert local: %v", err)
 	}
 	entries, _ = config.ReadMCPJSONFile(config.MCPJSONPath(cwd))
@@ -326,8 +327,144 @@ func TestUpsertServerScopes(t *testing.T) {
 		t.Errorf("project mcp.json = %+v, want loc", entries)
 	}
 
-	if err := UpsertServer(cfg, cwd, "x", "nope", config.MCPJSONServer{Command: "x"}); err == nil {
+	if err := SaveServer(cfg, cwd, "x", "nope", config.MCPJSONServer{Command: "x"}, ""); err == nil {
 		t.Error("unknown scope must error")
+	}
+}
+
+// The list shows "<redacted>" in place of every env and header value, so a
+// save of an edited entry sends it back for the values the operator did not
+// retype: those keep what the file stores, typed values replace theirs, and
+// a key left out goes. A check against the declaration shown and the write it
+// allows read the file once; a refusal writes nothing.
+func TestSaveServerKeepsRedactedValues(t *testing.T) {
+	cfg, _, home := writeTestConfig(t)
+	cwd := t.TempDir()
+	globalPath := config.GlobalMCPJSONPath(home)
+	stored := config.MCPJSONServer{Command: "files-mcp", Env: map[string]string{"TOKEN": "tok-1", "OLD": "gone"}, Headers: map[string]string{"X-Key": "tok-2"}}
+	if err := config.UpsertMCPJSONServer(globalPath, "files", stored); err != nil {
+		t.Fatal(err)
+	}
+	shown := Fingerprint(config.MCPServerFromJSON("files", stored))
+	unchanged := func(t *testing.T, path string, want []byte) {
+		t.Helper()
+		if got, _ := os.ReadFile(path); string(got) != string(want) {
+			t.Fatalf("a refused save rewrote %s:\n%s", path, got)
+		}
+	}
+
+	edit := config.MCPJSONServer{Command: "files-mcp", Env: map[string]string{"TOKEN": config.RedactedValue, "NEW": "fresh"}, Headers: map[string]string{"X-Key": config.RedactedValue}}
+	if err := SaveServer(cfg, cwd, "files", ScopeGlobal, edit, shown); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := config.ReadMCPJSONFile(globalPath)
+	if got := entries["files"]; !reflect.DeepEqual(got.Env, map[string]string{"TOKEN": "tok-1", "NEW": "fresh"}) || !reflect.DeepEqual(got.Headers, map[string]string{"X-Key": "tok-2"}) {
+		t.Fatalf("saved entry = %+v", got)
+	}
+	before, _ := os.ReadFile(globalPath)
+
+	err := SaveServer(cfg, cwd, "files", ScopeGlobal, config.MCPJSONServer{Command: "files-mcp", Headers: map[string]string{"X-Missing": config.RedactedValue}}, "")
+	if err == nil || !strings.Contains(err.Error(), "X-Missing") {
+		t.Fatalf("a placeholder for a value the file lacks = %v, want an error naming it", err)
+	}
+	unchanged(t, globalPath, before)
+
+	if err := SaveServer(cfg, cwd, "files", ScopeGlobal, edit, shown); !errors.Is(err, ErrDeclarationChanged) {
+		t.Fatalf("a save against the declaration as it was before the last save = %v, want ErrDeclarationChanged", err)
+	}
+	unchanged(t, globalPath, before)
+	if err := SaveServer(cfg, cwd, "gone", ScopeGlobal, config.MCPJSONServer{Command: "x"}, shown); !errors.Is(err, ErrDeclarationChanged) {
+		t.Fatalf("a save naming a declaration deleted since = %v, want ErrDeclarationChanged", err)
+	}
+	unchanged(t, globalPath, before)
+
+	// A project entry keeps a value only against the declaration shown, and
+	// the save approves what it wrote.
+	projectPath := config.MCPJSONPath(cwd)
+	project := config.MCPJSONServer{Command: "tracker-mcp", Env: map[string]string{"KEY": "tok-3", "MODE": "${TRACKER_MODE}"}}
+	if err := config.UpsertMCPJSONServer(projectPath, "tracker", project); err != nil {
+		t.Fatal(err)
+	}
+	keep := config.MCPJSONServer{Command: "tracker-mcp", Args: []string{"--verbose"}, Env: map[string]string{"KEY": config.RedactedValue, "MODE": config.RedactedValue}}
+	projectBefore, _ := os.ReadFile(projectPath)
+	if err := SaveServer(cfg, cwd, "tracker", ScopeLocal, keep, ""); err == nil || !strings.Contains(err.Error(), "fingerprint") {
+		t.Fatalf("keeping a project value without the fingerprint = %v, want a refusal naming it", err)
+	}
+	unchanged(t, projectPath, projectBefore)
+	if err := SaveServer(cfg, cwd, "tracker", ScopeLocal, keep, Fingerprint(config.MCPServerFromJSON("tracker", project))); err != nil {
+		t.Fatal(err)
+	}
+	servers, err := ListManagedServers(cfg, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, srv := range servers {
+		if srv.Config.Name != "tracker" {
+			continue
+		}
+		if got := srv.Config.Env; len(got) != 2 || got[0].Value != "tok-3" || got[1].Value != "${TRACKER_MODE}" {
+			t.Fatalf("kept project values = %+v", got)
+		}
+		if state := NewTrustGate(cfg).Evaluate(cwd, srv); state != TrustStateAllowed {
+			t.Fatalf("the saved project entry is %s, want it approved as written", state)
+		}
+	}
+
+	// Typed whole, a project entry needs no fingerprint.
+	if err := SaveServer(cfg, cwd, "typed", ScopeLocal, config.MCPJSONServer{Command: "typed-mcp", Env: map[string]string{"KEY": "typed"}}, ""); err != nil {
+		t.Fatalf("a project entry typed whole = %v", err)
+	}
+}
+
+// Under mcp.project_trust allow a project entry starts without an approval,
+// so a save of one records no receipt.
+func TestSaveServerUnderAllowRecordsNoReceipt(t *testing.T) {
+	cfg, _, home := writeTestConfig(t)
+	cwd := t.TempDir()
+	cfg.MCP.ProjectTrust = config.ProjectTrustAllow
+	if err := SaveServer(cfg, cwd, "free", ScopeLocal, config.MCPJSONServer{Command: "free-mcp"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if recs := NewTrustStore(home).Records(cwd); len(recs) != 0 {
+		t.Fatalf("a save under allow recorded receipts: %+v", recs)
+	}
+}
+
+// A probe error shown next to a server carries what the declaration resolved
+// to - the request URL with a ${NAME} in its query, a credential the server
+// echoed back - and leaves the server the way the list shows the declaration.
+func TestRedactValues(t *testing.T) {
+	t.Setenv("XR_REDACT_KEY", "tok-url-s3cr3t")
+	t.Setenv("XR_REDACT_PATH", "a/b+c=d/tok-path")
+	srv := config.MCPServerConfig{
+		Name:    "docs",
+		URL:     "https://mcp.example/${XR_REDACT_PATH}?api_key=${XR_REDACT_KEY}",
+		Env:     []config.EnvVarConfig{{Name: "TOKEN", Value: "tok-env-literal"}, {Name: "DEBUG", Value: "1"}},
+		Headers: []config.HTTPHeaderConfig{{Name: "Authorization", Value: "Bearer tok-hdr-s3cr3t"}, {Name: "X-Key", Value: "${XR_REDACT_KEY}"}},
+	}
+	cases := []struct{ name, msg, want string }{
+		{"transport error prints the request URL",
+			`Post "https://mcp.example/a/b+c=d/tok-path?api_key=tok-url-s3cr3t": dial tcp: connection refused`,
+			`Post "https://mcp.example/${XR_REDACT_PATH}?api_key=${XR_REDACT_KEY}": dial tcp: connection refused`},
+		{"a refusal echoes the token of a header",
+			`sse connect: http 401 text/plain: invalid token tok-hdr-s3cr3t`,
+			`sse connect: http 401 text/plain: invalid token <redacted>`},
+		{"a server echoes an env value",
+			`jsonrpc error -32000: TOKEN=tok-env-literal rejected`,
+			`jsonrpc error -32000: TOKEN=<redacted> rejected`},
+		{"a variable escaped into a path",
+			`GET /x/` + url.PathEscape("a/b+c=d/tok-path") + `: not found`,
+			`GET /x/<redacted>: not found`},
+		{"short values are ordinary words",
+			`exit status 1`, `exit status 1`},
+		{"nothing to redact", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RedactValues(srv, t.TempDir(), tc.msg); got != tc.want {
+				t.Fatalf("RedactValues = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1152,7 +1289,7 @@ func TestDeleteServerDropsProjectSwitches(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	cfg := &config.Config{}
 	cfg.Paths.Home = home
-	if err := UpsertServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "demo-mcp"}); err != nil {
+	if err := SaveServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "demo-mcp"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := SetServerDisabled(cfg, cwd, "demo", true); err != nil {
@@ -1168,7 +1305,7 @@ func TestDeleteServerDropsProjectSwitches(t *testing.T) {
 	if strings.Contains(string(data), `"demo"`) {
 		t.Fatalf("switches of a deleted server survived: %s", data)
 	}
-	if err := UpsertServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "other-mcp"}); err != nil {
+	if err := SaveServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "other-mcp"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	servers, err := ListManagedServers(cfg, cwd)
@@ -1462,7 +1599,7 @@ func TestFailedDeleteKeepsTheServerSwitchedOff(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	cfg := &config.Config{}
 	cfg.Paths.Home = home
-	if err := UpsertServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "demo-mcp"}); err != nil {
+	if err := SaveServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "demo-mcp"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := SetServerDisabled(cfg, cwd, "demo", true); err != nil {
@@ -1496,7 +1633,7 @@ func TestDeleteServerStandsWhenItsSwitchesCannotBeDropped(t *testing.T) {
 	home, cwd := t.TempDir(), t.TempDir()
 	cfg := &config.Config{}
 	cfg.Paths.Home = home
-	if err := UpsertServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "demo-mcp"}); err != nil {
+	if err := SaveServer(cfg, cwd, "demo", ScopeLocal, config.MCPJSONServer{Command: "demo-mcp"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := SetServerDisabled(cfg, cwd, "demo", true); err != nil {

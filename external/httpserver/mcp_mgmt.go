@@ -125,7 +125,10 @@ func (s *Server) probeMCPServer(ctx context.Context, gate *mcp.TrustGate, srv mc
 	}
 	entry = mcpProbeEntry{origin: srv.Origin, name: srv.Config.Name, workspace: workspace, fingerprint: fp, tools: tools}
 	if err != nil {
-		entry.err = err.Error()
+		// The list shows this error to every client of the API, so what the
+		// declaration resolved to (a ${NAME} in the URL, a value the server
+		// echoed back) leaves it the way the list shows the declaration.
+		entry.err = mcp.RedactValues(srv.Config, cwd, err.Error())
 	}
 	s.mcpProbeMu.Lock()
 	s.mcpProbeCache[key] = entry
@@ -204,16 +207,20 @@ func (s *Server) coddyMCPGet(w http.ResponseWriter, r *http.Request) {
 			Tools:         []mcpToolRow{},
 			DisabledTools: srv.Config.DisabledTools,
 		}
+		// Names only (issue #376): a value never leaves the server, whichever
+		// file declared it. The placeholder in its place is what a save sends
+		// back to keep the stored value (mcp.SaveServer), and reads names the
+		// variables of the process the values take.
 		if len(srv.Config.Env) > 0 {
 			row.Env = make(map[string]string, len(srv.Config.Env))
 			for _, e := range srv.Config.Env {
-				row.Env[e.Name] = e.Value
+				row.Env[e.Name] = config.RedactedValue
 			}
 		}
 		if len(srv.Config.Headers) > 0 {
 			row.Headers = make(map[string]string, len(srv.Config.Headers))
 			for _, h := range srv.Config.Headers {
-				row.Headers[h.Name] = h.Value
+				row.Headers[h.Name] = config.RedactedValue
 			}
 		}
 		if !mcp.SupportedTransport(transport) {
@@ -432,8 +439,11 @@ func (s *Server) coddyMCPToolToggle(disable bool) http.HandlerFunc {
 
 // coddyMCPServerPut creates or updates a server entry in the mcp.json file
 // selected by ?scope=: "local" (default) writes <cwd>/.coddy/mcp.json,
-// "global" writes <home>/mcp.json. Live sessions start it, or start it again
-// from the new declaration.
+// "global" writes <home>/mcp.json. An env or header value of "<redacted>",
+// the placeholder the list shows, keeps the stored value; ?fingerprint= names
+// the declaration the client was shown, and a save against one rewritten
+// since is refused with 409 (mcp.SaveServer). Live sessions start it, or
+// start it again from the new declaration.
 func (s *Server) coddyMCPServerPut(w http.ResponseWriter, r *http.Request) {
 	cwd, ok := s.mcpWorkspace(w, r)
 	if !ok {
@@ -457,8 +467,13 @@ func (s *Server) coddyMCPServerPut(w http.ResponseWriter, r *http.Request) {
 		writeCoddyMCPErr(w, http.StatusBadRequest, "either command or url is required")
 		return
 	}
-	if err := mcp.UpsertServer(s.activeCfg(), cwd, name, scope, entry); err != nil {
-		writeCoddyMCPErr(w, http.StatusBadRequest, err.Error())
+	shown := strings.TrimSpace(r.URL.Query().Get("fingerprint"))
+	if err := mcp.SaveServer(s.activeCfg(), cwd, name, scope, entry, shown); err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, mcp.ErrDeclarationChanged) {
+			code = http.StatusConflict
+		}
+		writeCoddyMCPErr(w, code, err.Error())
 		return
 	}
 	origin := mcp.OriginProject

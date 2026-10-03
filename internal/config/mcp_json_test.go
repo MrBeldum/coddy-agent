@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -203,6 +204,38 @@ func TestUpsertAndDeleteMCPJSONServer(t *testing.T) {
 	entries, _ = ReadMCPJSONFile(path)
 	if len(entries) != 1 {
 		t.Fatalf("entries after delete = %+v, want only other", entries)
+	}
+}
+
+// UpdateMCPJSONServer hands the change the entry the file stores, writes what
+// it returns, and leaves the file as it was when the change refuses.
+func TestUpdateMCPJSONServer(t *testing.T) {
+	path := MCPJSONPath(t.TempDir())
+	if err := UpsertMCPJSONServer(path, "demo", MCPJSONServer{Command: "demo-mcp", Env: map[string]string{"KEY": "kept"}}); err != nil {
+		t.Fatal(err)
+	}
+	written, err := UpdateMCPJSONServer(path, "demo", func(stored MCPJSONServer, exists bool) (MCPJSONServer, error) {
+		if !exists || stored.Env["KEY"] != "kept" {
+			t.Fatalf("stored = %+v, %v", stored, exists)
+		}
+		stored.Args = []string{"--x"}
+		return stored, nil
+	})
+	if err != nil || len(written.Args) != 1 {
+		t.Fatalf("written = %+v, %v", written, err)
+	}
+	before, _ := os.ReadFile(path)
+	refused := errors.New("refused")
+	if _, err := UpdateMCPJSONServer(path, "fresh", func(_ MCPJSONServer, exists bool) (MCPJSONServer, error) {
+		if exists {
+			t.Fatal("a name the file lacks reads as stored")
+		}
+		return MCPJSONServer{}, refused
+	}); !errors.Is(err, refused) {
+		t.Fatalf("refusal = %v", err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Fatalf("a refused change rewrote the file:\n%s", after)
 	}
 }
 

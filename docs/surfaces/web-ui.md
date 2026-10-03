@@ -1214,6 +1214,14 @@ a project-local one awaiting workspace approval):
   locked while the server is disabled.
 - Every row is editable, both scopes. Delete calls `DELETE /coddy/mcp/{name}`, Edit
   opens the JSON editor card inline with the scope pinned to the owning file.
+- The list carries no env or header value, only `<redacted>` in its place, so the
+  editor of a row starts from the placeholders and says under the JSON what they do
+  (`mcp-editor-values-hint`): one left as it is keeps the stored value, a new value
+  replaces it, a removed key is deleted. Save sends the row's `fingerprint`
+  (`PUT /coddy/mcp/{name}?scope=…&fingerprint=…`); when the file holds another
+  declaration by then the server answers `409`, the card stays open with
+  `mcp.error.saveChanged` and the list is read again, and the entry has to be
+  reopened to be edited.
 - Add server opens the editor prefilled with a Cursor-style entry template and
   a Local/Global scope picker (default Local); Save issues
   `PUT /coddy/mcp/{name}?scope=local|global` after client-side validation

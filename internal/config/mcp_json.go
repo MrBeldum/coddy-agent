@@ -186,6 +186,13 @@ func mcpJSONServerToConfig(name string, e MCPJSONServer) MCPServerConfig {
 	return srv
 }
 
+// MCPServerFromJSON is the declaration one mcp.json entry stands for, exactly
+// as LoadMCPJSONServers reads it, so a digest taken of it is the one the
+// listing of that file reports.
+func MCPServerFromJSON(name string, e MCPJSONServer) MCPServerConfig {
+	return mcpJSONServerToConfig(name, e)
+}
+
 // MCPJSONFromServer is the mcp.json entry of a declaration, the inverse of
 // what LoadMCPJSONServers reads: env and headers become objects, the name is
 // the entry's key and is left out.
@@ -236,12 +243,33 @@ func writeMCPJSONFileEntries(path string, entries map[string]MCPJSONServer) erro
 
 // UpsertMCPJSONServer creates or replaces one named entry in an mcp.json file.
 func UpsertMCPJSONServer(path, name string, srv MCPJSONServer) error {
+	_, err := UpdateMCPJSONServer(path, name, func(MCPJSONServer, bool) (MCPJSONServer, error) {
+		return srv, nil
+	})
+	return err
+}
+
+// UpdateMCPJSONServer changes one named entry of an mcp.json file in a single
+// read-modify-write: change receives the entry the file stores (and whether
+// it stores one) and returns the entry to write in its place, which is what
+// UpdateMCPJSONServer returns. An error from change leaves the file as it was,
+// so a check made against the stored entry and the write it allows read the
+// same file.
+func UpdateMCPJSONServer(path, name string, change func(stored MCPJSONServer, exists bool) (MCPJSONServer, error)) (MCPJSONServer, error) {
 	entries, err := ReadMCPJSONFile(path)
 	if err != nil {
-		return err
+		return MCPJSONServer{}, err
 	}
-	entries[name] = srv
-	return writeMCPJSONFileEntries(path, entries)
+	stored, exists := entries[name]
+	next, err := change(stored, exists)
+	if err != nil {
+		return MCPJSONServer{}, err
+	}
+	entries[name] = next
+	if err := writeMCPJSONFileEntries(path, entries); err != nil {
+		return MCPJSONServer{}, err
+	}
+	return next, nil
 }
 
 // DeleteMCPJSONServer removes a named entry; reports whether it existed.

@@ -13,7 +13,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const redactedConfigValue = "<redacted>"
+// RedactedValue stands in for a secret a surface reads but never shows: the
+// config tools print it for a secret setting, and the MCP list prints it for
+// every env and header value (a save that sends it back keeps the stored one).
+const RedactedValue = "<redacted>"
 
 var configPathWriteMu sync.Mutex
 
@@ -618,5 +621,5 @@ func publicConfigScalar(node *yaml.Node, path []string) bool {
 }
 
 func setRedactedNode(node *yaml.Node) {
-	*node = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: redactedConfigValue}
+	*node = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: RedactedValue}
 }

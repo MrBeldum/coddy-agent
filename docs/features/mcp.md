@@ -58,10 +58,11 @@ the server starts:
   no escaping), and a leading `~` is the user's home.
 
 The rules are the same in both files and for a server an ACP client sends. The file keeps the
-reference: Settings shows it as written, and the approval of a project declaration digests
-the reference rather than the value. Since a header value is never displayed, every approval
-surface names the variables a declaration reads (`reads: ${AWS_SECRET_ACCESS_KEY}`), so a
-checkout whose server would send one of them is seen doing so before it is approved. An
+reference, and the approval of a project declaration digests the reference rather than the
+value. Since an env or header value is never displayed (the server list shows `<redacted>` in
+its place, see [Management API and UI](#management-api-and-ui)), every approval surface names
+the variables a declaration reads (`reads: ${AWS_SECRET_ACCESS_KEY}`), so a checkout whose
+server would send one of them is seen doing so before it is approved. An
 approval records those names too, and one given by an earlier release, when `${NAME}` in a
 project file stayed literal, approved a declaration that read nothing: a project server whose
 values name a variable is asked about once more, while an approval of one that reads nothing
@@ -254,6 +255,25 @@ bundled web UI shows them under **Settings -> MCP servers**: status dot per serv
 Cursor-style JSON editor for mcp.json entries with a scope picker (global writes
 `~/.coddy/mcp.json`, local writes `./.coddy/mcp.json`). Global switches persist
 into their defining file; project switches persist in the operator's home.
+
+The list names the environment variables and headers of every declaration but never returns
+their values: each one reads `<redacted>`, whichever file declared it, and `reads` names the
+variables of the Coddy process the values take. The command, its arguments and the URL are
+listed as written, since they are what an approval is about, so a secret belongs in `env` or
+`headers`, or better in the environment as `${NAME}`. A probe error is cleaned the same way
+before it is listed: the URL appears as written, `${NAME}` references included, and a value
+the declaration resolves to (an env or header value, a variable it reads, eight characters or
+longer) reads `<redacted>` even when the server echoed it back. The console's and Telegram's
+`/mcp` show the same cleaned error.
+
+The editor starts from the listed entry, placeholders included. A value left as `<redacted>`
+keeps what the file stores, a new value replaces it, and a key removed from the JSON is
+removed from the entry; a placeholder for a key the file stores no value for is refused, since
+that value has to be typed. A save names the declaration the editor opened by its
+`fingerprint` (`PUT /coddy/mcp/{name}?fingerprint=`): when the file holds another declaration
+by then, the save is refused (`409`) and nothing is written or approved, so reopen the entry.
+A project entry keeps a hidden value only with that fingerprint, which is how a value the
+checkout put in the file after the listing is never written back and approved unseen.
 
 If loading or refreshing the list fails, Settings shows the error and leaves any
 previously loaded servers visible. Refresh remains available for another attempt.

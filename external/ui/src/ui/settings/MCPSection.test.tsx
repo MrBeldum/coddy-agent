@@ -776,3 +776,154 @@ test("a slow failed refresh cannot overwrite a newer reload", async () => {
   expect(screen.queryByTestId("mcp-load-error")).toBeNull();
   expect(screen.getByTestId("mcp-toggle-files-reloaded")).toBeTruthy();
 });
+
+// Issue #376: the list carries "<redacted>" in place of every env and header
+// value. An edit starts from that placeholder, says what it means, and sends
+// the fingerprint of the declaration it started from, so the server keeps the
+// hidden values only for that declaration.
+const redactedListResponse = {
+  object: "coddy.mcp_list",
+  project_trust: "ask",
+  items: [
+    {
+      name: "files",
+      source: "global",
+      origin: "home",
+      transport: "stdio",
+      command: "files-mcp",
+      env: { TOKEN: "<redacted>" },
+      headers: { "X-Key": "<redacted>" },
+      fingerprint: "sha256:shown",
+      enabled: true,
+      status: "connected",
+      tools: [],
+    },
+  ],
+};
+
+function stubRedactedFetch(putStatus: number) {
+  const calls: Array<{ url: string; method: string; body?: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      calls.push({
+        url: String(url),
+        method,
+        ...(typeof init?.body === "string" ? { body: init.body } : {}),
+      });
+      if (method === "PUT" && putStatus !== 200) {
+        return Promise.resolve({
+          ok: false,
+          status: putStatus,
+          json: async () => ({ error: { message: "changed" } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => (method === "GET" ? redactedListResponse : {}),
+      });
+    }),
+  );
+  return calls;
+}
+
+test("an edit keeps the hidden values: placeholder, hint and the fingerprint shown", async () => {
+  const calls = stubRedactedFetch(200);
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+  fireEvent.click(screen.getByTestId("mcp-edit-files"));
+
+  const json = screen.getByTestId("mcp-editor-json") as HTMLTextAreaElement;
+  expect(json.value).toContain('"TOKEN": "<redacted>"');
+  expect(screen.getByTestId("mcp-editor-values-hint").textContent).toContain(
+    "<redacted>",
+  );
+  fireEvent.click(screen.getByTestId("mcp-editor-save"));
+
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "PUT")).toBe(true),
+  );
+  const put = calls.find((c) => c.method === "PUT")!;
+  expect(put.url).toBe(
+    "/coddy/mcp/files?scope=global&fingerprint=sha256%3Ashown",
+  );
+  expect(JSON.parse(put.body ?? "{}")).toMatchObject({
+    env: { TOKEN: "<redacted>" },
+    headers: { "X-Key": "<redacted>" },
+  });
+  await waitFor(() => expect(screen.queryByTestId("mcp-editor")).toBeNull());
+});
+
+test("a new server sends no fingerprint and shows no values hint", async () => {
+  const calls = stubRedactedFetch(200);
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+  fireEvent.click(screen.getByTestId("mcp-add-server"));
+  expect(screen.queryByTestId("mcp-editor-values-hint")).toBeNull();
+  fireEvent.change(screen.getByTestId("mcp-editor-name"), {
+    target: { value: "fresh" },
+  });
+  fireEvent.click(screen.getByTestId("mcp-editor-save"));
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "PUT")).toBe(true),
+  );
+  expect(calls.find((c) => c.method === "PUT")!.url).toBe(
+    "/coddy/mcp/fresh?scope=local",
+  );
+});
+
+test("a save the server refuses as changed (409) says so and reloads the list", async () => {
+  const calls = stubRedactedFetch(409);
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+  fireEvent.click(screen.getByTestId("mcp-edit-files"));
+  const before = calls.filter((c) => c.method === "GET").length;
+  fireEvent.click(screen.getByTestId("mcp-editor-save"));
+
+  await waitFor(() =>
+    expect(
+      document.querySelector(".mcp-editor .settings-error")?.textContent,
+    ).toContain("changed in its file"),
+  );
+  expect(screen.getByTestId("mcp-editor")).toBeTruthy();
+  await waitFor(() =>
+    expect(calls.filter((c) => c.method === "GET").length).toBeGreaterThan(
+      before,
+    ),
+  );
+});
+
+test("a 409 for an entry deleted since the edit began keeps the card and its reason", async () => {
+  let put = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        put = true;
+        return Promise.resolve({
+          ok: false,
+          status: 409,
+          json: async () => ({ error: { message: "changed" } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () =>
+          put ? { ...redactedListResponse, items: [] } : redactedListResponse,
+      });
+    }),
+  );
+  render(<MCPSection />);
+  await screen.findByTestId("mcp-list");
+  fireEvent.click(screen.getByTestId("mcp-edit-files"));
+  fireEvent.click(screen.getByTestId("mcp-editor-save"));
+
+  await waitFor(() => expect(screen.queryByTestId("mcp-list")).toBeNull());
+  expect(screen.getByTestId("mcp-editor")).toBeTruthy();
+  expect(
+    document.querySelector(".mcp-editor .settings-error")?.textContent,
+  ).toContain("changed in its file");
+});

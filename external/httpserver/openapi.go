@@ -2329,7 +2329,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/mcp": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "List MCP servers",
-					"description": "Returns the merged MCP server list from two files: the global **`<home>/mcp.json`** (scope `global`) and the project-local **`.coddy/mcp.json`** (scope `local`); both are Cursor-compatible and the project file overrides a name. config.yaml declares no MCP server: an old **`mcp_servers`** key is moved into `<home>/mcp.json` when the configuration loads. Enabled servers are probed for their tool inventory over their transport (stdio spawn, streamable HTTP with legacy-SSE fallback, or SSE; connect, `tools/list`, close); results are cached until the server definition changes. **`?refresh=1`** forces a re-probe.\n\nA project-local entry arrives with the checkout, so it is **not** probed until it is approved for this workspace (see **POST** `/coddy/mcp/{name}/trust`): such a row comes back with `status: \"needs_approval\"`, `trusted: false`, no tools, and the `command`/`args`/`env`/`url`/`fingerprint` an approval would cover. Under `mcp.project_trust: deny` the status is `denied`.",
+					"description": "Returns the merged MCP server list from two files: the global **`<home>/mcp.json`** (scope `global`) and the project-local **`.coddy/mcp.json`** (scope `local`); both are Cursor-compatible and the project file overrides a name. config.yaml declares no MCP server: an old **`mcp_servers`** key is moved into `<home>/mcp.json` when the configuration loads. Enabled servers are probed for their tool inventory over their transport (stdio spawn, streamable HTTP with legacy-SSE fallback, or SSE; connect, `tools/list`, close); results are cached until the server definition changes. **`?refresh=1`** forces a re-probe.\n\nA project-local entry arrives with the checkout, so it is **not** probed until it is approved for this workspace (see **POST** `/coddy/mcp/{name}/trust`): such a row comes back with `status: \"needs_approval\"`, `trusted: false`, no tools, and the `command`/`args`/`url`, the names of its `env` and `headers`, its `reads` and the `fingerprint` an approval would cover. Under `mcp.project_trust: deny` the status is `denied`.\n\nNo `env` or `headers` value of either file is ever returned: each one reads `<redacted>`, which **PUT** `/coddy/mcp/{name}` takes back as \"keep the stored value\". A probe error shows the URL as written and `<redacted>` for a value the declaration resolves to.",
 					"operationId": "listMCPServers",
 					"parameters": []interface{}{
 						mcpWorkspaceSessionParam(),
@@ -2516,7 +2516,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/mcp/{name}": map[string]interface{}{
 				"put": map[string]interface{}{
 					"summary":     "Create or update an mcp.json MCP server",
-					"description": "Upserts one named entry in an mcp.json file (Cursor format: `env` and `headers` are objects, per-tool switches use `disabledTools`). **`?scope=local`** (default) writes the project **`.coddy/mcp.json`**; **`?scope=global`** writes the user-global **`<home>/mcp.json`**. Either `command` (stdio) or `url` is required; names must not contain `__`. Live sessions start the server, or start it again from the edited declaration, and keep their other servers running. Config.yaml-defined servers are edited via **PUT** `/coddy/config` instead.",
+					"description": "Upserts one named entry in an mcp.json file (Cursor format: `env` and `headers` are objects, per-tool switches use `disabledTools`). **`?scope=local`** (default) writes the project **`.coddy/mcp.json`**; **`?scope=global`** writes the user-global **`<home>/mcp.json`**. Either `command` (stdio) or `url` is required; names must not contain `__`. The body replaces the stored entry whole; an `env` or `headers` value of `<redacted>` (the placeholder **GET** `/coddy/mcp` shows) keeps the value the target file stores for that name, and is a 400 for a name the file stores no value for. **`?fingerprint=`** names the declaration the client was shown: when the file holds another one by then the answer is 409 and nothing is written or approved; a project entry keeps a stored value only with it (400 otherwise). A project entry written under `mcp.project_trust: ask` is approved as written. Live sessions start the server, or start it again from the edited declaration, and keep their other servers running. config.yaml declares no MCP server.",
 					"operationId": "putMCPServer",
 					"parameters": []interface{}{
 						mcpServerNameParam(),
@@ -2525,6 +2525,11 @@ func openAPISpec() map[string]interface{} {
 							"name": "scope", "in": "query", "required": false,
 							"schema":      map[string]interface{}{"type": "string", "enum": []string{"global", "local"}},
 							"description": "Target file: local (default) = ./.coddy/mcp.json, global = <home>/mcp.json.",
+						},
+						map[string]interface{}{
+							"name": "fingerprint", "in": "query", "required": false,
+							"schema":      map[string]string{"type": "string"},
+							"description": "The `fingerprint` **GET** `/coddy/mcp` listed for the entry being edited. The save is refused with 409 when the file holds another declaration by then; required to keep a `<redacted>` value of a project entry.",
 						},
 					},
 					"requestBody": map[string]interface{}{
@@ -2539,6 +2544,7 @@ func openAPISpec() map[string]interface{} {
 						"200": map[string]interface{}{"description": "Server saved."},
 						"400": errorResponseRef(),
 						"404": errorResponseRef(),
+						"409": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
@@ -3161,12 +3167,12 @@ func openAPISpec() map[string]interface{} {
 						"command":     map[string]string{"type": "string"},
 						"args":        map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
 						"url":         map[string]string{"type": "string"},
-						"env":         map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}},
-						"headers":     map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "HTTP headers sent to http/sse servers."},
+						"env":         map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "Names of the environment variables the declaration sets; every value is `<redacted>`."},
+						"headers":     map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "Names of the HTTP headers sent to http/sse servers; every value is `<redacted>`."},
 						"reads":       map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "Names of the environment variables of the Coddy process the declaration's values read (${NAME}), shown by an approval since header values are not."},
 						"enabled":     map[string]interface{}{"type": "boolean", "description": "False when the server-level disabled switch is set."},
 						"status":      map[string]interface{}{"type": "string", "enum": []string{"connected", "error", "disabled", "unsupported", "needs_approval", "denied"}, "description": "Probe result: connected (tools listed), error (probe failed), disabled (switched off), unsupported (unknown transport type), needs_approval (project entry awaiting workspace approval; not probed), denied (project entries switched off by mcp.project_trust)."},
-						"error":       map[string]string{"type": "string", "description": "Probe error message when status is error or unsupported, or why the trust gate refused the entry."},
+						"error":       map[string]string{"type": "string", "description": "Probe error message when status is error or unsupported (the URL as written, `<redacted>` for a value the declaration resolves to), or why the trust gate refused the entry."},
 						"source_path": map[string]string{"type": "string", "description": "File the declaration was read from."},
 						"trusted":     map[string]interface{}{"type": "boolean", "description": "False only for a project entry the workspace trust gate holds back."},
 						"gated":       map[string]interface{}{"type": "boolean", "description": "True for project-local entries, the ones the trust gate applies to."},
@@ -3197,9 +3203,9 @@ func openAPISpec() map[string]interface{} {
 						"type":          map[string]interface{}{"type": "string", "enum": []string{"stdio", "http", "sse"}, "description": "Transport; empty means stdio. Inferred as http for url-only entries."},
 						"command":       map[string]string{"type": "string", "description": "Executable for stdio transport."},
 						"args":          map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
-						"env":           map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}},
+						"env":           map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "Environment of a stdio server; on PUT a value of `<redacted>` keeps the stored one."},
 						"url":           map[string]string{"type": "string", "description": "Remote endpoint for http/sse transports."},
-						"headers":       map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}},
+						"headers":       map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}, "description": "HTTP headers of an http/sse server; on PUT a value of `<redacted>` keeps the stored one."},
 						"disabled":      map[string]interface{}{"type": "boolean"},
 						"disabledTools": map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}},
 					},

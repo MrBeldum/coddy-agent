@@ -98,7 +98,7 @@ func ListStatus(ctx context.Context, cfg *config.Config, cwd string, pool *Pool,
 				tools, probeErr := statusProbe(probeCtx, gate, pool, srv, cwd, log)
 				cancel()
 				if probeErr != nil {
-					row.Status, row.Error = "error", probeErr.Error()
+					row.Status, row.Error = "error", RedactValues(srv.Config, cwd, probeErr.Error())
 				} else {
 					row.Status = "connected"
 				}

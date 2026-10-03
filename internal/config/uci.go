@@ -58,7 +58,7 @@ func (c UCICommand) RedactedString() string {
 		keys = configPathKeys(tokens)
 	}
 	if configSecretPath(keys) && !publicConfigValue(keys, strings.Trim(c.Value, `"'`)) {
-		return c.Op + " " + c.Path + "=" + redactedConfigValue
+		return c.Op + " " + c.Path + "=" + RedactedValue
 	}
 	var decoded interface{}
 	if json.Unmarshal([]byte(c.Value), &decoded) == nil && redactSecretJSON(&decoded, keys) {
@@ -84,7 +84,7 @@ func redactSecretJSON(v *interface{}, path []string) bool {
 				if v, ok := child.(string); ok && publicConfigValue(next, v) {
 					continue
 				}
-				node[key] = redactedConfigValue
+				node[key] = RedactedValue
 				changed = true
 				continue
 			}
@@ -359,8 +359,8 @@ func refuseRedactedPlaceholder(node *yaml.Node, path []string) error {
 	case yaml.ScalarNode:
 		// A map whose every value is a secret (default_headers) takes the
 		// placeholder no better as a whole than entry by entry.
-		if node.Value == redactedConfigValue && (configSecretPath(path) || configSecretPath(appendPath(path, ""))) {
-			return fmt.Errorf("%s is what config_get shows in place of a secret, not its value: stage the real value, or leave the key out of the command", redactedConfigValue)
+		if node.Value == RedactedValue && (configSecretPath(path) || configSecretPath(appendPath(path, ""))) {
+			return fmt.Errorf("%s is what config_get shows in place of a secret, not its value: stage the real value, or leave the key out of the command", RedactedValue)
 		}
 	}
 	return nil
@@ -371,11 +371,11 @@ func refuseRedactedPlaceholder(node *yaml.Node, path []string) error {
 // writes the selector's value into the entry it creates.
 func refuseRedactedSelector(tokens []configPathToken) error {
 	for i, token := range tokens {
-		if token.selector == nil || token.selector.value != redactedConfigValue {
+		if token.selector == nil || token.selector.value != RedactedValue {
 			continue
 		}
 		if configSecretPath(append(configPathKeys(tokens[:i+1]), token.selector.field)) {
-			return fmt.Errorf("%s is what config_get shows in place of a secret, not its value: select the entry by another field", redactedConfigValue)
+			return fmt.Errorf("%s is what config_get shows in place of a secret, not its value: select the entry by another field", RedactedValue)
 		}
 	}
 	return nil

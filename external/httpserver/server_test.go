@@ -14,6 +14,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -5780,5 +5781,213 @@ func TestListingCWDQueryEdges(t *testing.T) {
 	_, _ = ioReadAllClose(res.Body)
 	if status, body := get("/coddy/mcp", pickedSID); status != http.StatusOK || !strings.Contains(body, "picked-only") {
 		t.Fatalf("mcp of a session in the picked folder: status %d body %s", status, body)
+	}
+}
+
+// mcpValuesServer serves the MCP routes over a home whose mcp.json and project
+// mcp.json carry the given servers, the server's default workspace being the
+// home itself.
+func mcpValuesServer(t *testing.T, homeMCP, projectMCP string) (*httptest.Server, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("CODDY_HOME", home)
+	cfgPath := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if homeMCP != "" {
+		if err := os.WriteFile(config.GlobalMCPJSONPath(home), []byte(homeMCP), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if projectMCP != "" {
+		if err := os.MkdirAll(filepath.Join(home, ".coddy"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(config.MCPJSONPath(home), []byte(projectMCP), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), home, nil)
+	ts := httptest.NewServer(New(cfg, mgr, slog.Default(), home).Handler())
+	t.Cleanup(ts.Close)
+	return ts, home
+}
+
+// Issue #376: the list of MCP servers names a server's environment variables
+// and headers but never returns their values, nor a value its probe error
+// carries: a token in either mcp.json, or in the environment a ${NAME}
+// reference reads, must not reach a client of the API.
+func TestCoddyMCPListNeverReturnsConfiguredValues(t *testing.T) {
+	t.Setenv("XR_MCP_URL_KEY", "tok-url-s3cr3t-5")
+	homeMCP := `{"mcpServers": {
+  "files": {"command": "/nonexistent-mcp-binary", "env": {"TOKEN": "tok-env-s3cr3t-1", "MODE": "${XR_MCP_MODE}"}},
+  "docs": {"url": "http://127.0.0.1:1/mcp?api_key=${XR_MCP_URL_KEY}", "headers": {"Authorization": "Bearer tok-hdr-s3cr3t-2"}}
+}}`
+	projectMCP := `{"mcpServers": {
+  "tracker": {"url": "https://tracker.example/mcp", "headers": {"X-Team": "tok-proj-s3cr3t-3"}, "env": {"KEY": "tok-proj-s3cr3t-4"}}
+}}`
+	ts, _ := mcpValuesServer(t, homeMCP, projectMCP)
+	res, err := http.Get(ts.URL + "/coddy/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := ioReadAllClose(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /coddy/mcp = %d %s", res.StatusCode, body)
+	}
+	for _, secret := range []string{"tok-env-s3cr3t-1", "tok-hdr-s3cr3t-2", "tok-proj-s3cr3t-3", "tok-proj-s3cr3t-4", "tok-url-s3cr3t-5"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("the list carries the configured value %q:\n%s", secret, body)
+		}
+	}
+	var list struct {
+		Items []struct {
+			Name    string            `json:"name"`
+			Env     map[string]string `json:"env"`
+			Headers map[string]string `json:"headers"`
+			Reads   []string          `json:"reads"`
+			URL     string            `json:"url"`
+			Error   string            `json:"error"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]int{}
+	for i, it := range list.Items {
+		rows[it.Name] = i
+		for k, v := range it.Env {
+			if v != config.RedactedValue {
+				t.Errorf("%s env %s = %q, want %q", it.Name, k, v, config.RedactedValue)
+			}
+		}
+		for k, v := range it.Headers {
+			if v != config.RedactedValue {
+				t.Errorf("%s header %s = %q, want %q", it.Name, k, v, config.RedactedValue)
+			}
+		}
+	}
+	files := list.Items[rows["files"]]
+	if len(files.Env) != 2 || files.Env["TOKEN"] == "" || !slices.Equal(files.Reads, []string{"XR_MCP_MODE"}) {
+		t.Fatalf("files = %+v, want both names kept and the variable it reads named", files)
+	}
+	docs := list.Items[rows["docs"]]
+	if docs.URL != "http://127.0.0.1:1/mcp?api_key=${XR_MCP_URL_KEY}" || !slices.Equal(docs.Reads, []string{"XR_MCP_URL_KEY"}) {
+		t.Fatalf("docs = %+v, want the URL as written and the variable it reads", docs)
+	}
+	if docs.Error == "" {
+		t.Fatal("the unreachable server reported no error, so its message was not checked")
+	}
+	tracker := list.Items[rows["tracker"]]
+	if tracker.Headers["X-Team"] == "" || tracker.Env["KEY"] == "" {
+		t.Fatalf("tracker = %+v, want the names of a held project server", tracker)
+	}
+}
+
+// An edit made from the list keeps what the client never saw: a value spelled
+// <redacted> keeps the one the file stores, a new value replaces it, a key
+// left out goes. A project entry keeps values only for the declaration the
+// client was shown (?fingerprint=): one the checkout rewrote since is refused
+// with 409 and nothing is written or approved.
+func TestCoddyMCPSaveKeepsRedactedValues(t *testing.T) {
+	homeMCP := `{"mcpServers": {"files": {"command": "files-server", "env": {"TOKEN": "tok-home-1", "OLD": "gone"}, "headers": {"X-Key": "tok-home-2"}}}}`
+	projectMCP := `{"mcpServers": {"tracker": {"command": "tracker-server", "env": {"KEY": "tok-proj-1"}}}}`
+	ts, home := mcpValuesServer(t, homeMCP, projectMCP)
+	put := func(path, body string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := ioReadAllClose(res.Body)
+		return res.StatusCode, string(b)
+	}
+	fingerprints := func() map[string]string {
+		t.Helper()
+		res, err := http.Get(ts.URL + "/coddy/mcp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := ioReadAllClose(res.Body)
+		var list struct {
+			Items []struct {
+				Name        string `json:"name"`
+				Fingerprint string `json:"fingerprint"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(body, &list); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, it := range list.Items {
+			out[it.Name] = it.Fingerprint
+		}
+		return out
+	}
+
+	// Your own entry: kept, replaced, added and removed in one save.
+	status, body := put("/coddy/mcp/files?scope=global",
+		`{"command": "files-server", "env": {"TOKEN": "<redacted>", "NEW": "fresh"}, "headers": {"X-Key": "<redacted>"}}`)
+	if status != http.StatusOK {
+		t.Fatalf("save of your entry = %d %s", status, body)
+	}
+	stored, err := config.ReadMCPJSONFile(config.GlobalMCPJSONPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := stored["files"]
+	if !maps.Equal(files.Env, map[string]string{"TOKEN": "tok-home-1", "NEW": "fresh"}) || files.Headers["X-Key"] != "tok-home-2" {
+		t.Fatalf("stored after the save = %+v", files)
+	}
+
+	// A placeholder for a value the file does not have is refused.
+	if status, body := put("/coddy/mcp/files?scope=global", `{"command": "files-server", "env": {"MISSING": "<redacted>"}}`); status != http.StatusBadRequest || !strings.Contains(body, "MISSING") {
+		t.Fatalf("keeping a value the file lacks = %d %s, want 400 naming it", status, body)
+	}
+
+	// A project entry keeps values only against the declaration shown.
+	keep := `{"command": "tracker-server", "env": {"KEY": "<redacted>"}}`
+	if status, body := put("/coddy/mcp/tracker?scope=local", keep); status != http.StatusBadRequest || !strings.Contains(body, "fingerprint") {
+		t.Fatalf("keeping a project value without the fingerprint = %d %s, want 400", status, body)
+	}
+	shown := fingerprints()["tracker"]
+	before, _ := os.ReadFile(config.MCPJSONPath(home))
+	if err := os.WriteFile(config.MCPJSONPath(home), []byte(`{"mcpServers": {"tracker": {"command": "tracker-server", "env": {"KEY": "rewritten-by-the-checkout"}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := put("/coddy/mcp/tracker?scope=local&fingerprint="+url.QueryEscape(shown), keep); status != http.StatusConflict {
+		t.Fatalf("keeping against a rewritten declaration = %d %s, want 409", status, body)
+	}
+	if after, _ := os.ReadFile(config.MCPJSONPath(home)); string(after) == string(before) || !strings.Contains(string(after), "rewritten-by-the-checkout") {
+		t.Fatalf("the refused save touched the file:\n%s", after)
+	}
+	if err := os.WriteFile(config.MCPJSONPath(home), before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := put("/coddy/mcp/tracker?scope=local&fingerprint="+url.QueryEscape(shown), keep); status != http.StatusOK {
+		t.Fatalf("keeping against the declaration shown = %d %s", status, body)
+	}
+	if after, _ := os.ReadFile(config.MCPJSONPath(home)); !strings.Contains(string(after), "tok-proj-1") {
+		t.Fatalf("the kept project value was lost:\n%s", after)
+	}
+	// The save approves the declaration as the file now holds it.
+	servers, err := config.LoadMCPJSONServers(config.MCPJSONPath(home))
+	if err != nil || len(servers) != 1 {
+		t.Fatalf("project servers = %+v, %v", servers, err)
+	}
+	if !mcp.NewTrustStore(home).Approved(home, servers[0]) {
+		t.Fatal("the saved project entry is not approved")
 	}
 }

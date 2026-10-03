@@ -593,7 +593,7 @@ func TestReadConfigPathShowsAnEmptyDefaultHeader(t *testing.T) {
 	if !ok {
 		t.Fatalf("value = %#v", got.Value)
 	}
-	if headers["User-Agent"] != "" || headers["Authorization"] != redactedConfigValue {
+	if headers["User-Agent"] != "" || headers["Authorization"] != RedactedValue {
 		t.Fatalf("config_get showed %v, want the empty User-Agent as it is and Authorization hidden", headers)
 	}
 }
