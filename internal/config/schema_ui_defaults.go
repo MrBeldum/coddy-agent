@@ -87,7 +87,7 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 		},
 		Subagents: SubagentsJSON{
 			Enabled:               boolPtr(true),
-			Dirs:                  DefaultSubagentDirs(),
+			Dirs:                  []string{}, // the default folders are read beside subagents.dirs
 			ProjectTrust:          SubagentsProjectTrustAsk,
 			MaxConcurrent:         SubagentsDefaultMaxConcurrent,
 			MaxDepth:              intPtr(SubagentsDefaultMaxDepth),

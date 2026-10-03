@@ -82,7 +82,7 @@ func DefaultSkillDirs() []string {
 // order. Every reader of skills goes through it, so the defaults cannot be
 // configured away and an extra directory wins a name over all of them. A
 // folder named twice (an old config that spelled the defaults out) is read
-// once, at its first place (the skills loader drops the repeat).
+// once, at its last place (the skills loader drops the earlier one).
 func (c Skills) SearchDirs() []string {
 	return append(DefaultSkillDirs(), c.Dirs...)
 }

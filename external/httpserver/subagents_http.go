@@ -58,7 +58,7 @@ type subagentCatalog struct {
 func (s *Server) loadSubagentCatalog(cwd string) subagentCatalog {
 	cfg := s.activeCfg()
 	policy := cfg.Subagents.ResolvedProjectTrust()
-	loader := subagents.NewLoader(cfg.Subagents.Dirs, policy)
+	loader := subagents.NewLoader(cfg.Subagents.SearchDirs(), policy)
 	loader.Log = s.log
 	return subagentCatalog{
 		workspace: subagents.CanonicalWorkspace(cwd),
