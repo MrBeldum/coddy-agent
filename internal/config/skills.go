@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,20 +30,26 @@ func ApplySkillsAutoDiscoveryFlag(fs *flag.FlagSet, cfg *Config, val *bool) {
 
 // SystemSkillsSource is the marketplace Coddy is born with: the catalogue that
 // publishes the skills of the standard delivery plus the rest of the same
-// collection. It is not a default that gets written into skills.sources - it
-// sits beside that list, which is why no surface offers to remove it and why a
-// config file never has to be edited to have it. Only an address: nothing is
-// fetched from it until `coddy skills sync` asks.
+// collection. It is not written into any marketplaces.json - it sits beside
+// them, always in effect and always trusted, which is why no surface offers
+// to remove it and why no file has to be edited to have it. Only an address:
+// nothing is fetched from it until `coddy skills sync` asks.
 const SystemSkillsSource = "EvilFreelancer/rpa-skills"
 
-// Skills is the YAML skills section (key skills).
+// Skills is the YAML skills section (key skills). The remote marketplaces
+// are declared in <home>/marketplaces.json and the project's
+// .coddy/marketplaces.json (marketplaces_json.go), not here; an old sources
+// key is moved into the home file on load.
 type Skills struct {
 	Dirs []string `yaml:"dirs"`
 
-	// Sources lists remote skill sources to install from (GitHub repos, git URLs,
-	// or an http(s) URL to an agents-standard marketplace.json). Fetched on demand
-	// via `coddy skills sync` (never automatically), materialized into ManagedDir.
-	Sources []string `yaml:"sources"`
+	// ProjectTrust is the trust policy for the project's
+	// .coddy/marketplaces.json, which arrives with the checkout: ask (default)
+	// keeps its sources and marketplaces out of every sync until the operator
+	// approves that exact entry for that workspace, allow treats them like the
+	// operator's own, deny never reads the file. The skill folders of a
+	// project (.coddy/skills, .agents/skills) are not affected.
+	ProjectTrust string `yaml:"project_trust"`
 
 	// AutoDiscovery enables the model-driven load_skill tool: the agent may pull a
 	// catalogued skill's full instructions into a turn on its own when the request
@@ -89,9 +96,7 @@ func (c Skills) SearchDirs() []string {
 
 // ApplyDefaults leaves Dirs as the file has it: skills.dirs only adds
 // directories to DefaultSkillDirs (see SearchDirs), so an absent key means no
-// extra ones. Sources stays exactly as the file has it too: the marketplace of
-// the standard delivery is a system source (SystemSkillsSource), listed beside
-// this key rather than inside it.
+// extra ones.
 func (c *Skills) ApplyDefaults(coddyHome string, expandCODDYHome func(string) string) {
 	if c.AutoDiscovery == nil {
 		v := true
@@ -113,9 +118,32 @@ func (c *Skills) AutoDiscoveryEnabled() bool {
 	return *c.AutoDiscovery
 }
 
-// Validate accepts any layout produced by ApplyDefaults.
+// ResolvedProjectTrust returns ProjectTrust with a safe default of ask, so an
+// empty or unknown value never widens the policy.
+func (c Skills) ResolvedProjectTrust() string {
+	switch v := strings.ToLower(strings.TrimSpace(c.ProjectTrust)); v {
+	case ProjectTrustAsk, ProjectTrustAllow, ProjectTrustDeny:
+		return v
+	default:
+		return ProjectTrustAsk
+	}
+}
+
+// Validate normalises ProjectTrust and rejects an unknown value.
 func (c *Skills) Validate() error {
-	return nil
+	v := strings.ToLower(strings.TrimSpace(c.ProjectTrust))
+	if v == "" {
+		c.ProjectTrust = ""
+		return nil
+	}
+	switch v {
+	case ProjectTrustAsk, ProjectTrustAllow, ProjectTrustDeny:
+		c.ProjectTrust = v
+		return nil
+	default:
+		return fmt.Errorf("project_trust: unknown value %q (use %q, %q, or %q)",
+			c.ProjectTrust, ProjectTrustAsk, ProjectTrustAllow, ProjectTrustDeny)
+	}
 }
 
 func expandSkillsHome(path string) string {

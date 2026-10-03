@@ -1842,3 +1842,81 @@ func TestSkillsDirsAddToTheFourDefaults(t *testing.T) {
 		t.Fatalf("a set skills.dirs must come after the defaults, got %q", got)
 	}
 }
+
+// Skill marketplaces are declared in two files of one shape: the operator's
+// <home>/marketplaces.json and the project's .coddy/marketplaces.json. A
+// missing file declares nothing; one that does not parse is an error, so
+// nothing writes over what it holds.
+func TestMarketplacesFileReadAndWrite(t *testing.T) {
+	home, cwd := t.TempDir(), t.TempDir()
+	if got := config.GlobalMarketplacesPath(home); got != filepath.Join(home, "marketplaces.json") {
+		t.Fatalf("GlobalMarketplacesPath = %q", got)
+	}
+	if got := config.ProjectMarketplacesPath(cwd); got != filepath.Join(cwd, ".coddy", "marketplaces.json") {
+		t.Fatalf("ProjectMarketplacesPath = %q", got)
+	}
+	empty, err := config.ReadMarketplacesFile(config.ProjectMarketplacesPath(cwd))
+	if err != nil || len(empty.Sources) != 0 || len(empty.Marketplaces) != 0 {
+		t.Fatalf("a missing file = %+v, %v", empty, err)
+	}
+	want := config.MarketplacesFile{
+		Sources:      []string{"owner/whole"},
+		Marketplaces: []config.DeclaredMarketplace{{Name: "catalog", Source: "owner/catalog"}},
+	}
+	path := config.ProjectMarketplacesPath(cwd)
+	if err := config.WriteMarketplacesFile(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := config.ReadMarketplacesFile(path)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("read back %+v, %v; want %+v", got, err, want)
+	}
+	if err := os.WriteFile(path, []byte(`{"sources": [`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.ReadMarketplacesFile(path); err == nil {
+		t.Fatal("a file that does not parse must be an error")
+	}
+}
+
+// skills.sources left config.yaml: a config that still has it hands the list
+// to <home>/marketplaces.json on load (a source the file has already, in any
+// case, and the system source are not repeated), the key and its comment
+// leave the file, the rest of the section stays, and one backup of the old
+// file covers this move and the mcp_servers one.
+func TestLegacySkillsSourcesMoveIntoHomeMarketplacesJSON(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := config.WriteMarketplacesFile(config.GlobalMarketplacesPath(home), config.MarketplacesFile{Sources: []string{"Owner/Kept"}}); err != nil {
+		t.Fatal(err)
+	}
+	body := "agent:\n  model: local/m\nskills:\n  dirs:\n    - /opt/team-skills\n  # Remote marketplaces\n  sources:\n    - owner/kept\n    - owner/new\n    - " + config.SystemSkillsSource + "\n  auto_discovery: false\nmcp_servers: []\nrules:\n  enable: true\n"
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadWithPaths(config.Paths{Home: home, CWD: dir, ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Skills.AutoDiscoveryEnabled() || len(cfg.Skills.Dirs) != 1 {
+		t.Fatalf("the rest of the skills section was lost: %+v", cfg.Skills)
+	}
+	got, err := config.ReadMarketplacesFile(config.GlobalMarketplacesPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Sources, []string{"Owner/Kept", "owner/new"}) {
+		t.Fatalf("home marketplaces.json sources = %v", got.Sources)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "agent:\n  model: local/m\nskills:\n  dirs:\n    - /opt/team-skills\n  auto_discovery: false\nrules:\n  enable: true\n"; string(after) != want {
+		t.Fatalf("config.yaml after the moves:\n%s\nwant:\n%s", after, want)
+	}
+	if backups, _ := filepath.Glob(path + ".bak-*"); len(backups) != 1 {
+		t.Fatalf("want one backup for both moves, got %v", backups)
+	}
+}

@@ -299,12 +299,16 @@
             "type": "string"
           }
         },
-        "sources": {
-          "type": "array",
-          "description": "Remote skill sources installed on demand with `coddy skills sync` (never fetched automatically). Each entry is a GitHub repo (owner/repo[@ref]), a git URL, or an http(s) URL to an agents-standard marketplace.json. Materialized into ${CODDY_HOME}/skills. EvilFreelancer/rpa-skills, the marketplace the bundled rpa-* skills are published from, is always in effect as a system source and is not listed here. See https://coddy.dev/docs/features/skills.",
-          "items": {
-            "type": "string"
-          }
+        "project_trust": {
+          "type": "string",
+          "title": "Project marketplaces",
+          "description": "Trust policy for the project's .coddy/marketplaces.json, which travels with the checkout: \"ask\" (default) leaves its sources and marketplaces out of every sync until the operator approves that exact entry for that workspace; \"allow\" treats them like the operator's own ${CODDY_HOME}/marketplaces.json; \"deny\" never uses them (they are listed as switched off). What they install goes to ${CODDY_HOME}/skills. The project's skill folders (.coddy/skills, .agents/skills) are not affected. Skill marketplaces are not declared in config.yaml: they live in ${CODDY_HOME}/marketplaces.json and the project's .coddy/marketplaces.json, and an old skills.sources list is moved into the home file on load. See https://coddy.dev/docs/features/skills#project-marketplaces-and-trust.",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ],
+          "default": "ask"
         },
         "auto_discovery": {
           "type": [
@@ -658,7 +662,7 @@
         },
         "project_trust": {
           "type": "string",
-          "description": "Trust policy for definitions found inside the workspace, which travel with the checkout: \"ask\" loads them but refuses to spawn one until the operator approved that exact file for that workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust with the session workspace as cwd); \"allow\" treats them like the operator's own files; \"deny\" never reads them.",
+          "description": "Trust policy for definitions found inside the workspace, which travel with the checkout: \"ask\" loads them but refuses to spawn one until the operator approved that exact file for that workspace (the shield in Settings -> Subagents, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust with the session workspace as cwd); \"allow\" treats them like the operator's own files; \"deny\" never reads them.",
           "default": "ask",
           "enum": [
             "ask",

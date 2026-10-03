@@ -129,8 +129,8 @@ def _render_config_into(
         # MCP servers live in <home>/mcp.json, never in config.yaml.
         write_home_mcp_json(home, mcp_servers)
     if skill_sources:
-        assert "skills:\n  dirs:" in resolved, "config.demo.yaml lost its skills.dirs line"
-        resolved = resolved.replace("skills:\n  dirs:", "skills:\n  sources: " + json.dumps(skill_sources) + "\n  dirs:")
+        # Skill sources live in <home>/marketplaces.json, never in config.yaml.
+        (home / "marketplaces.json").write_text(json.dumps({"sources": skill_sources}, indent=2) + "\n")
     resolved = resolved.replace(
         'model: "rpa/qwen3.6-35b-a3b"\n  max_turns', f'model: "{model}"\n  max_turns'
     )

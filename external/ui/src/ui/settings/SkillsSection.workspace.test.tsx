@@ -19,7 +19,7 @@ const schema = {
 } as unknown as JsonSchema;
 
 const BY_FOLDER: Record<string, string[]> = {
-  "/projects/data": ["rgs-confluence"],
+  "/projects/data": ["dat-report"],
   "/projects/other": [],
 };
 
@@ -56,7 +56,7 @@ test("the installed list follows the workspace of the chat", async () => {
       workspacePath="/projects/data"
     />,
   );
-  await waitFor(() => expect(screen.getByText("rgs-confluence")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("dat-report")).toBeTruthy());
 
   rerender(
     <SkillsSection
@@ -66,7 +66,7 @@ test("the installed list follows the workspace of the chat", async () => {
       workspacePath="/projects/other"
     />,
   );
-  await waitFor(() => expect(screen.queryByText("rgs-confluence")).toBeNull());
+  await waitFor(() => expect(screen.queryByText("dat-report")).toBeNull());
 });
 
 test("a list asked for a folder left since does not paint over the current one", async () => {
@@ -117,7 +117,7 @@ test("a list asked for a folder left since does not paint over the current one",
   await new Promise((resolve) => setTimeout(resolve, 20));
   releaseData();
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(screen.queryByText("rgs-confluence")).toBeNull();
+  expect(screen.queryByText("dat-report")).toBeNull();
 });
 
 test("deleting a project skill asks in the workspace the list was read for", async () => {
@@ -130,14 +130,14 @@ test("deleting a project skill asks in the workspace the list was read for", asy
       workspacePath="/projects/data"
     />,
   );
-  await waitFor(() => expect(screen.getByText("rgs-confluence")).toBeTruthy());
-  fireEvent.click(screen.getByRole("button", { name: /rgs-confluence/i }));
+  await waitFor(() => expect(screen.getByText("dat-report")).toBeTruthy());
+  fireEvent.click(screen.getByRole("button", { name: /dat-report/i }));
   await waitFor(() =>
     expect(
       fetchMock.mock.calls.some(
         ([input, init]) =>
           (init as RequestInit | undefined)?.method === "DELETE" &&
-          String(input) === "/coddy/skills/rgs-confluence?cwd=%2Fprojects%2Fdata",
+          String(input) === "/coddy/skills/dat-report?cwd=%2Fprojects%2Fdata",
       ),
     ).toBe(true),
   );

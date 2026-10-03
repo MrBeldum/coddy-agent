@@ -6,7 +6,7 @@ import {
   type FieldOverride,
 } from "./SchemaForm";
 import { LegendWithHint } from "./FieldHint";
-import { IconCheck, IconSync } from "./icons";
+import { MarketplacesEditor } from "./MarketplacesEditor";
 import { Switch } from "./Switch";
 import { SwitchField } from "./SwitchField";
 import { filterInstallableMatches } from "./installableMatches";
@@ -73,16 +73,6 @@ async function fetchAvailable(): Promise<AvailablePlugin[]> {
   return data.items ?? [];
 }
 
-// The marketplaces Coddy brings itself. They are in effect without being in
-// config.yaml, so the editor below shows them but offers no way to edit or
-// remove one.
-async function fetchSystemSources(): Promise<string[]> {
-  const res = await fetch("/coddy/skills/sources");
-  if (!res.ok) return [];
-  const data = (await res.json()) as { system?: string[] };
-  return data.system ?? [];
-}
-
 async function apiSend(
   path: string,
   method: "POST" | "DELETE",
@@ -126,168 +116,22 @@ function IconDownload() {
   );
 }
 
-// Flash key for the "Sync all" action (distinct from any source string).
-const SYNC_ALL_KEY = " all";
-
 /**
- * SourcesEditor renders the `skills.sources` array (config-backed via onChange)
- * with a per-marketplace Sync button and, in the footer, Add (left) plus
- * Sync all (right). It replaces the generic array control via SchemaForm's
- * fieldOverride hook.
- */
-function SourcesEditor(props: {
-  value: string[];
-  system: string[];
-  onChange: (next: string[]) => void;
-  onSyncOne: (source: string) => void;
-  onSyncAll: () => void;
-  syncing: boolean;
-  flash: string | null;
-}) {
-  const { value, system, onChange, onSyncOne, onSyncAll, syncing, flash } =
-    props;
-  const { t } = useT();
-  const sources = Array.isArray(value) ? value : [];
-  // A config that repeats a built-in marketplace must not show it twice: the
-  // server lists it once, and so does this. Rows are skipped where they are,
-  // never compacted into a new array - two rows can hold the same text (click
-  // Add twice) and an index recovered by value would then edit the wrong one.
-  const lowerSystem = new Set(system.map((s) => s.trim().toLowerCase()));
-  return (
-    <fieldset className="settings-fieldset">
-      <LegendWithHint
-        label={t("skills.sources.legend")}
-        description={t("skills.sources.description")}
-      />
-      <ul className="settings-array">
-        {system.map((src) => (
-          <li key={`system-${src}`} className="settings-array-row">
-            <div className="settings-array-row-field">
-              <input
-                className="settings-input"
-                type="text"
-                value={src}
-                readOnly
-                disabled
-                title={t("skills.sources.systemTitle")}
-              />
-            </div>
-            <button
-              type="button"
-              className={`settings-btn settings-btn-icon${flash === src ? " is-synced" : ""}`}
-              disabled={syncing}
-              onClick={() => onSyncOne(src)}
-              title={
-                flash === src
-                  ? t("skills.sources.syncedTitle")
-                  : t("skills.sources.syncTitle", { source: src })
-              }
-              aria-label={t("skills.sources.syncAria")}
-              data-testid={`skills-sync-system-${src}`}
-            >
-              {flash === src ? <IconCheck /> : <IconSync />}
-            </button>
-            <button
-              type="button"
-              className="settings-btn settings-btn-icon settings-btn-danger settings-array-remove"
-              disabled
-              title={t("skills.sources.systemTitle")}
-              aria-label={t("skills.sources.removeAria")}
-              data-testid={`skills-remove-system-${src}`}
-            >
-              <IconTrash />
-            </button>
-          </li>
-        ))}
-        {sources.map((src, i) =>
-          lowerSystem.has(src.trim().toLowerCase()) ? null : (
-            <li key={i} className="settings-array-row">
-              <div className="settings-array-row-field">
-                <input
-                  className="settings-input"
-                  type="text"
-                  value={src}
-                  placeholder={t("skills.sources.placeholder")}
-                  onChange={(e) => {
-                    const next = [...sources];
-                    next[i] = e.target.value;
-                    onChange(next);
-                  }}
-                />
-              </div>
-              <button
-                type="button"
-                className={`settings-btn settings-btn-icon${flash === src ? " is-synced" : ""}`}
-                disabled={syncing || !src.trim()}
-                onClick={() => onSyncOne(src)}
-                title={
-                  flash === src
-                    ? t("skills.sources.syncedTitle")
-                    : t("skills.sources.syncTitle", { source: src.trim() })
-                }
-                aria-label={t("skills.sources.syncAria")}
-                data-testid={`skills-sync-source-${i}`}
-              >
-                {flash === src ? <IconCheck /> : <IconSync />}
-              </button>
-              <button
-                type="button"
-                className="settings-btn settings-btn-icon settings-btn-danger settings-array-remove"
-                onClick={() => onChange(sources.filter((_, j) => j !== i))}
-                title={t("skills.sources.removeTitle")}
-                aria-label={t("skills.sources.removeAria")}
-              >
-                <IconTrash />
-              </button>
-            </li>
-          ),
-        )}
-      </ul>
-      <div className="skills-sources-footer">
-        <button
-          type="button"
-          className="settings-btn"
-          onClick={() => onChange([...sources, ""])}
-        >
-          {t("skills.sources.add")}
-        </button>
-        <button
-          type="button"
-          className={`settings-btn skills-sync-all-btn${flash === SYNC_ALL_KEY ? " is-synced" : ""}`}
-          disabled={syncing || sources.length + system.length === 0}
-          onClick={onSyncAll}
-          title={t("skills.sources.syncAllTitle")}
-          data-testid="skills-sync-all"
-        >
-          {flash === SYNC_ALL_KEY ? (
-            <>
-              <IconCheck />
-              <span>{t("skills.sources.completed")}</span>
-            </>
-          ) : (
-            <>
-              <IconSync />
-              <span>{t("skills.sources.syncAll")}</span>
-            </>
-          )}
-        </button>
-      </div>
-    </fieldset>
-  );
-}
-
-/**
- * SkillsSection is the combined Skills tab: the schema-driven `skills.dirs`
- * editor, a config-backed remote-sources editor (add/list/remove with a
- * per-source and a Sync-all button), and the installed-skills list with
- * versions, an iOS-style enable switch, a Download-update action when a newer
- * version exists, and a Delete action (disabled for bundled read-only skills).
+ * SkillsSection is the combined Skills tab: the schema-driven `skills` editor
+ * (extra directories, the project marketplace trust policy), the marketplaces
+ * list (MarketplacesEditor, API-driven: ~/.coddy/marketplaces.json and the
+ * workspace's .coddy/marketplaces.json, with a per-entry and a Sync-all
+ * button and the trust shield), and the installed-skills list with versions,
+ * an iOS-style enable switch, a Download-update action when a newer version
+ * exists, and a Delete action (disabled for bundled read-only skills).
  */
 export function SkillsSection(props: {
   schema: JsonSchema;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
   workspacePath?: string | undefined;
+  /** The viewed session, whose workspace's marketplaces are listed. */
+  activeSessionId?: string | undefined;
 }) {
   const { schema, value, onChange } = props;
   const workspacePath = props.workspacePath;
@@ -298,25 +142,16 @@ export function SkillsSection(props: {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  // Transient "synced" flash on a Sync button (SYNC_ALL_KEY or a source string).
-  const [flash, setFlash] = useState<string | null>(null);
   // Marketplace browse/install control.
   const [available, setAvailable] = useState<AvailablePlugin[] | null>(null);
   const [availableLoading, setAvailableLoading] = useState(false);
   const [installQuery, setInstallQuery] = useState("");
-  const [systemSources, setSystemSources] = useState<string[]>([]);
   const [installBusy, setInstallBusy] = useState<Record<string, boolean>>({});
   // Name of a just-installed skill to briefly highlight in the list. We do not
   // scroll to it: the floating install menu never reflows the list, so the
   // user stays exactly where they are; the status line and the flash confirm
   // the install without a jarring jump.
   const [justInstalled, setJustInstalled] = useState<string | null>(null);
-
-  const flashDone = useCallback((key: string) => {
-    setFlash(key);
-    window.setTimeout(() => setFlash((f) => (f === key ? null : f)), 1600);
-  }, []);
 
   // firstLoad guards the "Loading:" placeholder so a refresh never unmounts the
   // list (which would collapse height and jump the scroll to the top).
@@ -344,10 +179,6 @@ export function SkillsSection(props: {
   useEffect(() => {
     void loadInstalled(true);
   }, [loadInstalled]);
-
-  useEffect(() => {
-    void (async () => setSystemSources(await fetchSystemSources()))();
-  }, []);
 
   // After an install, briefly flash the new row so it is easy to spot, then
   // clear the flag. No scroll - the list position is left untouched.
@@ -416,44 +247,11 @@ export function SkillsSection(props: {
     })();
   };
 
-  // Sync all configured sources, then refresh the list and re-check versions.
-  // Success is shown on the button itself (checkmark), not as a status line.
-  const onSync = () => {
-    setSyncing(true);
-    setError(null);
-    void (async () => {
-      const res = await apiSend("/coddy/skills/sync", "POST");
-      if (!res.ok) setError(res.error || translate("skills.error.sync"));
-      else {
-        await loadInstalled();
-        await refreshUpdates();
-        flashDone(SYNC_ALL_KEY);
-      }
-      setSyncing(false);
-    })();
-  };
-
-  // Sync a single marketplace by its source string (works on the current row
-  // value even before the settings are saved).
-  const onSyncOne = (source: string) => {
-    const src = source.trim();
-    if (!src) return;
-    setSyncing(true);
-    setError(null);
-    void (async () => {
-      const res = await apiSend(
-        `/coddy/skills/sync?source=${encodeURIComponent(src)}`,
-        "POST",
-      );
-      if (!res.ok) setError(res.error || translate("skills.error.sync"));
-      else {
-        await loadInstalled();
-        await refreshUpdates();
-        flashDone(src);
-      }
-      setSyncing(false);
-    })();
-  };
+  // After a sync of the marketplaces: refresh the list and re-check versions.
+  const onSynced = useCallback(async () => {
+    await loadInstalled();
+    await refreshUpdates();
+  }, [loadInstalled, refreshUpdates]);
 
   // Lazily fetch the plugins advertised by configured marketplaces (network /
   // git) the first time the install control is used; force to refresh after an
@@ -506,20 +304,7 @@ export function SkillsSection(props: {
   // away, clearing the search, before the drawer hears the key.
   useEscapeCloses(installQ !== "", () => setInstallQuery(""));
 
-  const fieldOverride: FieldOverride = ({ path, value: fv, onChange: fc }) => {
-    if (path === "sources") {
-      return (
-        <SourcesEditor
-          value={(fv as string[]) ?? []}
-          system={systemSources}
-          onChange={(next) => fc(next)}
-          onSyncOne={onSyncOne}
-          onSyncAll={onSync}
-          syncing={syncing}
-          flash={flash}
-        />
-      );
-    }
+  const fieldOverride: FieldOverride = ({ path }) => {
     // Auto-discovery is rendered as its own fieldset at the top of the section
     // (see below); suppress the default inline boolean here.
     if (path === "auto_discovery") {
@@ -558,12 +343,30 @@ export function SkillsSection(props: {
         />
       </fieldset>
 
+      {/*
+        The policy for the project's marketplaces.json stands in a fieldset of
+        its own above the list it governs, the way MCP discovery does in the
+        MCP tab; unlike that one it is part of the settings document.
+      */}
       <SchemaForm
         schema={schema}
         value={value}
         onChange={onChange}
         fieldOverride={fieldOverride}
         i18nDomain="skills"
+        groups={[
+          {
+            id: "skills-marketplace-trust",
+            legend: t("skills.trust.legend"),
+            description: t("skills.trust.description"),
+            paths: ["project_trust"],
+          },
+        ]}
+      />
+
+      <MarketplacesEditor
+        activeSessionId={props.activeSessionId}
+        onSynced={onSynced}
       />
 
       <fieldset

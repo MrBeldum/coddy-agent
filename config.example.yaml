@@ -213,16 +213,21 @@ skills:
   # relative entry are the session workspace, resolved when a session loads
   # its skills, so they are safe here even for a shared coddy serve server.
   dirs: []
-  # sources lists remote skill sources installed on demand with `coddy skills sync`
-  # (never fetched automatically). Each entry is a GitHub repo (owner/repo[@ref]),
-  # a git URL, or an http(s) URL to an agents-standard marketplace.json.
+  # Remote skill sources and marketplaces are not declared here: they live in
+  # ${CODDY_HOME}/marketplaces.json (yours) and the project's
+  # .coddy/marketplaces.json, {"sources": [...], "marketplaces": [{"name", "source"}]},
+  # written by `coddy skills add [--project]`, `coddy plugin marketplace add`
+  # and Settings -> Skills. Nothing is fetched until `coddy skills sync`.
+  # An old skills.sources list moves into the home file on the first load.
   # "EvilFreelancer/rpa-skills", the catalogue the bundled rpa-* skills are
-  # published from, is always in effect as a system source and does not belong
-  # here: it is listed and synced beside this key and cannot be removed.
-  # sources:
-  #   - "EvilFreelancer/rpa-skills"
-  #   - "https://example.com/skills/marketplace.json"
-  sources: []
+  # published from, is always in effect and always trusted beside both files.
+  #
+  # project_trust decides the project's marketplaces.json, which travels with
+  # the checkout: "ask" (default) syncs an entry only once it is approved for
+  # the workspace (`coddy plugin marketplace trust <name>` or the shield in
+  # Settings -> Skills), "allow" treats it like your own file, "deny" never
+  # uses it. Whatever any entry installs goes to ${CODDY_HOME}/skills.
+  project_trust: ask
   # auto_discovery offers the model-driven load_skill tool so the agent can pull a
   # catalogued skill's full instructions into a turn on its own when the request
   # matches (like Codex / Claude Code / Cursor), instead of only when you type /name.

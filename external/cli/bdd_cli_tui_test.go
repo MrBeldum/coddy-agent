@@ -578,7 +578,12 @@ func (s *cliTUIState) buildAppWithModels(neuraldeep, panel bool, models []config
 	cfg.Tools.PermissionMode = "ask"
 	cfg.Rules.AutoDiscover = &noAuto
 	cfg.Skills.Dirs = append(cfg.Skills.Dirs, s.skillDirs...)
-	cfg.Skills.Sources = append(cfg.Skills.Sources, s.skillSources...)
+	if len(s.skillSources) > 0 {
+		// Remote sources are declared in the home marketplaces.json.
+		if err := config.WriteMarketplacesFile(config.GlobalMarketplacesPath(cfg.Paths.Home), config.MarketplacesFile{Sources: s.skillSources}); err != nil {
+			return err
+		}
+	}
 	s.cfg = cfg
 	s.store = &session.FileStore{Root: filepath.Join(s.home, "sessions")}
 

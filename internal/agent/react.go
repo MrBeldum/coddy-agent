@@ -2324,9 +2324,8 @@ func invokedSkillBlocks(text string, allSkills []*skills.Skill, managedDir strin
 // searching the disk for them. A skill read out of the binary has no folder.
 //
 // A skill served out of the binary has no folder of its own, but the standard
-// delivery writes the same skill into managedDir (skills.dirs may not list that
-// directory, and then the copy in the binary is the one loaded): when that copy
-// is on disk, its folder is the one named.
+// delivery writes the same skill into managedDir: when that copy is on disk,
+// its folder is the one named.
 func skillBodyForModel(sk *skills.Skill, managedDir string) string {
 	body := strings.TrimSpace(sk.Content)
 	if body == "" || !strings.EqualFold(filepath.Base(sk.FilePath), "SKILL.md") {

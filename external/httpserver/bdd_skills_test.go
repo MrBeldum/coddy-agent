@@ -102,7 +102,7 @@ func (s *skFeatureState) startServer() error {
 		return err
 	}
 	cfgPath := filepath.Join(s.home, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("skills:\n  sources: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("skills:\n  auto_discovery: true\n"), 0o644); err != nil {
 		return err
 	}
 	cfg, err := config.Load(cfgPath)
@@ -293,6 +293,65 @@ func (s *skFeatureState) removeSource(market string) error {
 	return nil
 }
 
+// projectDeclares writes the server workspace's .coddy/marketplaces.json with
+// the marketplace as a source, the way a checkout brings it.
+func (s *skFeatureState) projectDeclares(market string) error {
+	return config.WriteMarketplacesFile(config.ProjectMarketplacesPath(s.home), config.MarketplacesFile{Sources: []string{s.marketplaceURL(market)}})
+}
+
+// listedEntry finds the entry of the last source listing whose source is the
+// marketplace's.
+func (s *skFeatureState) listedEntry(market string) (map[string]interface{}, error) {
+	entries, _ := s.body["entries"].([]interface{})
+	for _, it := range entries {
+		m, _ := it.(map[string]interface{})
+		if src, _ := m["source"].(string); src == s.marketplaceURL(market) {
+			return m, nil
+		}
+	}
+	return nil, fmt.Errorf("the listing has no entry for %q: %v", market, s.body["entries"])
+}
+
+func (s *skFeatureState) listedAwaitingApproval(market string) error {
+	m, err := s.listedEntry(market)
+	if err != nil {
+		return err
+	}
+	if m["origin"] != "project" || m["status"] != "needs_approval" || m["trusted"] != false || m["gated"] != true {
+		return fmt.Errorf("entry of %q = %v, want a gated project entry awaiting approval", market, m)
+	}
+	return nil
+}
+
+func (s *skFeatureState) approveListed(market string) error {
+	m, err := s.listedEntry(market)
+	if err != nil {
+		return err
+	}
+	if err := s.do(http.MethodPost, "/coddy/skills/sources/trust", map[string]interface{}{
+		"key": s.marketplaceURL(market), "fingerprint": m["fingerprint"],
+	}); err != nil {
+		return err
+	}
+	if s.status != http.StatusOK {
+		return fmt.Errorf("approve status %d body %v", s.status, s.body)
+	}
+	return nil
+}
+
+func (s *skFeatureState) syncSources() error {
+	if err := s.do(http.MethodPost, "/coddy/skills/sync", nil); err != nil {
+		return err
+	}
+	if s.status != http.StatusOK {
+		return fmt.Errorf("sync status %d body %v", s.status, s.body)
+	}
+	if failed, _ := s.body["failed"].([]interface{}); len(failed) != 0 {
+		return fmt.Errorf("sync failed: %v", failed)
+	}
+	return nil
+}
+
 func (s *skFeatureState) skillRow(name string) (map[string]interface{}, error) {
 	if err := s.do(http.MethodGet, "/coddy/skills", nil); err != nil {
 		return nil, err
@@ -389,6 +448,10 @@ func initializeSkillsScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^I update the skill "([^"]*)"$`, s.updateSkill)
 	sc.Step(`^I list the skill sources$`, s.listSources)
 	sc.Step(`^I remove the marketplace "([^"]*)" from the skill sources$`, s.removeSource)
+	sc.Step(`^the workspace's marketplaces\.json declares the marketplace "([^"]*)"$`, s.projectDeclares)
+	sc.Step(`^the source list shows the marketplace "([^"]*)" from the project awaiting approval$`, s.listedAwaitingApproval)
+	sc.Step(`^I approve the project marketplace "([^"]*)" as it was listed$`, s.approveListed)
+	sc.Step(`^I sync the skill sources$`, s.syncSources)
 
 	sc.Step(`^the skills list shows "([^"]*)" at version "([^"]*)"$`, s.listShowsVersion)
 	sc.Step(`^the skills list still shows "([^"]*)" at version "([^"]*)"$`, s.listShowsVersion)

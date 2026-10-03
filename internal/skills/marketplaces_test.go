@@ -11,11 +11,13 @@ package skills
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
+	"github.com/EvilFreelancer/coddy-agent/internal/mcp"
 )
 
 // testCatalogue serves a marketplace over https: /marketplace.json names its
@@ -94,25 +97,35 @@ func pluginArchive(t *testing.T, name string, revision int) []byte {
 	)
 }
 
-// marketHome is a home with a config file and no sources, off the network.
+// marketHome is a home with a config file whose marketplaces.json declares
+// sources (none by default), off the network.
 func marketHome(t *testing.T, sources ...string) *config.Config {
 	t.Helper()
 	offlineSystemSources(t)
 	home := t.TempDir()
 	cfgPath := filepath.Join(home, "config.yaml")
-	body := "skills:\n  sources: []\n"
-	if len(sources) > 0 {
-		body = "skills:\n  sources:\n"
-		for _, s := range sources {
-			body += fmt.Sprintf("    - %q\n", s)
-		}
-	}
-	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	declareHomeSources(t, home, sources...)
 	return &config.Config{
 		Paths:  config.Paths{Home: home, ConfigPath: cfgPath},
-		Skills: config.Skills{Dirs: []string{filepath.Join(home, "skills")}, Sources: sources},
+		Skills: config.Skills{Dirs: []string{filepath.Join(home, "skills")}},
+	}
+}
+
+// declareHomeSources makes <home>/marketplaces.json declare sources as
+// installed whole, keeping its marketplaces.
+func declareHomeSources(t *testing.T, home string, sources ...string) {
+	t.Helper()
+	path := config.GlobalMarketplacesPath(home)
+	file, err := config.ReadMarketplacesFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Sources = append([]string(nil), sources...)
+	if err := config.WriteMarketplacesFile(path, file); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -181,7 +194,7 @@ func TestAddMarketplaceRefusesWhatItCannotName(t *testing.T) {
 			t.Errorf("add %q-named marketplace: %v, want a refusal naming the whole install", c.name, err)
 		}
 	}
-	if ms, _ := AddedMarketplaces(cfg); len(ms) != 0 {
+	if ms, _ := AddedMarketplaces(cfg, ""); len(ms) != 0 {
 		t.Errorf("added %+v", ms)
 	}
 }
@@ -211,7 +224,7 @@ func TestAddMarketplaceKeepsOneMarketplacePerName(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "`plugin marketplace remove shop`") {
 		t.Fatalf("a second marketplace named shop: %v", err)
 	}
-	ms, _ := AddedMarketplaces(cfg)
+	ms, _ := AddedMarketplaces(cfg, "")
 	if len(ms) != 1 || ms[0].Source != first.url() {
 		t.Fatalf("added = %+v, want the first one kept", ms)
 	}
@@ -220,7 +233,7 @@ func TestAddMarketplaceKeepsOneMarketplacePerName(t *testing.T) {
 		t.Fatalf("remove: %q", out)
 	}
 	mustRun(t, cfg, "marketplace", "add", second.url())
-	if ms, _ := AddedMarketplaces(cfg); len(ms) != 1 || ms[0].Source != second.url() {
+	if ms, _ := AddedMarketplaces(cfg, ""); len(ms) != 1 || ms[0].Source != second.url() {
 		t.Fatalf("added = %+v, want the second one", ms)
 	}
 }
@@ -288,7 +301,7 @@ func TestUpdatesTouchOnlyWhatWasInstalled(t *testing.T) {
 		cfg := marketHome(t)
 		mustRun(t, cfg, "marketplace", "add", c.url())
 		mustRun(t, cfg, "install", "a@neuraldeep")
-		res, err := UpdateSkill(context.Background(), cfg, "a")
+		res, err := UpdateSkill(context.Background(), cfg, "", "a")
 		if err != nil || len(res.Failed) != 0 || strings.Join(res.Updated, ",") != "a" {
 			t.Fatalf("UpdateSkill = %+v, %v", res, err)
 		}
@@ -359,7 +372,7 @@ func TestMarketplaceListAndShow(t *testing.T) {
 	mustRun(t, cfg, "marketplace", "add", c.url())
 	mustRun(t, cfg, "install", "b@neuraldeep")
 	out := mustRun(t, cfg, "marketplace", "list")
-	if !strings.Contains(out, "1 added marketplace(s)") || !strings.Contains(out, "- neuraldeep  [valid marketplace — neuraldeep, 2 plugin(s); "+c.url()+"]") {
+	if !strings.Contains(out, "1 added marketplace(s)") || !strings.Contains(out, "- neuraldeep  [valid marketplace — neuraldeep, 2 plugin(s); "+c.url()+"; yours]") {
 		t.Fatalf("list: %q", out)
 	}
 	out = mustRun(t, cfg, "marketplace", "list", "neuraldeep")
@@ -421,7 +434,7 @@ func TestACorruptMarketplaceListIsNotOverwritten(t *testing.T) {
 	if data, _ := os.ReadFile(path); string(data) != "{not json" {
 		t.Fatalf("the corrupt list was overwritten: %q", data)
 	}
-	res, err := Sync(context.Background(), cfg)
+	res, err := Sync(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +487,169 @@ func TestRemovingAMarketplaceByNameTakesItsSourceOut(t *testing.T) {
 	if !strings.Contains(out, "and its source") {
 		t.Fatalf("remove answered %q", out)
 	}
-	if got := ListSources(cfg); len(got) != 0 {
+	if got := ListSources(cfg, ""); len(got) != 0 {
 		t.Fatalf("sources = %v, want the marketplace's source gone too", got)
+	}
+}
+
+// trustHome is a home off the network whose operator file declares home and
+// whose workspace declares project, under policy.
+func trustHome(t *testing.T, policy string, home, project config.MarketplacesFile) (*config.Config, string) {
+	t.Helper()
+	offlineSystemSources(t)
+	SystemSources = []string{"system/market"}
+	cfg := &config.Config{Paths: config.Paths{Home: t.TempDir()}}
+	cfg.Skills.ProjectTrust = policy
+	cwd := t.TempDir()
+	if err := config.WriteMarketplacesFile(config.GlobalMarketplacesPath(cfg.Paths.Home), home); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteMarketplacesFile(config.ProjectMarketplacesPath(cwd), project); err != nil {
+		t.Fatal(err)
+	}
+	return cfg, cwd
+}
+
+// What a workspace has comes in order - the system source, the operator's
+// file, the project's - each entry once: a project repeating the operator's
+// source or marketplace name adds nothing, and a project entry under ask
+// waits for its approval.
+func TestDeclarationsComeInOrderEachOnce(t *testing.T) {
+	cfg, cwd := trustHome(t, "",
+		config.MarketplacesFile{Sources: []string{"owner/home", "https://github.com/system/market"}, Marketplaces: []config.DeclaredMarketplace{{Name: "shop", Source: "owner/shop"}}},
+		config.MarketplacesFile{Sources: []string{"Owner/Home", "owner/project"}, Marketplaces: []config.DeclaredMarketplace{{Name: "shop", Source: "owner/elsewhere"}, {Name: "team", Source: "owner/team"}}},
+	)
+	decls, errs := Declarations(cfg, cwd)
+	if len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	var got []string
+	for _, d := range decls {
+		got = append(got, d.Origin+":"+d.Kind+":"+d.Key()+":"+d.State)
+	}
+	want := []string{
+		"system:source:system/market:ready",
+		"home:source:owner/home:ready",
+		"home:marketplace:shop:ready",
+		"project:source:owner/project:needs_approval",
+		"project:marketplace:team:needs_approval",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("declarations:\n%v\nwant:\n%v", got, want)
+	}
+	if got := ListSources(cfg, cwd); !reflect.DeepEqual(got, []string{"system/market", "owner/home"}) {
+		t.Fatalf("sources in effect = %v", got)
+	}
+}
+
+// An approval binds the entry as it was shown: a checkout that rewrites the
+// address asks again, and an approval of what the operator saw before the
+// rewrite is refused. allow needs no approval, deny reads nothing into effect.
+func TestProjectEntryTrustFollowsTheDeclaration(t *testing.T) {
+	cfg, cwd := trustHome(t, config.ProjectTrustAsk, config.MarketplacesFile{}, config.MarketplacesFile{Sources: []string{"owner/project"}})
+	SystemSources = nil // the sync below must not reach out for it
+	shown, ok := FindDeclaration(cfg, cwd, "owner/project")
+	if !ok || shown.State != StateNeedsApproval || shown.Fingerprint == "" {
+		t.Fatalf("project entry = %+v, %v", shown, ok)
+	}
+	if _, err := ApproveShown(cfg, cwd, "owner/project", shown.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if got := ListSources(cfg, cwd); !reflect.DeepEqual(got, []string{"owner/project"}) {
+		t.Fatalf("sources after the approval = %v", got)
+	}
+	if _, err := ApproveShown(cfg, cwd, "owner/project", "sha256:stale"); !errors.Is(err, ErrDeclarationChanged) {
+		t.Fatalf("approving a stale fingerprint: %v", err)
+	}
+
+	// The checkout points the entry somewhere else: no approval covers it.
+	if err := config.WriteMarketplacesFile(config.ProjectMarketplacesPath(cwd), config.MarketplacesFile{Sources: []string{"attacker/project"}}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := FindDeclaration(cfg, cwd, "attacker/project"); d.State != StateNeedsApproval {
+		t.Fatalf("a rewritten entry = %+v, want it awaiting approval", d)
+	}
+	res, err := Sync(context.Background(), cfg, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Held) != 1 || res.Held[0].Source != "attacker/project" || len(res.Failed) != 0 {
+		t.Fatalf("sync = %+v, want the rewritten entry held and nothing fetched", res)
+	}
+
+	cfg.Skills.ProjectTrust = config.ProjectTrustAllow
+	if got := ListSources(cfg, cwd); !reflect.DeepEqual(got, []string{"attacker/project"}) {
+		t.Fatalf("sources under allow = %v", got)
+	}
+	cfg.Skills.ProjectTrust = config.ProjectTrustDeny
+	if d, _ := FindDeclaration(cfg, cwd, "attacker/project"); d.State != StateDenied {
+		t.Fatalf("under deny = %+v", d)
+	}
+	if _, err := ApproveShown(cfg, cwd, "attacker/project", ""); err == nil {
+		t.Fatal("an approval under deny was recorded")
+	}
+}
+
+// A held project marketplace cannot be installed from, and the refusal says
+// how to approve it; removing a project entry takes its approval with it.
+func TestHeldProjectMarketplaceAndItsRemoval(t *testing.T) {
+	cfg, cwd := trustHome(t, "", config.MarketplacesFile{}, config.MarketplacesFile{Marketplaces: []config.DeclaredMarketplace{{Name: "team", Source: "owner/team"}}})
+	_, err := InstallFromMarketplace(context.Background(), cfg, cwd, "lint", "team")
+	if err == nil || !strings.Contains(err.Error(), "coddy plugin marketplace trust team") {
+		t.Fatalf("installing from a held marketplace: %v", err)
+	}
+	if _, err := ApproveShown(cfg, cwd, "team", ""); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := RemoveSource(cfg, cwd, "team")
+	if err != nil || !removed {
+		t.Fatalf("remove = %v, %v", removed, err)
+	}
+	if file, _ := config.ReadMarketplacesFile(config.ProjectMarketplacesPath(cwd)); len(file.Marketplaces) != 0 {
+		t.Fatalf("project file after the removal = %+v", file)
+	}
+	if recs := NewTrustStore(cfg.Paths.Home).Records(mcp.CanonicalWorkspace(cwd)); len(recs) != 0 {
+		t.Fatalf("receipts after the removal = %+v", recs)
+	}
+}
+
+// An older Coddy kept the added marketplaces in the managed dir's list. That
+// list moves into the operator's marketplaces.json once, a marketplace the
+// file declares already staying as the file has it, and stays as the cache of
+// what each one listed.
+func TestLegacyMarketplaceListMovesIntoTheHomeFile(t *testing.T) {
+	cfg, cwd := trustHome(t, "", config.MarketplacesFile{Marketplaces: []config.DeclaredMarketplace{{Name: "kept", Source: "owner/kept-there"}}}, config.MarketplacesFile{})
+	managed := cfg.Skills.ManagedDir(cfg.Paths.Home)
+	legacy := `{"marketplaces":[{"name":"neuraldeep","source":"https://neuraldeep.example/marketplace.json","plugins":[{"name":"wordstat"}]},{"name":"kept","source":"owner/kept"}]}`
+	if err := os.MkdirAll(managed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(managed, marketplacesFile), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ms, err := AddedMarketplaces(cfg, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, m := range ms {
+		names = append(names, m.Name+"="+m.Source)
+	}
+	if !reflect.DeepEqual(names, []string{"kept=owner/kept-there", "neuraldeep=https://neuraldeep.example/marketplace.json"}) {
+		t.Fatalf("marketplaces after the move = %v", names)
+	}
+	if ms[1].Plugins == nil || ms[1].Plugins[0].Name != "wordstat" {
+		t.Fatalf("the listing of the moved marketplace was lost: %+v", ms[1])
+	}
+	doc, err := readMarketplacesDoc(managed)
+	if err != nil || doc.Version != marketplacesCacheVersion {
+		t.Fatalf("cache after the move = %+v, %v", doc, err)
+	}
+	// Removed from the operator's file, it does not come back from the cache.
+	if _, err := RemoveSource(cfg, cwd, "neuraldeep"); err != nil {
+		t.Fatal(err)
+	}
+	if ms, _ := AddedMarketplaces(cfg, cwd); len(ms) != 1 {
+		t.Fatalf("marketplaces after the removal = %+v", ms)
 	}
 }

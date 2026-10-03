@@ -5,6 +5,7 @@ package httpserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -25,6 +26,8 @@ func (s *Server) registerSkillsManagementRoutes() {
 	s.mux.HandleFunc("POST /coddy/skills/sync", s.coddySkillsSyncPost)
 	s.mux.HandleFunc("POST /coddy/skills/sources", s.coddySkillsSourcesPost)
 	s.mux.HandleFunc("DELETE /coddy/skills/sources", s.coddySkillsSourcesDelete)
+	s.mux.HandleFunc("POST /coddy/skills/sources/trust", s.coddySkillsSourceTrust)
+	s.mux.HandleFunc("POST /coddy/skills/sources/untrust", s.coddySkillsSourceUntrust)
 	s.mux.HandleFunc("DELETE /coddy/skills/{name}", s.coddySkillsDelete)
 }
 
@@ -139,47 +142,76 @@ func (s *Server) coddySkillsDisablePost(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
 
-// coddySkillsSyncPost fetches all configured skill sources and materializes them.
+// coddySkillsSyncPost fetches the skill sources in effect for the session
+// workspace (the server default workspace without a session) and
+// materializes them; a project entry the trust gate holds back is reported in
+// held, not fetched.
 func (s *Server) coddySkillsSyncPost(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
 	}
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
+		return
+	}
 	// Optional ?source=<src>: only that source, or only what is installed from
-	// it when it is a marketplace added with `plugin marketplace add`;
-	// otherwise sync all.
+	// it when it is a marketplace; otherwise sync all.
 	var res *skills.SyncResult
 	var err error
 	if src := strings.TrimSpace(r.URL.Query().Get("source")); src != "" {
-		res, _, err = skills.UpdateSource(r.Context(), s.activeCfg(), src)
+		res, _, err = skills.UpdateSource(r.Context(), s.activeCfg(), cwd, src)
 	} else {
-		res, err = skills.Sync(r.Context(), s.activeCfg())
+		res, err = skills.Sync(r.Context(), s.activeCfg(), cwd)
 	}
 	if err != nil {
+		// An entry the trust gate holds back is the caller's to approve, not
+		// a failure of the server.
+		status := http.StatusInternalServerError
+		if errors.Is(err, skills.ErrHeld) {
+			status = http.StatusBadRequest
+		}
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
-		http.Error(w, string(body), http.StatusInternalServerError)
+		http.Error(w, string(body), status)
 		return
 	}
 	s.invalidateSlashCache()
 	slog.Info("skills synced", "added", len(res.Added), "updated", len(res.Updated), "failed", len(res.Failed))
 	w.Header().Set("Content-Type", "application/json")
+	held := res.Held
+	if held == nil {
+		held = []skills.Declaration{}
+	}
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":      true,
 		"added":   res.Added,
 		"updated": res.Updated,
 		"failed":  res.Failed,
+		"held":    held,
 	})
 }
 
 type skillSourceRequest struct {
 	Source string `json:"source"`
 	Sync   bool   `json:"sync"`
+	// Scope picks the file: "global" (default) <home>/marketplaces.json,
+	// "local" the session workspace's .coddy/marketplaces.json.
+	Scope string `json:"scope,omitempty"`
+	// Kind is "source" (default, installed whole) or "marketplace" (a
+	// catalog whose plugins are installed one by one).
+	Kind string `json:"kind,omitempty"`
 }
 
-// coddySkillsSourcesPost adds a remote source to skills.sources (and optionally syncs).
+// coddySkillsSourcesPost declares a remote source (or a marketplace) in the
+// marketplaces.json the scope names, and optionally syncs it. A local entry
+// is approved for the workspace by the act of writing it.
 func (s *Server) coddySkillsSourcesPost(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
+		return
+	}
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
 		return
 	}
 	var req skillSourceRequest
@@ -188,14 +220,23 @@ func (s *Server) coddySkillsSourcesPost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	cfg := s.activeCfg()
-	added, err := skills.AddSource(cfg, req.Source)
+	var added bool
+	var err error
+	switch strings.TrimSpace(req.Kind) {
+	case "", skills.KindSource:
+		added, err = skills.AddSource(cfg, cwd, req.Source, req.Scope)
+	case skills.KindMarketplace:
+		var refreshed bool
+		_, refreshed, err = skills.AddMarketplace(r.Context(), cfg, cwd, req.Source, req.Scope)
+		added = !refreshed
+	default:
+		err = fmt.Errorf("unknown kind %q (use %q or %q)", req.Kind, skills.KindSource, skills.KindMarketplace)
+	}
 	if err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusBadRequest)
 		return
 	}
-	// AddSource persisted config.yaml; reload so the running server sees it.
-	s.reloadConfigFromDisk()
 
 	resp := map[string]interface{}{"ok": true, "added": added}
 	if req.Sync {
@@ -271,7 +312,11 @@ func (s *Server) coddySkillsAvailableGet(w http.ResponseWriter, r *http.Request)
 		http.NotFound(w, r)
 		return
 	}
-	items, err := skills.AvailablePlugins(r.Context(), s.activeCfg(), s.defaultCWD)
+	cwd, ok := s.resolveListingCWD(w, r)
+	if !ok {
+		return
+	}
+	items, err := skills.AvailablePlugins(r.Context(), s.activeCfg(), cwd)
 	if err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusInternalServerError)
@@ -322,23 +367,95 @@ func (s *Server) coddySkillsInstallPost(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// coddySkillsSourcesGet lists every remote skill source in effect. system names
-// the subset Coddy brings itself: they are in items like any other, but they do
-// not live in config.yaml and DELETE refuses them, so a client shows them
-// without a remove control.
+// coddySkillsSourcesGet lists the skill sources and marketplaces declared
+// for the session workspace (the server default workspace without a session,
+// as the MCP tab does): entries carries each with its kind, origin, file and
+// trust state; items are the sources installed whole in effect and system
+// the subset Coddy brings itself, which DELETE refuses.
 func (s *Server) coddySkillsSourcesGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
+		return
+	}
+	cfg := s.activeCfg()
+	decls, errs := skills.Declarations(cfg, cwd)
+	if decls == nil {
+		decls = []skills.Declaration{}
+	}
+	messages := make([]string, 0, len(errs))
+	for _, err := range errs {
+		messages = append(messages, err.Error())
+	}
 	system := make([]string, 0, len(skills.SystemSources))
 	system = append(system, skills.SystemSources...)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"object": "coddy.skills_sources",
-		"items":  skills.ListSources(s.activeCfg()),
-		"system": system,
+		"object":        "coddy.skills_sources",
+		"workspace":     cwd,
+		"project_trust": cfg.Skills.ResolvedProjectTrust(),
+		"items":         skills.ListSources(cfg, cwd),
+		"system":        system,
+		"entries":       decls,
+		"errors":        messages,
 	})
+}
+
+type skillSourceTrustRequest struct {
+	Key         string `json:"key"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+}
+
+// coddySkillsSourceTrust approves a project entry of the session workspace's
+// .coddy/marketplaces.json. The optional fingerprint names the entry the
+// operator was shown: one the checkout rewrote since is refused with 409.
+func (s *Server) coddySkillsSourceTrust(w http.ResponseWriter, r *http.Request) {
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
+		return
+	}
+	var req skillSourceTrustRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Key) == "" {
+		http.Error(w, `{"error":{"message":"body must name the entry: {\"key\": \"<marketplace | source>\"}"}}`, http.StatusBadRequest)
+		return
+	}
+	d, err := skills.ApproveShown(s.activeCfg(), cwd, req.Key, req.Fingerprint)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, skills.ErrDeclarationChanged) {
+			status = http.StatusConflict
+		}
+		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
+		http.Error(w, string(body), status)
+		return
+	}
+	slog.Info("project skill source approved", "key", req.Key, "workspace", cwd)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "fingerprint": d.Fingerprint})
+}
+
+// coddySkillsSourceUntrust withdraws the approval of a project entry.
+func (s *Server) coddySkillsSourceUntrust(w http.ResponseWriter, r *http.Request) {
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
+		return
+	}
+	var req skillSourceTrustRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Key) == "" {
+		http.Error(w, `{"error":{"message":"body must name the entry: {\"key\": \"<marketplace | source>\"}"}}`, http.StatusBadRequest)
+		return
+	}
+	removed, err := skills.Revoke(s.activeCfg(), cwd, req.Key)
+	if err != nil {
+		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
+		http.Error(w, string(body), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "removed": removed})
 }
 
 // coddySkillsUpdatePost re-syncs the source that provides {name}, installing the
@@ -348,8 +465,12 @@ func (s *Server) coddySkillsUpdatePost(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
+		return
+	}
 	name := r.PathValue("name")
-	res, err := skills.UpdateSkill(r.Context(), s.activeCfg(), name)
+	res, err := skills.UpdateSkill(r.Context(), s.activeCfg(), cwd, name)
 	if err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusBadRequest)
@@ -366,10 +487,16 @@ func (s *Server) coddySkillsUpdatePost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// coddySkillsSourcesDelete removes a source from skills.sources (query ?source=).
+// coddySkillsSourcesDelete takes the sources and marketplaces ?source= names
+// (a marketplace by name, either kind by source) out of the operator's
+// marketplaces.json and the session workspace's.
 func (s *Server) coddySkillsSourcesDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.NotFound(w, r)
+		return
+	}
+	cwd, ok := s.resolveSessionCWD(w, r)
+	if !ok {
 		return
 	}
 	source := strings.TrimSpace(r.URL.Query().Get("source"))
@@ -377,13 +504,12 @@ func (s *Server) coddySkillsSourcesDelete(w http.ResponseWriter, r *http.Request
 		http.Error(w, `{"error":{"message":"missing source query parameter"}}`, http.StatusBadRequest)
 		return
 	}
-	removed, err := skills.RemoveSource(s.activeCfg(), source)
+	removed, err := skills.RemoveSource(s.activeCfg(), cwd, source)
 	if err != nil {
 		body, _ := json.Marshal(map[string]interface{}{"error": map[string]string{"message": err.Error()}})
 		http.Error(w, string(body), http.StatusBadRequest)
 		return
 	}
-	s.reloadConfigFromDisk()
 	slog.Info("skill source removed", "source", source, "removed", removed)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "removed": removed})
@@ -395,7 +521,7 @@ func (s *Server) invalidateSlashCache() {
 	s.slashMu.Unlock()
 }
 
-// reloadConfigFromDisk re-reads config.yaml (after AddSource persisted it) and
+// reloadConfigFromDisk re-reads config.yaml (after a route persisted it) and
 // swaps it into the running server and session manager.
 func (s *Server) reloadConfigFromDisk() {
 	c := s.activeCfg()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,11 +19,25 @@ import (
 // stays byte for byte, and the old file is kept beside it as
 // <config>.bak-<time>.
 
-// migrateLegacyKeys moves the old top-level mcp_servers key: its servers go
-// into <home>/mcp.json with every value meaning what it meant in config.yaml
-// (legacyMCPValue: an environment reference stays one, which mcp.json
-// resolves when the server starts), and a name the file already declares is
-// left alone.
+// legacyMove is one key that left config.yaml: where it sits in the file and
+// how its value is carried into the file that holds it now. move reports
+// what it moved and what the target had already, for the log line.
+type legacyMove struct {
+	path  string
+	key   *yaml.Node
+	value *yaml.Node
+	move  func(value *yaml.Node) (moved, kept []string, err error)
+}
+
+// migrateLegacyKeys moves the keys that left config.yaml: the old top-level
+// mcp_servers into <home>/mcp.json, every value meaning what it meant in
+// config.yaml (legacyMCPValue: an environment reference stays one, which
+// mcp.json resolves when the server starts), a name the file declares
+// already left alone; and skills.sources into the sources of
+// <home>/marketplaces.json, a source the file has already (in any case) and
+// the system source not repeated. A move that cannot write its target leaves
+// its key where it is; the others go ahead, in one rewrite of config.yaml
+// with one backup of the old file.
 func migrateLegacyKeys(paths Paths, data []byte) []byte {
 	if strings.TrimSpace(paths.ConfigPath) == "" {
 		return data
@@ -32,14 +47,18 @@ func migrateLegacyKeys(paths Paths, data []byte) []byte {
 		return data
 	}
 	root := doc.Content[0]
-	keyIdx := -1
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "mcp_servers" {
-			keyIdx = i
-			break
+	var moves []legacyMove
+	if k, v := mappingEntry(root, "mcp_servers"); k != nil {
+		moves = append(moves, legacyMove{path: "mcp_servers", key: k, value: v,
+			move: func(v *yaml.Node) ([]string, []string, error) { return moveLegacyMCPServers(paths, v) }})
+	}
+	if _, skills := mappingEntry(root, "skills"); skills != nil && skills.Kind == yaml.MappingNode {
+		if k, v := mappingEntry(skills, "sources"); k != nil {
+			moves = append(moves, legacyMove{path: "skills.sources", key: k, value: v,
+				move: func(v *yaml.Node) ([]string, []string, error) { return moveLegacySkillSources(paths, v) }})
 		}
 	}
-	if keyIdx < 0 {
+	if len(moves) == 0 {
 		return data
 	}
 	if !configPathWriteMu.TryLock() {
@@ -48,46 +67,115 @@ func migrateLegacyKeys(paths Paths, data []byte) []byte {
 	defer configPathWriteMu.Unlock()
 
 	log := slog.Default()
-	var servers []MCPServerConfig
-	if err := root.Content[keyIdx+1].Decode(&servers); err != nil {
-		log.Warn("config: the old mcp_servers key does not read as a list of servers; left in place", "path", paths.ConfigPath, "error", err)
-		return data
-	}
-	var moved, skipped []string
-	if len(servers) > 0 {
-		target := GlobalMCPJSONPath(paths.Home)
-		entries, err := ReadMCPJSONFile(target)
+	var done []legacyMove
+	for _, m := range moves {
+		moved, kept, err := m.move(m.value)
 		if err != nil {
-			log.Warn("config: mcp_servers not moved, the target mcp.json does not read", "target", target, "error", err)
-			return data
+			log.Warn("config: a key that left config.yaml could not be moved; left in place and not used", "key", m.path, "path", paths.ConfigPath, "error", err)
+			continue
 		}
-		for _, srv := range servers {
-			name := strings.TrimSpace(srv.Name)
-			if name == "" {
-				continue
-			}
-			if _, ok := entries[name]; ok {
-				skipped = append(skipped, name)
-				continue
-			}
-			entries[name] = legacyMCPServerToJSON(srv, paths.Home)
-			moved = append(moved, name)
-		}
-		if len(moved) > 0 {
-			if err := writeMCPJSONFileEntries(target, entries); err != nil {
-				log.Warn("config: mcp_servers not moved, mcp.json could not be written", "target", target, "error", err)
-				return data
-			}
-		}
+		log.Info("config: moved a key out of config.yaml", "key", m.path, "moved", moved, "already_there", kept, "config", paths.ConfigPath)
+		done = append(done, m)
 	}
-	next := removeYAMLKeyBlock(data, root.Content[keyIdx])
-	if err := rewriteConfigKeepingBackup(paths.ConfigPath, data, next); err != nil {
-		log.Warn("config: mcp_servers moved but config.yaml could not be rewritten; the key is ignored", "path", paths.ConfigPath, "error", err)
+	if len(done) == 0 {
 		return data
 	}
-	log.Info("config: moved mcp_servers out of config.yaml",
-		"into", GlobalMCPJSONPath(paths.Home), "moved", moved, "already_there", skipped, "config", paths.ConfigPath)
+	// Cut from the bottom of the file up, so a cut never moves the lines of
+	// a key still to be cut.
+	sort.Slice(done, func(i, j int) bool { return done[i].key.Line > done[j].key.Line })
+	next := data
+	for _, m := range done {
+		next = removeYAMLKeyBlock(next, m.key)
+	}
+	if err := rewriteConfigKeepingBackup(paths.ConfigPath, data, next); err != nil {
+		log.Warn("config: keys moved but config.yaml could not be rewritten; they are ignored", "path", paths.ConfigPath, "error", err)
+		return data
+	}
 	return next
+}
+
+// mappingEntry finds key in a mapping node, returning its key and value nodes.
+func mappingEntry(m *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i], m.Content[i+1]
+		}
+	}
+	return nil, nil
+}
+
+// moveLegacyMCPServers writes the servers of an old mcp_servers list into
+// <home>/mcp.json, leaving a name the file declares already alone.
+func moveLegacyMCPServers(paths Paths, value *yaml.Node) (moved, kept []string, err error) {
+	var servers []MCPServerConfig
+	if err := value.Decode(&servers); err != nil {
+		return nil, nil, fmt.Errorf("mcp_servers does not read as a list of servers: %w", err)
+	}
+	if len(servers) == 0 {
+		return nil, nil, nil
+	}
+	target := GlobalMCPJSONPath(paths.Home)
+	entries, err := ReadMCPJSONFile(target)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, srv := range servers {
+		name := strings.TrimSpace(srv.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := entries[name]; ok {
+			kept = append(kept, name)
+			continue
+		}
+		entries[name] = legacyMCPServerToJSON(srv, paths.Home)
+		moved = append(moved, name)
+	}
+	if len(moved) > 0 {
+		if err := writeMCPJSONFileEntries(target, entries); err != nil {
+			return nil, nil, err
+		}
+	}
+	return moved, kept, nil
+}
+
+// moveLegacySkillSources appends the sources of an old skills.sources list to
+// the sources of <home>/marketplaces.json. A source the file has already, in
+// any case, and the system source, which is in effect without any file, are
+// not repeated.
+func moveLegacySkillSources(paths Paths, value *yaml.Node) (moved, kept []string, err error) {
+	var sources []string
+	if err := value.Decode(&sources); err != nil {
+		return nil, nil, fmt.Errorf("skills.sources does not read as a list of sources: %w", err)
+	}
+	target := GlobalMarketplacesPath(paths.Home)
+	file, err := ReadMarketplacesFile(target)
+	if err != nil {
+		return nil, nil, err
+	}
+	known := map[string]bool{strings.ToLower(SystemSkillsSource): true}
+	for _, s := range file.Sources {
+		known[strings.ToLower(strings.TrimSpace(s))] = true
+	}
+	for _, s := range sources {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if known[strings.ToLower(s)] {
+			kept = append(kept, s)
+			continue
+		}
+		known[strings.ToLower(s)] = true
+		file.Sources = append(file.Sources, s)
+		moved = append(moved, s)
+	}
+	if len(moved) > 0 {
+		if err := WriteMarketplacesFile(target, file); err != nil {
+			return nil, nil, err
+		}
+	}
+	return moved, kept, nil
 }
 
 // legacyMCPServerToJSON is the mcp.json entry of a declaration read from the

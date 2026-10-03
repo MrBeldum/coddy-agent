@@ -393,6 +393,7 @@ export function SettingsSection(props: {
         value={asObject(doc.skills)}
         onChange={(v) => setKey("skills", v)}
         workspacePath={props.workspacePath}
+        {...(activeSessionId ? { activeSessionId } : {})}
       />
     );
   }

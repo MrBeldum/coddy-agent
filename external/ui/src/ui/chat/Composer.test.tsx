@@ -2814,7 +2814,7 @@ describe("cwd-scoped requests follow the chat workspace", () => {
     await waitFor(() => expect(slashCwds()).toEqual(["/projects/other"]));
     fireEvent.click(screen.getByRole("button", { name: "pick data" }));
     fireEvent.change(ta, {
-      target: { value: "/rgs-", selectionStart: 5, selectionEnd: 5 },
+      target: { value: "/dat-", selectionStart: 5, selectionEnd: 5 },
     });
     await waitFor(() =>
       expect(slashCwds()).toEqual(["/projects/other", "/projects/data"]),
@@ -2843,7 +2843,7 @@ describe("cwd-scoped requests follow the chat workspace", () => {
       const body = {
         items:
           url.searchParams.get("cwd") === "/projects/data"
-            ? [{ name: "rgs-confluence", description: "data skill" }]
+            ? [{ name: "dat-report", description: "data skill" }]
             : [],
         has_more: false,
         page: 1,
@@ -2894,7 +2894,7 @@ describe("cwd-scoped requests follow the chat workspace", () => {
     releaseOld();
     await new Promise((resolve) => setTimeout(resolve, 30));
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
-      target: { value: "/rgs-", selectionStart: 5, selectionEnd: 5 },
+      target: { value: "/dat-", selectionStart: 5, selectionEnd: 5 },
     });
     await waitFor(() =>
       expect(
@@ -2905,7 +2905,7 @@ describe("cwd-scoped requests follow the chat workspace", () => {
     );
     // The answer for data came after data was left: the menu that opens next,
     // waiting for the other folder, never lists what data holds.
-    expect(screen.queryByText("/rgs-confluence")).toBeNull();
+    expect(screen.queryByText("/dat-report")).toBeNull();
     vi.unstubAllGlobals();
   });
 

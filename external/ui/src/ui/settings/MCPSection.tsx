@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chevron } from "../components/Chevron";
 import { FieldHint, LegendWithHint } from "./FieldHint";
-import { IconSync } from "./icons";
+import { IconShield, IconSync } from "./icons";
 import { IconTrash } from "./SchemaForm";
 import { Switch } from "./Switch";
 import { useT } from "../i18n/I18nProvider";
@@ -118,25 +118,6 @@ function IconPencil() {
   );
 }
 
-// Shield glyph for the workspace trust control on project-local rows.
-function IconShield() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 3l7 3v6c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V6Z" />
-      <path d="M9 12l2 2 4-4" />
-    </svg>
-  );
-}
 
 function statusTitle(row: MCPServerRow): string {
   switch (row.status) {

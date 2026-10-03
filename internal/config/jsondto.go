@@ -139,7 +139,7 @@ type PromptsJSON struct {
 // SkillsJSON mirrors Skills for JSON APIs.
 type SkillsJSON struct {
 	Dirs          []string `json:"dirs,omitempty"`
-	Sources       []string `json:"sources,omitempty"`
+	ProjectTrust  string   `json:"project_trust,omitempty"`
 	AutoDiscovery *bool    `json:"auto_discovery,omitempty"`
 }
 
@@ -476,7 +476,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Instructions = InstructionsJSON{Files: append([]string(nil), c.Instructions.Files...)}
 	out.Skills = SkillsJSON{
 		Dirs:          append([]string(nil), c.Skills.Dirs...),
-		Sources:       append([]string(nil), c.Skills.Sources...),
+		ProjectTrust:  c.Skills.ProjectTrust,
 		AutoDiscovery: cloneBoolPtr(c.Skills.AutoDiscovery),
 	}
 	out.Rules = RulesJSON{
@@ -691,7 +691,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	cfg.Instructions = Instructions{Files: append([]string(nil), j.Instructions.Files...)}
 	cfg.Skills = Skills{
 		Dirs:          append([]string(nil), j.Skills.Dirs...),
-		Sources:       append([]string(nil), j.Skills.Sources...),
+		ProjectTrust:  j.Skills.ProjectTrust,
 		AutoDiscovery: cloneBoolPtr(j.Skills.AutoDiscovery),
 	}
 	cfg.Rules = Rules{

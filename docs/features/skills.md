@@ -55,30 +55,31 @@ each one comes from.
 ### The marketplace that comes with it
 
 **`EvilFreelancer/rpa-skills`** - the catalogue the delivered `rpa-*` skills are published from - is a
-**system source**: it is in effect the way the delivered skills are, without appearing in
-`skills.sources` and without any file being written for it. So the rest of that collection is one
-command away on a machine whose `config.yaml` has never been touched:
+**system source**: it is in effect the way the delivered skills are, without being declared in any
+`marketplaces.json` and without any file being written for it, and it is trusted in every workspace.
+So the rest of that collection is one command away on a machine nobody has configured:
 
 ```bash
 coddy skills sync                 # install everything the catalogue publishes
 coddy plugin marketplace list     # every source in effect, and whether it resolves
 ```
 
-It is an address and nothing more - Coddy contacts it only when you ask it to. Because it is not in
-the config file there is nothing to take out of one: `coddy plugin marketplace remove` refuses it
-(unless your `skills.sources` happens to name it as well, in which case it takes that redundant
-entry out of the file and tells you the marketplace itself stays),
-`DELETE /coddy/skills/sources` answers 400, and **Settings → Skills → Remote skill sources** shows the
-row greyed out with its delete button disabled. To be rid of a skill it publishes, disable or delete
-that skill (`coddy skills disable <name>`) rather than the catalogue.
+It is an address and nothing more - Coddy contacts it only when you ask it to. Because no file
+declares it there is nothing to take out of one: `coddy plugin marketplace remove` refuses it
+(unless one of your `marketplaces.json` files happens to name it as well, in which case it takes
+that redundant entry out of the file and tells you the marketplace itself stays),
+`DELETE /coddy/skills/sources` answers 400, and **Settings → Skills → Marketplaces** shows its row
+with a shield that cannot be clicked and a disabled delete button. To be rid of a skill it
+publishes, disable or delete that skill (`coddy skills disable <name>`) rather than the catalogue.
 
-`GET /coddy/skills/sources` names them under `system`, which is how a client knows which rows carry
-no remove control.
+`GET /coddy/skills/sources` lists it first, with `origin: "system"`, and names it under `system`,
+which is how a client knows which rows carry no remove control.
 
-![Remote skill sources with the built-in marketplace greyed out](../assets/skills/skills-system-source-dark-1280.png)
+![Settings, Skills: the marketplaces list with the built-in source, one of yours and a project source awaiting approval](../assets/skills/skills-marketplaces-dark-1280.png)
 
-*Settings → Skills: the built-in `EvilFreelancer/rpa-skills` is listed and can be synced, but its
-field and its delete button are disabled; a source you added yourself is editable as before.*
+*Settings → Skills → Marketplaces: the built-in `EvilFreelancer/rpa-skills` with its always-trusted
+shield, a catalogue from your own file, and a source the project declares, held until the shield
+approves it for this workspace.*
 
 ## Where to get skills
 
@@ -131,19 +132,87 @@ You can also browse and install through the Coddy web UI: **Settings → Skills 
 
 ---
 
-## Install from a repository or marketplace API (agents standard)
+## Marketplaces and sources
 
-Coddy can fetch skills itself, without any external CLI, from a **GitHub repo**, a **git URL**, or an **http(s) URL** to an [agents-standard](https://agents.md) `marketplace.json`. Configure sources under `skills.sources` and install them on demand — nothing is fetched automatically.
+Coddy can fetch skills itself, without any external CLI, from a **GitHub repo**, a **git URL**, or
+an **http(s) URL** to an [agents-standard](https://agents.md) `marketplace.json`. What it may fetch
+is declared in two files of one shape, never in `config.yaml`:
 
-```yaml
-skills:
-  sources:
-    - "EvilFreelancer/rpa-skills"                    # owner/repo shorthand (GitHub)
-    - "artwist-polyakov/polyakov-claude-skills"      # a marketplace monorepo
-    - "owner/repo@v1.2"                              # pin a branch or tag
-    - "https://github.com/owner/single-skill.git"    # any git URL
-    - "https://example.com/skills/marketplace.json"  # an API marketplace URL
+| File | Written by | Takes effect |
+|------|------------|--------------|
+| `${CODDY_HOME}/marketplaces.json` (`~/.coddy/marketplaces.json`) | you: `coddy skills add`, `coddy plugin marketplace add`, Settings → Skills | at once, in every workspace |
+| `.coddy/marketplaces.json` of the project | the project, which commits it; `coddy skills add --project`, **This project** in Settings | as `skills.project_trust` allows ([below](#project-marketplaces-and-trust)) |
+
+```json
+{
+  "sources": [
+    "artwist-polyakov/polyakov-claude-skills",
+    "owner/repo@v1.2",
+    "https://github.com/owner/single-skill.git"
+  ],
+  "marketplaces": [
+    { "name": "neuraldeep", "source": "https://neuraldeep.ru/skapi/marketplace.json" }
+  ]
+}
 ```
+
+- A **source** is installed whole: a sync installs every plugin it publishes (every skill of a
+  repository without a `marketplace.json`) and keeps them up to date. A source is a GitHub
+  `owner/repo` (with `@ref` to pin a branch or a tag), a git URL or a `marketplace.json` URL.
+- A **marketplace** is a catalogue, remembered under the `name` its `marketplace.json` gives:
+  `plugin marketplace add` reads its list, its plugins are installed one by one with
+  `plugin install <plugin>@<name>`, and an update touches only those.
+
+Declaring either downloads nothing: `coddy skills sync`, **Sync** in Settings or
+`POST /coddy/skills/sync` fetches, and nothing is fetched automatically. Whatever an entry installs
+goes into `${CODDY_HOME}/skills`, whichever file declared it, so a project's marketplace brings its
+skills into your Coddy home, not into the checkout. The built-in
+[`EvilFreelancer/rpa-skills`](#the-marketplace-that-comes-with-it) sits beside both files. An entry
+both files declare counts once, as yours, and a marketplace name keeps the source your file gives it.
+
+`coddy skills add <src>` declares a source in your file, `--project` in the project's;
+`coddy plugin marketplace add <src>` adds a marketplace to your file. **Settings → Skills →
+Marketplaces** lists every entry of the session's workspace with what it is (**all plugins** or
+**catalog**) and where it is declared (**built in**, **yours**, **from the project**); its add field
+declares a source in your file or, with **This project**, in the project's, and every row syncs and
+removes on its own.
+
+### Project marketplaces and trust
+
+The project's file arrives with a `git clone`, the way a project's `.coddy/mcp.json` and its subagent
+definitions do, and an entry in it decides what code lands in your Coddy home. So it takes effect
+only as **`skills.project_trust`** allows:
+
+- **`ask`** (the default): the entry is listed, marked as awaiting approval, and neither synced nor
+  offered for installation until you approve it for this workspace - with
+  `coddy plugin marketplace trust <name | source>` in a terminal in the workspace, or with the shield
+  of its row in Settings → Skills. `coddy plugin marketplace list` and every sync name the entries
+  they held back and the command that approves them. The approval is bound to the workspace and to
+  the entry (its kind, name and source) and kept in `${CODDY_HOME}/skills-trust.json`; an entry the
+  checkout rewrites asks again, and `coddy plugin marketplace untrust <key>` or the shield withdraws
+  it. Skills it already installed stay until you remove them.
+- **`allow`**: project entries take effect at once.
+- **`deny`**: project entries never take effect; they are listed as switched off by the policy.
+
+An entry you write into the project yourself (`coddy skills add <src> --project`, **This project** in
+Settings) is approved for that workspace as you write it. The chat's `/plugin` cannot approve one: a
+model can type into a chat, so the command names the terminal and the shield instead.
+
+### Moving from config.yaml
+
+Earlier versions kept sources in `config.yaml` under `skills.sources` and the added marketplaces in
+`${CODDY_HOME}/skills/.marketplaces.json`. Both move into `${CODDY_HOME}/marketplaces.json` by
+themselves:
+
+- the first time this version loads `config.yaml`, the sources of `skills.sources` are appended to
+  the file in their order (one it lists already, in any spelling, and the built-in source are not
+  repeated), and `config.yaml` is rewritten without the key, the old file kept beside it as
+  `config.yaml.bak-<timestamp>` and the move logged with what it carried;
+- the first time it reads the marketplaces, the ones `.marketplaces.json` remembers are added to the
+  file unless it declares that name or source already. `.marketplaces.json` stays, holding only the
+  plugin lists Coddy read from each marketplace.
+
+`coddy -t` reports a `skills.sources` key still standing in a file as moved, with a pointer here.
 
 ### The `plugin` command (CLI and `/plugin` in chat)
 
@@ -157,6 +226,8 @@ coddy plugin install <plugin>@<marketplace>              # install one plugin of
 coddy plugin marketplace update [<marketplace>]          # refresh the list and the plugins installed from it (alias: sync)
 coddy plugin marketplace list [<marketplace>]            # marketplaces and sources, or the plugins of one marketplace
 coddy plugin marketplace remove <marketplace | source>   # remove a marketplace or a source; installed skills stay
+coddy plugin marketplace trust <marketplace | source>    # approve a project entry for this workspace (terminal only)
+coddy plugin marketplace untrust <marketplace | source>  # withdraw that approval
 coddy plugin install <owner/repo | url>                  # install every skill a source publishes, kept in sync
 coddy plugin remove <name>                               # delete an installed skill (bundled = read-only)
 coddy plugin enable <name>   |   plugin disable <name>   # toggle a skill
@@ -182,50 +253,55 @@ coddy plugin install yandex-wordstat@neuraldeep
   gives (`neuraldeep` above), with the list of plugins it publishes; it installs none of them. Adding
   it again refreshes that list and answers that the marketplace is added already. A source with no
   `marketplace.json`, or whose `marketplace.json` gives no name, cannot be added; install it whole
-  with `plugin install <source>` instead. The added marketplaces live in
-  `${CODDY_HOME}/skills/.marketplaces.json`, not in `config.yaml`.
-- **`install <plugin>@<marketplace>`** installs one plugin of an added marketplace, found by that
-  name. It reads the marketplace again first, so a plugin the marketplace published after it was
-  added installs without an update. A marketplace that is not added, or a plugin it does not list,
-  is an error that says what to run.
+  with `plugin install <source>` instead. The marketplace is declared in your
+  `${CODDY_HOME}/marketplaces.json`; the plugin list it read is kept in
+  `${CODDY_HOME}/skills/.marketplaces.json`.
+- **`install <plugin>@<marketplace>`** installs one plugin of a marketplace in effect, found by that
+  name: one of yours, or one the project declares and you approved. It reads the marketplace again
+  first, so a plugin the marketplace published after it was added installs without an update. A
+  marketplace that is not added, one still awaiting approval, or a plugin it does not list, is an
+  error that says what to run.
 - **`marketplace update <marketplace>`** reads the marketplace again and reinstalls the plugins
   installed from it; the ones never installed stay so. It works per plugin: a skill removed with
-  `plugin remove` comes back while another skill of the same plugin is still installed. Without a name it does that for every added
-  marketplace and syncs every source, which is also what `coddy skills sync` does.
-- **`install <owner/repo | url>`** (no `@`) installs every skill the source publishes, as before: it
-  adds the source to `skills.sources`, and every sync installs and updates all of its plugins. A
-  source already in `skills.sources` keeps that contract, including the built-in `EvilFreelancer/rpa-skills`.
-- **`marketplace list`** probes each added marketplace and each source and reports whether it is a
-  **valid marketplace** (agents standard, with its name, version, and plugin count), a repo with **no
-  marketplace.json** (skills discovered directly), or **unreachable**; with a name it lists the plugins
-  of that marketplace and marks the installed ones.
+  `plugin remove` comes back while another skill of the same plugin is still installed. Without a name it does that for every
+  marketplace in effect and syncs every source, which is also what `coddy skills sync` does.
+- **`install <owner/repo | url>`** (no `@`) installs every skill the source publishes: it declares the
+  source in your `marketplaces.json`, and every sync installs and updates all of its plugins. Every
+  source of either file keeps that contract, the built-in `EvilFreelancer/rpa-skills` included.
+- **`marketplace list`** probes each marketplace and each source in effect and reports whether it is
+  a **valid marketplace** (agents standard, with its name, version, and plugin count), a repo with
+  **no marketplace.json** (skills discovered directly), or **unreachable**, with where it is declared;
+  a project entry awaiting approval is listed with the command that approves it, not probed. With a
+  name it lists the plugins of that marketplace and marks the installed ones.
+- **`marketplace trust <key>`** approves a project entry for the workspace the terminal is in and
+  prints what it approved: the file that declares it, the address it reads and the digest the
+  approval binds to. `untrust` withdraws it. In chat both answer with the command to run instead.
 
-`marketplace remove <marketplace>` forgets an added marketplace and, when its source is in
-`skills.sources` as well, takes it out of there too; the skills installed from it stay until
-`plugin remove <name>`. `install` and `marketplace add` touch only what they name: another source
-that is unreachable does not fail them.
+`marketplace remove <marketplace>` takes the marketplace out of the file that declares it - yours or
+the project's - and a source of the same address with it, together with the project approval it
+had; the skills installed from it stay until `plugin remove <name>`. `install` and `marketplace add`
+touch only what they name: another source that is unreachable does not fail them.
 
-**Changed in this release.** `plugin marketplace add` used to write the source into `skills.sources`
-and install every plugin it lists. It now only adds the marketplace; install its plugins one by one
-with `plugin install <plugin>@<marketplace>`, or keep the old behaviour with
-`plugin install <owner/repo | url>`. Sources that are already in `skills.sources` are not touched and
-keep having every plugin installed.
+`plugin marketplace add` only adds the marketplace; install its plugins one by one with
+`plugin install <plugin>@<marketplace>`, or have every plugin installed and kept in sync with
+`plugin install <owner/repo | url>`.
 
 The lower-level `coddy skills` commands remain for skill files themselves:
 
 ```bash
 coddy skills list                                      # all skills (with a VERSION column)
 coddy skills enable <name>  |  disable <name>
-coddy skills add <src>  |  sync  |  remove <name>      # remote source install (see below)
+coddy skills add <src> [--project]  |  sync  |  remove <name>   # declare a source, fetch, delete
 ```
 
 Three surfaces stay in parity — pick whichever fits:
 
 - **CLI** — `coddy plugin ...` (and `coddy skills ...`).
 - **Chat** — the `/plugin ...` command.
-- **Web UI** — **Settings → Skills → Remote skill sources** (add a source, **Sync**, remove a source,
-  **Refresh** to check versions, and a per-skill **Update** button when a newer version exists). The
-  install search there also offers the plugins of the added marketplaces.
+- **Web UI** — **Settings → Skills → Marketplaces** (add a source to your file or the project's,
+  approve a project entry with its shield, **Sync**, remove), **Refresh** to check versions, and a
+  per-skill **Update** button when a newer version exists. The install search there also offers the
+  plugins of the marketplaces in effect.
 
 ### Versions and updates
 
@@ -267,7 +343,7 @@ again and records the new version.
 3. If there is **no manifest**, the repo is scanned directly for `SKILL.md`.
 4. Every discovered skill directory (root `SKILL.md`, `skills/<name>/`, `.claude/skills/<name>/`, or `plugins/<p>/skills/<s>/`) is copied — with its sibling `scripts/`, `references/`, `examples/` — into `${CODDY_HOME}/skills/<name>/`, where the normal loader picks it up.
 
-Provenance is tracked in `${CODDY_HOME}/skills/.remote.json`. Because synced skills live in a normal skills directory, `enable`/`disable` work on them like any other skill; `remove` deletes the copy (re-running `sync` re-installs it unless you also drop the source from `skills.sources`).
+Provenance is tracked in `${CODDY_HOME}/skills/.remote.json`. Because synced skills live in a normal skills directory, `enable`/`disable` work on them like any other skill; `remove` deletes the copy (re-running `sync` re-installs it unless you also remove the source from its `marketplaces.json`).
 
 Private repositories rely on your ambient `git` credentials; API URLs and plugin archives are checked against the same SSRF guard used by the `webfetch` tool.
 
@@ -324,9 +400,9 @@ The lockfile records the archive address next to the marketplace, and the versio
 
 ## Directory layout
 
-![Settings, Skills tab: auto-discovery, the resolved skills.dirs, remote sources and installed skills](../assets/screenshot-fullhd-settings-skills.png)
+![Settings, Skills tab: auto-discovery, the extra skill directories, the project marketplaces policy, the marketplaces and the installed skills](../assets/screenshot-fullhd-settings-skills.png)
 
-*Settings, Skills tab: auto-discovery, the extra directories of skills.dirs, the remote sources with the built-in one greyed out, and the installed skills, the bundled ones among them*
+*Settings, Skills tab: auto-discovery, the extra directories of skills.dirs and the policy for project marketplaces, the marketplaces with the built-in one, and the installed skills, the bundled ones among them*
 
 Every workspace reads four skill folders, whatever `config.yaml` says, and then the extra directories of `skills.dirs`. They are read in this order, and **the lower a folder is in the list, the stronger it is**: a skill whose name is found in several folders is taken from the last of them.
 
@@ -437,7 +513,7 @@ Instructions the agent will follow when this skill is active.
 
 Then drop the directory into one of the default folders (`~/.agents/skills/`, the project's `.agents/skills/`, `~/.coddy/skills/`, the project's `.coddy/skills/`), or add its parent directory to `skills.dirs` in `config.yaml`.
 
-In a running agent session, committing a change to `skills.dirs`, `skills.sources`, or `skills.auto_discovery` through the staged config tools (`config_set` + `config_commit`) immediately rebuilds the skill catalog. An external installer such as `coddy plugin install` or `npx skills add` changes files on disk, so follow it with an idempotent commit of `set skills.dirs=[...]` to refresh the running loader. Adding an entry to `skills.sources` alone still does not fetch or install anything.
+In a running agent session, committing a change to `skills.dirs` or `skills.auto_discovery` through the staged config tools (`config_set` + `config_commit`) immediately rebuilds the skill catalog. An external installer such as `coddy plugin install` or `npx skills add` changes files on disk, so follow it with an idempotent commit of `set skills.dirs=[...]` to refresh the running loader. Declaring a source in a `marketplaces.json` alone does not fetch or install anything.
 
 To share it with others, publish to GitHub and list it on [skills.sh](https://skills.sh) or submit to [neuraldeep.ru/skills](https://neuraldeep.ru/skills).
 
@@ -451,11 +527,12 @@ when its workspace changes and when the configuration is reloaded; nothing
 is read over the network for that.
 
 - **Read at the start, bodies included**: every `SKILL.md` (and root `.md` /
-  `.mdc` skill file) of the folders in `skills.dirs` and of the managed
-  folder, about 0.1 ms per skill, so a thousand installed skills add some
-  100 ms to the console's first frame; the skills built into the binary are
-  held in memory.
-- **Never read at the start**: `skills.sources`. A source's manifest or
+  `.mdc` skill file) of the folders the workspace reads
+  ([Directory layout](#directory-layout)), about 0.1 ms per skill, so a
+  thousand installed skills add some 100 ms to the console's first frame;
+  the skills built into the binary are held in memory.
+- **Never read at the start**: the sources and marketplaces of the
+  `marketplaces.json` files. A source's manifest or
   repository is fetched only when someone asks for it - `coddy skills sync`,
   `coddy plugin marketplace sync` and `/plugin`, Settings → Skills
   (**Refresh**, **Update**), `GET /coddy/skills/updates` - so a large
@@ -468,14 +545,14 @@ connects them after its first frame ([MCP servers](mcp.md#mcp-server-lifecycle))
 
 On each `session/prompt` the agent:
 
-1. Uses the skills the session read from `skills.dirs` for its cwd and `CODDY_HOME` ([When skills are read](#when-skills-are-read)).
+1. Uses the skills the session read from the folders of its workspace ([When skills are read](#when-skills-are-read)).
 2. All loaded (and enabled) skills are always active — their bodies are available as slash commands and injected on demand.
 3. Builds the **`{{.Skills}}`** system-prompt block: the slash-command catalog listing all skills, plus the full body of any always-active or glob-matched skill whose name is **not** already in the catalog.
 4. Looks for `/name` invocations in the text the user typed and **appends each matched skill's body to the user message**, as a `<coddy_attachment path="skill:name" kind="skill">` element after the typed text. The message goes into **session history with the body in it**, so later turns replay the same bytes: the provider's cached prefix holds, and the model keeps the instructions it was given until a compaction folds the message into its summary ([Mentions and the prompt cache](mentions.md#mentions-and-the-prompt-cache)). The transcript shows the message as typed, because the web UI drops `kind="skill"` elements, and so does the history replay a reopened console or an ACP editor receives. A follow-up queued during a turn gets its skill bodies the same way.
 
 A body the model loads itself with the `load_skill` tool (offered while `skills.auto_discovery` is on) comes back as the result of that call and stays in session history like any other tool result.
 
-Either way, a skill that is a folder on disk arrives headed by one line, `Skill directory: <path>`, the folder its `SKILL.md` was read from. A skill names its own files - `scripts/`, `references/` - by relative path, and without the line a model has to search the disk for them. A skill of the standard delivery that is read out of the binary (when `skills.dirs` does not list `${CODDY_HOME}/skills`) is pointed at the copy the delivery wrote there; with no such copy on disk there is no line.
+Either way, a skill that is a folder on disk arrives headed by one line, `Skill directory: <path>`, the folder its `SKILL.md` was read from. A skill names its own files - `scripts/`, `references/` - by relative path, and without the line a model has to search the disk for them. A skill of the standard delivery that is read out of the binary (a home Coddy cannot write to) is pointed at the copy the delivery wrote into `${CODDY_HOME}/skills` when there is one; with no such copy on disk there is no line.
 
 ACP clients receive `available_commands_update` after `session/new` and `session/load`. The HTTP UI queries `GET /coddy/slash-commands` for autocomplete.
 

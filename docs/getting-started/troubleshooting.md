@@ -145,7 +145,23 @@ coddy agents list [--cwd DIR]
 coddy agents trust <name>
 ```
 
-Both `trust` commands print what they are about to approve and record the receipt (`~/.coddy/hooks-trust.json`, `~/.coddy/subagents-trust.json`). From a remote console or an ACP client the approval belongs on the server: `POST /coddy/hooks/trust` and `POST /coddy/subagents/{name}/trust` with the session workspace as `cwd`. The web UI's Settings > Subagents lists the definitions and marks the ones awaiting approval, but records none. A checkout you already trust can run under `project_trust: allow`. Guides: [Hooks](../features/hooks.md#project-files-and-trust), [Subagents](../features/subagents.md#scopes-and-project-trust).
+Both `trust` commands print what they are about to approve and record the receipt (`~/.coddy/hooks-trust.json`, `~/.coddy/subagents-trust.json`). From a remote console or an ACP client the approval belongs on the server: `POST /coddy/hooks/trust` and `POST /coddy/subagents/{name}/trust` with the session workspace as `cwd`. The web UI's Settings > Subagents lists the definitions and approves a project one with the shield of its row, which records the receipt on the server for the workspace of the chat on screen. A checkout you already trust can run under `project_trust: allow`. Guides: [Hooks](../features/hooks.md#project-files-and-trust), [Subagents](../features/subagents.md#scopes-and-project-trust).
+
+## A project marketplace is not synced
+
+**Symptom.** A source or marketplace the project declares in `.coddy/marketplaces.json` installs nothing: `coddy skills sync` ends with a line like `? team/skills: declared by <workspace>/.coddy/marketplaces.json, not approved for this workspace`, `plugin install <plugin>@<name>` says the marketplace is not approved, and Settings > Skills shows the row with a note and its **Sync** button disabled.
+
+**Cause.** That file arrives with the checkout and decides what is installed into `${CODDY_HOME}/skills`, so its entries follow `skills.project_trust`: under the default `ask` an entry takes effect only once you approve it for that workspace, and an approval is bound to the entry, so a checkout that rewrites it asks again. Under `deny` the entries are listed as switched off and never used.
+
+**Fix.** Approve it in a terminal in the workspace, or with the shield of its row in Settings > Skills:
+
+```bash
+coddy plugin marketplace list            # what is declared, and what waits for approval
+coddy plugin marketplace trust <name>    # a marketplace by name, a source by its address
+coddy skills sync
+```
+
+`/plugin` in a chat cannot approve one. A checkout you already trust can run under `skills.project_trust: allow`. Guide: [Skills](../features/skills.md#project-marketplaces-and-trust).
 
 ## A turn stops with a usage limit
 

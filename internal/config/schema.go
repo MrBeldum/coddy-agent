@@ -339,6 +339,13 @@ var movedKeys = map[string]struct{ message, fix, doc string }{
 			"and removes it from config.yaml, keeping the old file as config.yaml.bak-<time>",
 		doc: "https://coddy.dev/docs/features/mcp#moving-from-configyaml",
 	},
+	"skills.sources": {
+		message: "skills.sources is no longer read from config.yaml",
+		fix: "skill marketplaces live in ${CODDY_HOME}/marketplaces.json and the project's .coddy/marketplaces.json; " +
+			"the next start moves this list into the sources of ${CODDY_HOME}/marketplaces.json " +
+			"and removes it from config.yaml, keeping the old file as config.yaml.bak-<time>",
+		doc: "https://coddy.dev/docs/features/skills#marketplaces-and-sources",
+	},
 }
 
 func (v *schemaValidator) unknownKey(path string, k *yaml.Node, s *schemaNode) {

@@ -94,7 +94,7 @@ const B_WORKSPACE = "/projects/b";
 // Skills each workspace holds in its .coddy/skills, plus one global skill.
 const SKILLS_BY_WORKSPACE: Record<string, string[]> = {
   [DEFAULT_WORKSPACE]: ["global", "default-only"],
-  [DATA_WORKSPACE]: ["global", "rgs-confluence", "rgs-jira"],
+  [DATA_WORKSPACE]: ["global", "dat-report", "dat-export"],
   [OTHER_WORKSPACE]: ["global"],
   [ACTIVE_WORKSPACE]: ["global", "active-only"],
   [B_WORKSPACE]: ["global", "b-only"],
@@ -198,7 +198,7 @@ test("a folder picked before the session exists decides the known skills", async
   await waitFor(() => expect(known()).toBe("default-only,global"));
 
   fireEvent.click(screen.getByTestId("pick-data"));
-  await waitFor(() => expect(known()).toBe("global,rgs-confluence,rgs-jira"));
+  await waitFor(() => expect(known()).toBe("dat-export,dat-report,global"));
 
   fireEvent.click(screen.getByTestId("pick-other"));
   await waitFor(() => expect(known()).toBe("global"));
@@ -280,7 +280,7 @@ test("the first send keeps the picked folder although its preview never answered
   await waitFor(() => expect(known()).toBe("default-only,global"));
   slowDataContext = new Promise<void>(() => {});
   fireEvent.click(screen.getByTestId("pick-data"));
-  await waitFor(() => expect(known()).toBe("global,rgs-confluence,rgs-jira"));
+  await waitFor(() => expect(known()).toBe("dat-export,dat-report,global"));
 
   fireEvent.click(screen.getByTestId("send"));
   await waitFor(() =>
@@ -290,5 +290,5 @@ test("the first send keeps the picked folder although its preview never answered
   );
   expect(screen.getByTestId("chat-workspace").textContent).toBe(DATA_WORKSPACE);
   await new Promise((resolve) => setTimeout(resolve, 20));
-  expect(known()).toBe("global,rgs-confluence,rgs-jira");
+  expect(known()).toBe("dat-export,dat-report,global");
 });

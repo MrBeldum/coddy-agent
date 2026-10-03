@@ -1429,7 +1429,7 @@ func openAPISpec() map[string]interface{} {
 				"post": map[string]interface{}{
 					"summary": "Approve a project subagent definition for a workspace",
 					"description": "Records a receipt in **`<home>/subagents-trust.json`** binding the workspace, the definition name and the digest of its current file content, so **spawn_agent** may run it under **`subagents.project_trust: ask`**. Rewriting the file changes the digest and withdraws the approval. " +
-						"Optional body **`{\"cwd\": ...}`** selects the workspace (default: the server's default cwd). **404** when no definition of that name is visible from the workspace; **400** for a built-in or user-scope definition (nothing to approve), a malformed body, or a relative **cwd**. Answers with the refreshed catalog entry.",
+						"Optional body **`{\"cwd\": ..., \"digest\": ...}`** selects the workspace (default: the server's default cwd) and names the content the operator was shown: a file rewritten since is refused with **409**. **404** when no definition of that name is visible from the workspace; **400** for a built-in or user-scope definition (nothing to approve), a malformed body, or a relative **cwd**. Answers with the refreshed catalog entry. Settings -> Subagents approves through this route.",
 					"operationId": "trustSubagent",
 					"parameters":  []interface{}{subagentNameParam()},
 					"requestBody": subagentTrustRequestBody(),
@@ -1437,6 +1437,7 @@ func openAPISpec() map[string]interface{} {
 						"200": subagentEntryResponse("Approval recorded; the entry now reports **trusted**."),
 						"400": errorResponseRef(),
 						"404": errorResponseRef(),
+						"409": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
@@ -2556,13 +2557,13 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/skills/sync": map[string]interface{}{
 				"post": map[string]interface{}{
 					"summary":     "Sync remote skill sources",
-					"description": "Fetches every source in **`skills.sources`** (GitHub repos, git URLs, or an http(s) URL to an agents-standard **`marketplace.json`**) and materializes their skills into the managed skills directory, then refreshes every marketplace added with `plugin marketplace add` and reinstalls only the plugins installed from it. Manual only — never runs automatically. Returns lists of added/updated skill names and per-source failures.",
+					"description": "Fetches every source in effect for the session workspace (the server default workspace without **X-Coddy-Session-ID**): the built-in one, the sources of **`<home>/marketplaces.json`** and those of the workspace's **`.coddy/marketplaces.json`** the trust gate admits (GitHub repos, git URLs, or an http(s) URL to an agents-standard **`marketplace.json`**), and materializes their skills into the managed skills directory, then refreshes every marketplace in effect and reinstalls only the plugins installed from it. A project entry the gate holds back (**`skills.project_trust`**) is reported in **`held`** and not fetched. Manual only - never runs automatically. Returns lists of added/updated skill names and per-source failures.",
 					"operationId": "syncSkills",
 					"parameters": []interface{}{
 						map[string]interface{}{
 							"name": "source", "in": "query", "required": false,
 							"schema":      map[string]string{"type": "string"},
-							"description": "Sync only this source; a marketplace added with `plugin marketplace add` refreshes only the plugins installed from it. Omit to sync everything.",
+							"description": "Sync only this source, or refresh only the plugins installed from this marketplace (by name or source). Omit to sync everything in effect. A project entry the trust gate holds back is refused with 400.",
 						},
 					},
 					"responses": map[string]interface{}{
@@ -2574,26 +2575,34 @@ func openAPISpec() map[string]interface{} {
 								},
 							},
 						},
+						"400": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
 			},
 			"/coddy/skills/sources": map[string]interface{}{
 				"get": map[string]interface{}{
-					"summary":     "List remote skill sources",
-					"description": "Returns the configured **`skills.sources`** entries (GitHub repos, git URLs, or marketplace.json URLs).",
+					"summary":     "List skill sources and marketplaces",
+					"description": "Lists what is declared for the session workspace (the server default workspace without **X-Coddy-Session-ID**, as the MCP tab does): the built-in source, the entries of **`<home>/marketplaces.json`** and those of the workspace's **`.coddy/marketplaces.json`**, each once, with its kind, origin, file and trust state. A project entry takes effect only as **`skills.project_trust`** allows: under `ask` once approved for the workspace (`POST /coddy/skills/sources/trust`).",
 					"operationId": "listSkillSources",
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
-							"description": "Configured sources.",
+							"description": "Declared sources and marketplaces.",
 							"content": map[string]interface{}{
 								"application/json": map[string]interface{}{
 									"schema": map[string]interface{}{
 										"type": "object",
 										"properties": map[string]interface{}{
-											"object": map[string]string{"type": "string", "example": "coddy.skills_sources"},
-											"items":  map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "Every source in effect: the built-in ones first, then what skills.sources names."},
-											"system": map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "The subset of items Coddy brings itself. They are not in config.yaml, DELETE refuses them, and a client should offer no remove control for them."},
+											"object":        map[string]string{"type": "string", "example": "coddy.skills_sources"},
+											"workspace":     map[string]string{"type": "string", "description": "The workspace whose project file was read."},
+											"project_trust": map[string]interface{}{"type": "string", "enum": []string{"ask", "allow", "deny"}, "description": "The skills.project_trust in force."},
+											"items":         map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "The sources installed whole that are in effect: the built-in ones first, then the operator's, then the project's the gate admits."},
+											"system":        map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "The sources Coddy brings itself. They are in no file, always trusted, DELETE refuses them, and a client should offer no remove control for them."},
+											"entries": map[string]interface{}{
+												"type":  "array",
+												"items": map[string]interface{}{"$ref": "#/components/schemas/SkillSourceEntry"},
+											},
+											"errors": map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "A marketplaces.json that could not be read; it declares nothing until repaired."},
 										},
 									},
 								},
@@ -2602,8 +2611,8 @@ func openAPISpec() map[string]interface{} {
 					},
 				},
 				"post": map[string]interface{}{
-					"summary":     "Add a remote skill source",
-					"description": "Appends a source to **`skills.sources`** in **config.yaml** and reloads config. Set **`sync:true`** to also fetch it immediately. The source is a GitHub repo (`owner/repo[@ref]`), a git URL, or an http(s) URL to an agents-standard **`marketplace.json`**.",
+					"summary":     "Declare a skill source or marketplace",
+					"description": "Declares a source (installed whole: every plugin it publishes, kept in sync) or, with **`kind: marketplace`**, a catalog whose plugins are installed one by one (its **`marketplace.json`** is read for its name). **`scope: global`** (default) writes **`<home>/marketplaces.json`**; **`scope: local`** writes the session workspace's **`.coddy/marketplaces.json`** and approves the entry for that workspace, the operator having typed it. Set **`sync:true`** to also fetch a source immediately. config.yaml is not touched.",
 					"operationId": "addSkillSource",
 					"requestBody": map[string]interface{}{
 						"required": true,
@@ -2614,6 +2623,8 @@ func openAPISpec() map[string]interface{} {
 									"properties": map[string]interface{}{
 										"source": map[string]string{"type": "string", "description": "owner/repo[@ref], a git URL, or a marketplace.json URL."},
 										"sync":   map[string]interface{}{"type": "boolean", "description": "Fetch the source immediately after adding."},
+										"scope":  map[string]interface{}{"type": "string", "enum": []string{"global", "local"}, "description": "global: <home>/marketplaces.json (default); local: the workspace's .coddy/marketplaces.json."},
+										"kind":   map[string]interface{}{"type": "string", "enum": []string{"source", "marketplace"}, "description": "source (default): installed whole; marketplace: a catalog."},
 									},
 									"required": []interface{}{"source"},
 								},
@@ -2621,24 +2632,74 @@ func openAPISpec() map[string]interface{} {
 						},
 					},
 					"responses": map[string]interface{}{
-						"200": map[string]interface{}{"description": "Source added (with optional sync result)."},
+						"200": map[string]interface{}{"description": "Declared (added:false when it was declared already), with an optional sync result."},
 						"400": errorResponseRef(),
 						"500": errorResponseRef(),
 					},
 				},
 				"delete": map[string]interface{}{
-					"summary":     "Remove a remote skill source",
-					"description": "Removes a source from **`skills.sources`** in **config.yaml** (matched case-insensitively) and reloads config. Already-installed skills remain until removed. The source is passed as the **`source`** query parameter. Missing **`source`** returns 400, and so does a source listed under **`system`** by `GET /coddy/skills/sources`: those are built into Coddy and are not in the file.",
+					"summary":     "Remove a skill source or marketplace",
+					"description": "Takes every source and marketplace **`source`** names (a marketplace by name, either kind by source in any spelling; a marketplace removed by name takes a source of its address with it) out of **`<home>/marketplaces.json`** and the session workspace's **`.coddy/marketplaces.json`**, with the approvals of the project entries. Already-installed skills remain until removed. Missing **`source`** returns 400, and so does a source listed under **`system`** by `GET /coddy/skills/sources`: those are built into Coddy and are in no file.",
 					"operationId": "removeSkillSource",
 					"parameters": []interface{}{
 						map[string]interface{}{
 							"name": "source", "in": "query", "required": true,
 							"schema":      map[string]string{"type": "string"},
-							"description": "The exact configured source string to remove.",
+							"description": "A marketplace name, or a source address.",
 						},
 					},
 					"responses": map[string]interface{}{
-						"200": map[string]interface{}{"description": "Source removed (or absent, with removed:false)."},
+						"200": map[string]interface{}{"description": "Removed (or absent, with removed:false)."},
+						"400": errorResponseRef(),
+					},
+				},
+			},
+			"/coddy/skills/sources/trust": map[string]interface{}{
+				"post": map[string]interface{}{
+					"summary":     "Approve a project skill source",
+					"description": "Records the operator's approval of an entry of the session workspace's **`.coddy/marketplaces.json`** for that workspace, so a sync uses it. The optional **`fingerprint`** names the entry the operator was shown (`GET /coddy/skills/sources`); when the checkout rewrote it since, the answer is **409** and nothing is recorded. Receipts live in **`<home>/skills-trust.json`**. **400** for an entry no file declares, one of the operator's own or the built-in one (they need no approval), and under **`skills.project_trust: deny`**.",
+					"operationId": "trustSkillSource",
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type": "object",
+									"properties": map[string]interface{}{
+										"key":         map[string]string{"type": "string", "description": "A marketplace name, or a source address."},
+										"fingerprint": map[string]string{"type": "string", "description": "The fingerprint the listing reported for the entry."},
+									},
+									"required": []interface{}{"key"},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "Approved: {\"ok\": true, \"fingerprint\": \"sha256:...\"}."},
+						"400": errorResponseRef(),
+						"409": errorResponseRef(),
+					},
+				},
+			},
+			"/coddy/skills/sources/untrust": map[string]interface{}{
+				"post": map[string]interface{}{
+					"summary":     "Withdraw the approval of a project skill source",
+					"description": "Removes the receipt of the entry **`key`** names for the session workspace. Skills it installed stay until removed.",
+					"operationId": "untrustSkillSource",
+					"requestBody": map[string]interface{}{
+						"required": true,
+						"content": map[string]interface{}{
+							"application/json": map[string]interface{}{
+								"schema": map[string]interface{}{
+									"type":       "object",
+									"properties": map[string]interface{}{"key": map[string]string{"type": "string", "description": "A marketplace name, or a source address."}},
+									"required":   []interface{}{"key"},
+								},
+							},
+						},
+					},
+					"responses": map[string]interface{}{
+						"200": map[string]interface{}{"description": "{\"ok\": true, \"removed\": bool}."},
 						"400": errorResponseRef(),
 					},
 				},
@@ -2646,8 +2707,9 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/skills/available": map[string]interface{}{
 				"get": map[string]interface{}{
 					"summary":     "List installable marketplace plugins",
-					"description": "Fetches the manifest of every configured source and of every marketplace added with `plugin marketplace add` (network / git) and returns the plugins they advertise, each flagged with `installed`. Backs the browse/filter install control.",
+					"description": "Fetches the manifest of every source and marketplace in effect for the workspace (network / git) and returns the plugins they advertise, each flagged with `installed`; a project entry the trust gate holds back offers nothing. Backs the browse/filter install control.",
 					"operationId": "listAvailablePlugins",
+					"parameters":  []interface{}{listingCWDParam()},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{"description": "Available plugins (name, description, version, source, installed)."},
 						"500": errorResponseRef(),
@@ -3005,7 +3067,7 @@ func openAPISpec() map[string]interface{} {
 						"file_path":   map[string]string{"type": "string"},
 						"enabled":     map[string]interface{}{"type": "boolean", "description": "False when the skill is in the disabled list."},
 						"version":     map[string]string{"type": "string", "description": "Installed version: the marketplace-declared version for synced skills, else `sha256:` and the first 12 hex digits of the archive for a plugin installed from a zip archive, else the SKILL.md frontmatter version. Absent when unknown."},
-						"source":      map[string]string{"type": "string", "description": "Configured source string when the skill was installed via `skills.sources`; absent for local/bundled skills."},
+						"source":      map[string]string{"type": "string", "description": "The source the skill was installed from (as a marketplaces.json declares it, or as an install named it); absent for local/bundled skills."},
 						"readonly":    map[string]interface{}{"type": "boolean", "description": "True for bundled skills, which cannot be deleted."},
 					},
 				},
@@ -3025,6 +3087,25 @@ func openAPISpec() map[string]interface{} {
 								},
 							},
 						},
+						"held": map[string]interface{}{
+							"type":        "array",
+							"description": "Project entries the workspace trust gate kept out of the sync.",
+							"items":       map[string]interface{}{"$ref": "#/components/schemas/SkillSourceEntry"},
+						},
+					},
+				},
+				"SkillSourceEntry": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"kind":        map[string]interface{}{"type": "string", "enum": []string{"source", "marketplace"}, "description": "source: installed whole; marketplace: a catalog whose plugins are installed one by one."},
+						"name":        map[string]string{"type": "string", "description": "A marketplace's name, what <plugin>@<name> uses."},
+						"source":      map[string]string{"type": "string", "description": "owner/repo, a git URL or a marketplace.json URL."},
+						"origin":      map[string]interface{}{"type": "string", "enum": []string{"system", "home", "project"}, "description": "Built into Coddy, <home>/marketplaces.json, or the workspace's .coddy/marketplaces.json."},
+						"source_path": map[string]string{"type": "string", "description": "The file it is declared in; absent for the built-in source."},
+						"gated":       map[string]interface{}{"type": "boolean", "description": "True for a project entry, the kind the trust gate decides on."},
+						"trusted":     map[string]interface{}{"type": "boolean"},
+						"status":      map[string]interface{}{"type": "string", "enum": []string{"ready", "needs_approval", "denied"}},
+						"fingerprint": map[string]string{"type": "string", "description": "The digest an approval of a project entry binds to."},
 					},
 				},
 				"SkillList": map[string]interface{}{
@@ -4060,7 +4141,8 @@ func subagentTrustRequestBody() map[string]interface{} {
 				"schema": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"cwd": map[string]string{"type": "string", "description": "Absolute workspace path. Defaults to the server's default cwd; a relative path is a **400**."},
+						"cwd":    map[string]string{"type": "string", "description": "Absolute workspace path. Defaults to the server's default cwd; a relative path is a **400**."},
+						"digest": map[string]string{"type": "string", "description": "trust only: the digest the catalog reported for the definition the operator was shown; a file rewritten since is refused with **409** and nothing is recorded."},
 					},
 				},
 			},

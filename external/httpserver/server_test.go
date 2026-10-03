@@ -3583,13 +3583,14 @@ func TestCompactEndpointSuccessCounts(t *testing.T) {
 }
 
 // TestCoddySkillsSourcesSyncDelete exercises the remote-skill management routes
-// without any network: add a source (persisted to config.yaml), an empty sync,
-// and delete of a pre-seeded remote skill.
+// without any network: add a source (declared in <home>/marketplaces.json), an
+// empty sync, and delete of a pre-seeded remote skill.
 func TestCoddySkillsSourcesSyncDelete(t *testing.T) {
+	offlineSystemSources(t)
 	home := t.TempDir()
 	t.Setenv("CODDY_HOME", home) // keep ManagedDir() inside the temp home
 	cfgPath := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("skills:\n  sources: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -3604,7 +3605,7 @@ func TestCoddySkillsSourcesSyncDelete(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Add a source; it should persist to config.yaml (no sync).
+	// Add a source; it should be declared in <home>/marketplaces.json (no sync).
 	addBody := `{"source":"owner/repo"}`
 	addReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/coddy/skills/sources", strings.NewReader(addBody))
 	addReq.Header.Set("Content-Type", "application/json")
@@ -3616,15 +3617,20 @@ func TestCoddySkillsSourcesSyncDelete(t *testing.T) {
 	if addRes.StatusCode != http.StatusOK {
 		t.Fatalf("add source status %d %s", addRes.StatusCode, ab)
 	}
-	data, _ := os.ReadFile(cfgPath)
+	data, _ := os.ReadFile(config.GlobalMarketplacesPath(home))
 	if !strings.Contains(string(data), "owner/repo") {
 		t.Fatalf("source not persisted: %s", data)
 	}
+	if cfgData, _ := os.ReadFile(cfgPath); strings.Contains(string(cfgData), "owner/repo") {
+		t.Fatalf("the source was written into config.yaml: %s", cfgData)
+	}
 
-	// Empty sync (no reachable sources fetched here beyond the one we just added,
-	// which would need network) — assert the endpoint responds with a result shape.
-	// Reset sources to empty so sync does no network and returns ok cleanly.
-	srv.activeCfg().Skills.Sources = nil
+	// Empty sync (the source just added would need network) - assert the
+	// endpoint responds with a result shape. Declare no sources again so sync
+	// does no network and returns ok cleanly.
+	if err := config.WriteMarketplacesFile(config.GlobalMarketplacesPath(home), config.MarketplacesFile{}); err != nil {
+		t.Fatal(err)
+	}
 	syncReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/coddy/skills/sync", nil)
 	syncRes, err := http.DefaultClient.Do(syncReq)
 	if err != nil {
@@ -3685,7 +3691,7 @@ func TestCoddySkillsNewRoutesEdgeCases(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODDY_HOME", home)
 	cfgPath := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("skills:\n  sources: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -3749,6 +3755,69 @@ func TestCoddySkillsNewRoutesEdgeCases(t *testing.T) {
 	_, _ = ioReadAllClose(delRes.Body)
 	if delRes.StatusCode != http.StatusBadRequest {
 		t.Fatalf("delete source without query status %d, want 400", delRes.StatusCode)
+	}
+
+	post := func(path, body string) (int, []byte) {
+		t.Helper()
+		res, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := ioReadAllClose(res.Body)
+		return res.StatusCode, b
+	}
+	// An unknown scope or kind is refused; nothing is written.
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/repo","scope":"nope"}`); status != http.StatusBadRequest {
+		t.Fatalf("add with an unknown scope = %d %s, want 400", status, b)
+	}
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/repo","kind":"nope"}`); status != http.StatusBadRequest {
+		t.Fatalf("add with an unknown kind = %d %s, want 400", status, b)
+	}
+	// A trust request must name the entry, and the entry must be declared.
+	if status, _ := post("/coddy/skills/sources/trust", `{}`); status != http.StatusBadRequest {
+		t.Fatalf("trust without a key = %d, want 400", status)
+	}
+	if status, _ := post("/coddy/skills/sources/trust", `{"key":"owner/ghost"}`); status != http.StatusBadRequest {
+		t.Fatalf("trust of an undeclared entry = %d, want 400", status)
+	}
+	// An entry the checkout rewrote since it was listed is refused with 409,
+	// and one the operator adds to the project is approved by writing it.
+	if err := config.WriteMarketplacesFile(config.ProjectMarketplacesPath(home), config.MarketplacesFile{Sources: []string{"owner/project"}}); err != nil {
+		t.Fatal(err)
+	}
+	if status, b := post("/coddy/skills/sources/trust", `{"key":"owner/project","fingerprint":"sha256:shown-before"}`); status != http.StatusConflict {
+		t.Fatalf("trust of a rewritten entry = %d %s, want 409", status, b)
+	}
+	// Syncing an entry still awaiting approval is the caller's to fix: 400
+	// with the command that approves it, never a server error.
+	if status, b := post("/coddy/skills/sync?source=owner/project", ``); status != http.StatusBadRequest || !strings.Contains(string(b), "coddy plugin marketplace trust owner/project") {
+		t.Fatalf("sync of a held entry = %d %s, want 400 naming the approval", status, b)
+	}
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/local","scope":"local"}`); status != http.StatusOK {
+		t.Fatalf("add to the project = %d %s", status, b)
+	}
+	res3, err := http.Get(ts.URL + "/coddy/skills/sources")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lb, _ := ioReadAllClose(res3.Body)
+	var listed struct {
+		Entries []struct {
+			Source  string `json:"source"`
+			Origin  string `json:"origin"`
+			Trusted bool   `json:"trusted"`
+			Status  string `json:"status"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(lb, &listed); err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, e := range listed.Entries {
+		states[e.Source] = e.Origin + "/" + e.Status
+	}
+	if states["owner/project"] != "project/needs_approval" || states["owner/local"] != "project/ready" {
+		t.Fatalf("listed entries = %s", lb)
 	}
 }
 
@@ -4276,6 +4345,14 @@ func TestCoddySubagentsCatalogAndTrustRoutes(t *testing.T) {
 	}
 	if status, _ := httpJSON(t, ts, http.MethodPost, "/coddy/subagents/reviewer/trust", `{"cwd":"rel"}`, nil); status != http.StatusBadRequest {
 		t.Fatalf("relative body cwd: status %d, want 400", status)
+	}
+	// An approval names the content the operator was shown: a file rewritten
+	// since (another digest) is refused and nothing is recorded.
+	if status, body := httpJSON(t, ts, http.MethodPost, "/coddy/subagents/reviewer/trust", fmt.Sprintf(`{"cwd":%q,"digest":"sha256:shown-before"}`, ws), nil); status != http.StatusConflict {
+		t.Fatalf("stale digest: status %d, want 409 (%v)", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(home, "subagents-trust.json")); !os.IsNotExist(err) {
+		t.Fatalf("a refused approval wrote a receipt: %v", err)
 	}
 
 	status, body = httpJSON(t, ts, http.MethodPost, "/coddy/subagents/reviewer/trust", fmt.Sprintf(`{"cwd":%q}`, ws), nil)
@@ -5505,13 +5582,13 @@ func TestListingCWDQueryEdges(t *testing.T) {
 	home := filepath.Join(root, "home")
 	defaultCWD := filepath.Join(root, "launch")
 	picked := filepath.Join(root, "data")
-	for _, d := range []string{home, defaultCWD, filepath.Join(picked, ".coddy", "skills", "rgs-local")} {
+	for _, d := range []string{home, defaultCWD, filepath.Join(picked, ".coddy", "skills", "dat-local")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(picked, ".coddy", "skills", "rgs-local", "SKILL.md"),
-		[]byte("---\nname: rgs-local\ndescription: local\n---\nbody\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "skills", "dat-local", "SKILL.md"),
+		[]byte("---\nname: dat-local\ndescription: local\n---\nbody\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(picked, ".coddy", "mcp.json"),
@@ -5566,7 +5643,7 @@ func TestListingCWDQueryEdges(t *testing.T) {
 			t.Fatalf("%s cwd: status %d, want 400: %s", name, status, body)
 		}
 	}
-	if status, body := get(slash+url.QueryEscape(picked), ""); status != http.StatusOK || !strings.Contains(body, "rgs-local") {
+	if status, body := get(slash+url.QueryEscape(picked), ""); status != http.StatusOK || !strings.Contains(body, "dat-local") {
 		t.Fatalf("picked cwd: status %d body %s", status, body)
 	}
 	// The composer's highlight check resolves a mention against the same folder.
@@ -5597,7 +5674,7 @@ func TestListingCWDQueryEdges(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("anchor session: status %d", res.StatusCode)
 	}
-	if status, body := get(slash+url.QueryEscape(picked), sid); status != http.StatusOK || strings.Contains(body, "rgs-local") {
+	if status, body := get(slash+url.QueryEscape(picked), sid); status != http.StatusOK || strings.Contains(body, "dat-local") {
 		t.Fatalf("session with cwd: status %d body %s", status, body)
 	}
 	if status, body := get(slash+"relative", sid); status != http.StatusOK {
@@ -5606,7 +5683,7 @@ func TestListingCWDQueryEdges(t *testing.T) {
 	// The first send of a chat with no folder picked: the id is not on the
 	// server yet, so the folder next to it answers; without one it is a 404.
 	unknown := sid + "x"
-	if status, body := get(slash+url.QueryEscape(picked), unknown); status != http.StatusOK || !strings.Contains(body, "rgs-local") {
+	if status, body := get(slash+url.QueryEscape(picked), unknown); status != http.StatusOK || !strings.Contains(body, "dat-local") {
 		t.Fatalf("unknown session with cwd: status %d body %s", status, body)
 	}
 	if status, body := get("/coddy/slash-commands?page=1&page_size=200", unknown); status != http.StatusNotFound {

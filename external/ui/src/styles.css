@@ -9205,14 +9205,97 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 /* "Installed skills" heading row with the Refresh action on the right. */
-/* Footer of the Remote skill sources box: Add on the left, Sync all on the
-   right, on one level (matches the SchemaForm array's Add position). */
+/* Footer of the Marketplaces box: the add form on the left, Sync all on the
+   right, on one level; on a narrow box Sync all drops under the form. */
 .skills-sources-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
+}
+
+/* The add form: the address grows, the scope picker and Add keep their
+   size. */
+.skills-marketplace-add {
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skills-marketplace-add > .settings-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 40px;
+}
+
+.skills-marketplace-add > .skills-marketplace-scope {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.skills-marketplace-add > button {
+  flex: 0 0 auto;
+}
+
+/* A fieldset is as wide as its min-content unless told otherwise, and the
+   add form and the long addresses of this box would widen it past the panel
+   on a phone. */
+.skills-marketplaces-box {
+  min-inline-size: 0;
+  max-width: 100%;
+}
+
+/* The marketplaces list: one row per declared source or marketplace, laid
+   out like an MCP server row (text, then the 40px icon controls). */
+.skills-marketplaces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.skills-marketplace-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.skills-marketplace-head > button {
+  flex: 0 0 auto;
+}
+
+.skills-marketplace-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skills-marketplace-key {
+  font-family: var(--mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.skills-marketplace-source {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+/* A project entry the trust gate holds back reads dimmed, its shield amber
+   (.settings-btn-approve) and the note under it says why. */
+.skills-marketplace.is-held .skills-marketplace-text {
+  opacity: 0.65;
+}
+
+.skills-marketplace-note {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--text) 72%, transparent);
+  overflow-wrap: anywhere;
 }
 
 .skills-sync-all-btn {
@@ -9556,6 +9639,13 @@ html:not([data-theme="light"]) .context-usage-note--error {
   align-items: center;
   row-gap: 2px;
   min-width: 0;
+}
+
+/* The shield of a project definition stands at the end of its head, like
+   the MCP tab's, and never shrinks under a long name. */
+.subagents-item-head > .subagents-trust {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 /* The fold toggle is the app's chevron in front of the definition's name, the
@@ -15020,6 +15110,28 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
   .mcp-list-item-text {
     flex-basis: calc(100% - var(--mcp-row-inset));
+  }
+
+  /* Marketplaces: the same rule as an MCP row. The address and its badges
+     take the first line, the shield, Sync and trash wrap to the row's end,
+     and the add form puts its scope picker and Add under the address. */
+  .skills-marketplace-head {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
+  .skills-marketplace-text {
+    flex-basis: 100%;
+  }
+
+  .skills-marketplace-add {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .skills-marketplace-add > .settings-input:first-child {
+    flex-basis: 100%;
   }
 
   /* Settings maps (the default headers): a name and a value side by side left

@@ -135,7 +135,7 @@ Clear the field to use the session model for summarization.
 
 *Hovering the (i) beside a field's name shows what the field means, above it and over the page.*
 
-- A settings form shows the names of its fields and the controls, nothing else. What a field means is behind the **(i)** right after its name: hover it (or reach it with Tab) and the description appears above it; on a touch screen tap it. Moving away, Escape, a tap elsewhere or scrolling the form closes it. Fieldsets (the provider **Models** list, **Remote skill sources**, **MCP discovery**, the Subagents **Definitions**, the object and list blocks of the generated forms) carry their description the same way, beside the legend.
+- A settings form shows the names of its fields and the controls, nothing else. What a field means is behind the **(i)** right after its name: hover it (or reach it with Tab) and the description appears above it; on a touch screen tap it. Moving away, Escape, a tap elsewhere or scrolling the form closes it. Fieldsets (the provider **Models** list, the Skills **Marketplaces**, **MCP discovery**, the Subagents **Definitions**, the object and list blocks of the generated forms) carry their description the same way, beside the legend.
 - The tip is drawn over the whole page, not inside the settings panel, so it is never clipped by the panel and never adds a scrollbar to it. Text that reports a state (a fetch result, a sign-in code, a warning about a stored value) stays in the form under its control.
 - Automated checks: **`FieldHint.test.tsx`**. Live check: hover an (i) at **1280px** and tap one at **390px**; the tip is a child of `<body>`, sits 8px above the (i) and centred on it, and `.settings-scroll` keeps `scrollWidth` equal to `clientWidth`.
 
@@ -935,10 +935,10 @@ Automated checks:
 
 ### Subagent definitions
 
-**Settings > Subagents** is a hybrid tab like Skills (section kind `subagents` in `settingsSections.ts`, `SubagentsSection.tsx`): the schema-driven form of the `subagents` config section (`enable`, `dirs`, `project_trust`, `max_concurrent`, `max_depth`, `default_timeout_seconds`, `max_turns`; labels from `settings.schema.subagents.*`) is saved with the rest of the document, and below it a **Definitions** fieldset lists the catalog of `GET /coddy/subagents` for the workspace of the session on screen (`workspaceCtx.path` from `App.tsx`; without one the server answers for its default workspace), with that workspace printed above the list.
+**Settings > Subagents** is a hybrid tab like Skills (section kind `subagents` in `settingsSections.ts`, `SubagentsSection.tsx`): the schema-driven form of the `subagents` config section (`enable`, `dirs`, `project_trust`, `max_concurrent`, `max_depth`, `default_timeout_seconds`, `max_turns`; labels from `settings.schema.subagents.*`) is saved with the rest of the document, and below it a **Definitions** fieldset lists the catalog of `GET /coddy/subagents` for the workspace of the chat on screen (`chatWorkspacePath` from `App.tsx`: the session's folder, or the folder picked before the first message; without one the server answers for its default workspace). The tab does not print that path.
 
-- The list only reads. Each row reuses the MCP list chrome: the name, a scope badge (`built in` / `yours` / `from the project`), `hidden`, the description as plain text and the file.
-- A project definition still awaiting a receipt under `project_trust: ask` carries an amber `needs approval` badge and nothing to click: its tooltip names `coddy agents trust <name>`, which records the receipt on the machine running coddy (or `POST /coddy/subagents/{name}/trust`).
+- Each row reuses the MCP list chrome: the name, a scope badge (`built in` / `yours` / `from the project`), `hidden`, the description as plain text and the file.
+- Under `project_trust: ask` a project definition carries the shield of the MCP tab (`subagent-trust-<name>`): amber while it is not approved, plain once it is. Clicking it approves the file for that workspace with `POST /coddy/subagents/{name}/trust`, naming the `digest` the row showed, so a file the checkout rewrote since is refused (409) and the error is shown above the list; clicking an approved one withdraws the receipt. The list is read again after either. A definition still awaiting a receipt also carries an amber `needs approval` badge whose tooltip names the shield and `coddy agents trust <name>`. Built-in and user definitions, and every definition under `allow` or `deny`, have no shield.
 - **Declared bounds**, collapsed on every row (`subagentDeclaredFacts` in `settings/subagentCatalog.ts`): model, mode, permissions, tools, denies, timeout, max turns, runs detached and instructions size, with every undeclared bound shown as inherited. Long paths and tool lists wrap inside the panel (`.settings-subagents-section` rules) instead of widening it.
 
 ![Settings Subagents catalog](../assets/subagents/settings-subagents-catalog-dark-1280.png)
@@ -957,7 +957,7 @@ Automated checks:
 
 - **external/ui/src/ui/settings/subagentCatalog.test.ts** (inherited and declared facts, formatting, scope badge keys)
 - **external/ui/src/ui/settings/subagentsApi.test.ts** (workspace in the query, normalised catalog, server error messages, offline)
-- **external/ui/src/ui/settings/SubagentsSection.test.tsx** (rows with scope, description and file, no control on any row, the passive needs-approval badge, declared bounds behind a disclosure, failed load, Russian copy)
+- **external/ui/src/ui/settings/SubagentsSection.test.tsx** (rows with scope, description and file, the shield of a project definition under ask approving the file with the digest shown and withdrawing the receipt, a refused approval, no shield under allow or deny nor on a built-in or user definition, the needs-approval badge, declared bounds behind a disclosure, failed load, Russian copy)
 - **external/ui/src/ui/settings/subagentsCatalogCss.test.ts** (the catalog cannot outgrow the panel, facts label column, amber badge)
 - **external/ui/src/ui/settings/SettingsSection.test.tsx** (the subagents kind keeps its form and asks about the session workspace)
 - **external/ui/src/ui/chat/SubagentPermissionCard.test.tsx** (answered against the child session, only waiting tasks and oldest first, nothing while none waits, title prefix, Russian copy)
@@ -1223,6 +1223,44 @@ a project-local one awaiting workspace approval):
 - List refreshes never unmount the list (initial-load-only placeholder), so the
   drawer scroll position is preserved.
 - The tab does not participate in the settings document Save all flow.
+
+## Skill marketplaces (Settings tab)
+
+**Settings > Skills** keeps its form (auto-discovery, `skills.dirs`, and `skills.project_trust` in a
+**Marketplace discovery** fieldset of its own, saved with the rest of the settings) and the installed
+skills, and between them a **Marketplaces** fieldset (`MarketplacesEditor.tsx`, helpers in
+`settings/marketplaces.ts`). Like the MCP tab it is API-driven and never part of the settings
+document: what it lists is declared in `~/.coddy/marketplaces.json`, the project's
+`.coddy/marketplaces.json` and Coddy itself, read through `GET /coddy/skills/sources` for the session
+on screen (`X-Coddy-Session-ID`), and every action applies at once.
+
+- One row per entry, in the order the entries take effect: the key (a marketplace's name, a source's
+  address), a kind badge (**all plugins** for a source, **catalog** for a marketplace, whose address
+  sits under the name) and an origin badge (**built in**, **yours**, **from the project**) whose
+  tooltip names the declaring file.
+- The built-in `EvilFreelancer/rpa-skills` carries a shield that cannot be clicked (always trusted)
+  and a disabled delete button; it syncs like any row.
+- Under `skills.project_trust: ask` a project row carries the MCP shield: amber while the entry
+  waits for approval, plain once approved. Clicking it posts `POST /coddy/skills/sources/trust` with
+  the row's `fingerprint` (an entry the checkout rewrote since is refused with 409 and the message is
+  shown above the list), or `untrust` for an approved one; the list is read again after either. A
+  row still waiting is dimmed, says which file declares it and that it is not synced until approved,
+  and its **Sync** button is disabled. Under `deny` its note says the policy switched it off and
+  there is no shield; under `allow` project rows are in effect and have none either.
+- **Sync** on a row is `POST /coddy/skills/sync?source=<key>`, **Sync all** `POST /coddy/skills/sync`;
+  both refresh the installed list and flash a check mark. Delete is
+  `DELETE /coddy/skills/sources?source=<key>`.
+- The add field declares a source (installed whole) with `POST /coddy/skills/sources`, in your file
+  or, with **This project**, in the project's, which approves it for that workspace as it is written.
+- On a phone the row's controls wrap under the key and the add field takes the full width.
+
+![Settings, Skills: the marketplaces list](../assets/skills/skills-marketplaces-dark-1280.png)
+
+Automated checks:
+
+- **external/ui/src/ui/settings/MarketplacesEditor.test.tsx** (rows with kind, origin and file, the built-in row's disabled shield and delete, a held project row with its note, disabled sync and shield, approval with the fingerprint and its withdrawal, a refused approval, a denied row, add with the scope, remove by key, sync of one and of all, Russian copy)
+- **external/httpserver/server_test.go** (`TestCoddySkillsSourcesSyncDelete`, `TestCoddySkillsNewRoutesEdgeCases`: the routes, the scopes, 409 on a rewritten entry, 400 on syncing a held one)
+- **features/skills_marketplace.feature**, **features/skills_marketplace_trust.feature** (a project marketplace waits for its approval, then syncs into the Coddy home)
 
 ## Swarm screen
 

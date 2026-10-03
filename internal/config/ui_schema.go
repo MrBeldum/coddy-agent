@@ -477,7 +477,7 @@ func UISchemaMap() map[string]interface{} {
 				"project_trust": map[string]interface{}{
 					"type":        "string",
 					"title":       "Project definitions",
-					"description": "Definitions found inside the workspace travel with the checkout. \"ask\": load them but refuse to spawn one until it is approved for this workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust). \"allow\": treat them like your own files. \"deny\": never read them.",
+					"description": "Definitions found inside the workspace travel with the checkout. \"ask\": load them but refuse to spawn one until it is approved for this workspace (the shield of its row in Definitions, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust). \"allow\": treat them like your own files. \"deny\": never read them.",
 					"enum":        []string{SubagentsProjectTrustAsk, SubagentsProjectTrustAllow, SubagentsProjectTrustDeny},
 				},
 				"max_concurrent":          intProp("Max concurrent", "How many subagent runs the whole process may have in flight at once (default 4). Extra spawns are refused, not queued."),
@@ -525,11 +525,11 @@ func UISchemaMap() map[string]interface{} {
 					"description": "Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the lowest one, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included).",
 					"items":       map[string]interface{}{"type": "string"},
 				},
-				"sources": map[string]interface{}{
-					"type":        "array",
-					"title":       "Remote skill sources",
-					"description": "GitHub repos (owner/repo[@ref]), git URLs, or an http(s) URL to an agents-standard marketplace.json. Installed on demand via `coddy skills sync` or the Sync button; never fetched automatically. EvilFreelancer/rpa-skills, the marketplace the bundled rpa-* skills are published from, is always in effect as a system source and is not part of this list.",
-					"items":       map[string]interface{}{"type": "string"},
+				"project_trust": map[string]interface{}{
+					"type":        "string",
+					"title":       "Project marketplaces",
+					"description": "The project's .coddy/marketplaces.json travels with the checkout. \"ask\": leave its sources and marketplaces out of every sync until each entry is approved for this workspace (the shield of the marketplaces list, or coddy plugin marketplace trust). \"allow\": treat them like your own ~/.coddy/marketplaces.json. \"deny\": never use them; they are listed as switched off. What they install goes to ${CODDY_HOME}/skills; the project's skill folders are not affected.",
+					"enum":        []string{ProjectTrustAsk, ProjectTrustAllow, ProjectTrustDeny},
 				},
 				"auto_discovery": map[string]interface{}{
 					"type":        "boolean",
@@ -537,7 +537,7 @@ func UISchemaMap() map[string]interface{} {
 					"description": "Let the agent load a matching skill's full instructions on its own (model-driven load_skill tool), instead of only when you type /name. Defaults to on.",
 				},
 			},
-			[]string{"dirs", "sources", "auto_discovery"},
+			[]string{"dirs", "project_trust", "auto_discovery"},
 			nil),
 		"memory": objectSchema("Memory copilot", "Optional memory subagent (requires the memory build tag and a provider).",
 			map[string]interface{}{

@@ -21,9 +21,9 @@ session in this folder and `coddy -p "..."` runs one non-interactive prompt
 (`coddy -p -` and `coddy -i FILE` read it from stdin or from a file).
 Startup runs before the terminal enters raw mode: the config, the session
 store, the skills and the rule folders, then the first frame. The skills are
-read from their folders only, never from `skills.sources`, so hundreds of
-installed skills cost a fraction of a second and a marketplace that does not
-answer costs nothing ([Skills](../features/skills.md#when-skills-are-read)).
+read from their folders only, never from the marketplaces of
+`marketplaces.json`, so hundreds of installed skills cost a fraction of a
+second and a marketplace that does not answer costs nothing ([Skills](../features/skills.md#when-skills-are-read)).
 The configured MCP servers are **not** on that path, whatever starts them - a
 program the config names, an npm package run through `npx`, a remote server
 over streamable HTTP or SSE: they connect in the background once the console
@@ -907,8 +907,8 @@ and types `@ment` against a provider that is never asked anything.
   server that never answers (`sleep 600`) and checks that the first frame
   still comes within seconds, with `MCP 0/1` in the footer, and that the
   console still leaves through double ctrl+c; a third one adds 300 installed
-  skills and a `skills.sources` entry that accepts connections and never
-  answers (issue #319), and checks that the first frame comes within two
+  skills and a source in `marketplaces.json` that accepts connections and
+  never answers (issue #319), and checks that the first frame comes within two
   seconds, that a typed key is echoed and that the source was never
   contacted. Those two are the startup bounds CI enforces. The performance of the startup itself is
   measured, not gated: `make bench-cli-startup` times the first frame and a

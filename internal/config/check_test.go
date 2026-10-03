@@ -116,6 +116,14 @@ func TestCheckWarnsAboutAKeyThatMovedOut(t *testing.T) {
 	if got, err := os.ReadFile(rep.File); err != nil || string(got) != body {
 		t.Fatalf("the check rewrote the file: %q, %v", got, err)
 	}
+
+	sources := checkYAML(t, withModeline("skills:\n  sources:\n    - owner/repo\n"))
+	if errs := errorsOf(sources); len(errs) != 0 {
+		t.Fatalf("skills.sources must not be an error: %+v", errs)
+	}
+	if w := warningsOf(sources); len(w) != 1 || w[0].Path != "skills.sources" || !strings.Contains(w[0].Fix, "marketplaces.json") {
+		t.Fatalf("want one warning at skills.sources naming marketplaces.json, got %+v", sources.Findings)
+	}
 }
 
 func TestCheckUnknownKeyInsideAListEntry(t *testing.T) {

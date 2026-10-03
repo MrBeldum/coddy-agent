@@ -560,6 +560,9 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.skills.dirs.label": "Каталоги скилов",
   "settings.schema.skills.dirs.desc":
     "Дополнительные каталоги скилов. Четыре каталога по умолчанию читаются всегда, от слабого к сильному, это ${HOME}/.agents/skills (общие для всех агентов, туда ставят npx skills и npx skillsbd), .agents/skills проекта, ${CODDY_HOME}/skills (собственные и установленные скилы Coddy) и .coddy/skills проекта. Каталоги из этого списка читаются после них по порядку и сильнее их. Если скил есть в нескольких каталогах, берётся из нижнего, а каталог, указанный дважды, читается на последнем месте. ${CODDY_HOME} разворачивается при загрузке файла, ${HOME} и ~ в домашнюю папку, ${CWD} и относительный путь от папки сессии, в том числе выбранной для нового чата.",
+  "settings.schema.skills.project_trust.label": "Маркетплейсы проекта",
+  "settings.schema.skills.project_trust.desc":
+    'Файл .coddy/marketplaces.json проекта приходит вместе с чекаутом. Значение "ask" не включает его источники и маркетплейсы ни в одну синхронизацию, пока каждая запись не одобрена для этого рабочего пространства (щит в списке ниже или coddy plugin marketplace trust). Значение "allow" считает их вашими, как записи ~/.coddy/marketplaces.json. Значение "deny" никогда не читает файл. Установленное ими попадает в ~/.coddy/skills, папок скилов проекта настройка не касается.',
   "settings.schema.skills.auto_discovery.desc":
     "Разрешить агенту самостоятельно загружать полные инструкции подходящего скила (инструмент load_skill, управляемый моделью), а не только по команде /скил. По умолчанию включено.",
 
@@ -901,7 +904,7 @@ export const messagesRu: Record<string, string> = {
     "Правила пула делегирования, то есть можно ли запускать определения, пришедшие с чекаутом, сколько запусков идёт одновременно, насколько глубоко они вкладываются и сколько времени и итераций получает один запуск, если ни определение, ни вызов их не задают.",
   "subagents.catalog.legend": "Определения",
   "subagents.catalog.description":
-    "Все определения, которые может запустить сессия этого рабочего пространства: встроенные, ваши файлы в ~/.agents/agents и ~/.coddy/agents и файлы .agents/agents и .coddy/agents, пришедшие вместе с чекаутом. При значении \"ask\" проектный файл запускается только после одобрения для этого рабочего пространства в терминале на машине, где работает coddy: coddy agents trust <name>.",
+    "Все определения, которые может запустить сессия этого рабочего пространства, это встроенные, ваши файлы в ~/.agents/agents и ~/.coddy/agents и файлы .agents/agents и .coddy/agents, пришедшие вместе с чекаутом. При значении \"ask\" проектный файл запускается только после одобрения для этого рабочего пространства щитом здесь или командой coddy agents trust <name> на машине, где работает coddy. Изменённый одобренный файл потребует одобрения снова.",
   "subagents.catalog.loading": "Загрузка определений…",
   "subagents.catalog.empty":
     "Из этого рабочего пространства не видно ни одного определения субагента.",
@@ -915,7 +918,13 @@ export const messagesRu: Record<string, string> = {
   "subagents.badge.hidden": "скрытый",
   "subagents.badge.needsApproval": "нужно одобрение",
   "subagents.badge.needsApprovalTitle":
-    "Запуск отклоняется, пока определение не одобрено для этого рабочего пространства: coddy agents trust {name}",
+    "Запуск отклоняется, пока определение не одобрено для этого рабочего пространства щитом или командой coddy agents trust {name}",
+  "subagents.trust.approveTitle": "Разрешить запуск {name} в этом рабочем пространстве",
+  "subagents.trust.approvedTitle":
+    "Одобрено для этого рабочего пространства, нажмите, чтобы отозвать",
+  "subagents.trust.approveAria": "Одобрить субагента {name}",
+  "subagents.trust.withdrawAria": "Отозвать одобрение субагента {name}",
+  "subagents.error.trust": "Не удалось изменить одобрение {name}.",
   "subagents.fact.file": "файл",
   "subagents.fact.model": "модель",
   "subagents.fact.modelInherits": "модель родителя",
@@ -975,20 +984,47 @@ export const messagesRu: Record<string, string> = {
   "skills.error.install": "Не удалось установить {name}",
   "skills.status.updated": "Обновлено: {name}.",
   "skills.status.installed": "Установлено: {name}.",
-  "skills.sources.legend": "Удалённые источники скилов",
+  "skills.trust.legend": "Обнаружение маркетплейсов",
+  "skills.trust.description":
+    "Проектный .coddy/marketplaces.json приходит вместе с чекаутом, поэтому то, что синхронизация установит в ~/.coddy/skills, выбирает репозиторий, а не вы. При значении ask его записи не синхронизируются и не предлагаются к установке, пока вы не одобрите каждую для этого рабочего пространства (щит в списке ниже); изменение одобренной записи снова потребует одобрения. Записи, которые вы добавляете в проект здесь, одобряются самим фактом записи, а ~/.coddy/marketplaces.json ваш и никогда не блокируется. Сохраняется вместе с остальными настройками.",
+  "skills.sources.legend": "Маркетплейсы",
   "skills.sources.add": "Добавить",
+  "skills.sources.addAria": "Источник для добавления",
+  "skills.sources.scopeAria": "Где объявить",
+  "skills.sources.scope.global": "Ваш (~/.coddy)",
+  "skills.sources.scope.local": "Этот проект",
   "skills.sources.syncAll": "Синхронизировать все",
-  "skills.sources.syncAllTitle": "Получить все настроенные маркетплейсы",
+  "skills.sources.syncAllTitle": "Получить все действующие источники и маркетплейсы",
   "skills.sources.completed": "Готово",
   "skills.sources.syncedTitle": "Синхронизировано",
   "skills.sources.syncTitle": "Синхронизировать {source}",
+  "skills.sources.heldSyncTitle": "Сначала одобрите его для этого рабочего пространства",
   "skills.sources.syncAria": "Синхронизировать этот маркетплейс",
-  "skills.sources.removeTitle": "Удалить",
+  "skills.sources.removeTitle": "Удалить из {path}",
   "skills.sources.systemTitle":
-    "Встроен в Coddy: работает без записи в config.yaml и не удаляется",
+    "Встроен в Coddy, всегда действует, всегда доверенный и не удаляется",
   "skills.sources.removeAria": "Удалить маркетплейс",
+  "skills.sources.kind.source": "все плагины",
+  "skills.sources.kind.marketplace": "каталог",
+  "skills.sources.origin.system": "встроенный",
+  "skills.sources.origin.home": "ваш",
+  "skills.sources.origin.project": "из проекта",
+  "skills.sources.trust.systemAria": "{source} встроен в Coddy и всегда доверенный",
+  "skills.sources.trust.approveTitle": "Разрешить синхронизацию {source} в этом рабочем пространстве",
+  "skills.sources.trust.approvedTitle":
+    "Одобрено для этого рабочего пространства, нажмите, чтобы отозвать",
+  "skills.sources.trust.approveAria": "Одобрить {source} для этого рабочего пространства",
+  "skills.sources.trust.withdrawAria": "Отозвать одобрение {source}",
+  "skills.sources.note.held":
+    "Объявлено в {path}; этот файл приходит вместе с чекаутом, поэтому запись не синхронизируется, пока вы не одобрите её щитом для этого рабочего пространства.",
+  "skills.sources.note.denied":
+    "Маркетплейсы проекта отключены настройкой skills.project_trust со значением deny.",
+  "skills.sources.error.load": "Не удалось загрузить маркетплейсы.",
+  "skills.sources.error.add": "Не удалось добавить {source}.",
+  "skills.sources.error.remove": "Не удалось удалить {source}.",
+  "skills.sources.error.trust": "Не удалось изменить одобрение {source}.",
   "skills.sources.description":
-    "Репозитории GitHub (owner/repo[@ref]), git-ссылки или URL agents-standard marketplace.json. Сохраняется в skills.sources; запрашивается только при синхронизации. Блёклые строки встроены в Coddy, их нельзя удалить.",
+    "Откуда берутся удалённые скилы. Источник ставит все плагины, которые публикует, и держит их в актуальном виде, каталог (coddy plugin marketplace add) ставит плагины по одному. Ваши записи хранятся в ~/.coddy/marketplaces.json, записи проекта в его .coddy/marketplaces.json, который приходит вместе с чекаутом, и при значении \"ask\" запись проекта синхронизируется только после одобрения щитом. Всё ставится в ~/.coddy/skills, и ничего не запрашивается до синхронизации. Встроенный маркетплейс rpa-skills действует всегда и всегда доверенный.",
   "skills.sources.placeholder": "owner/repo  ·  https://…/marketplace.json",
   "skills.install.cliHint":
     "Скилы можно также установить через npx skills или npx skillsbd — они попадают в ~/.agents/skills/ и подхватываются автоматически.",
