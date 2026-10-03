@@ -232,10 +232,17 @@ describe("the environment banner on the stacked shell", () => {
   });
 
   test("moves everything the top inset places down by its own height", () => {
+    // On :root, so a dialog portalled into <body> (the folder browser) is
+    // placed by the same inset as the drawers inside .shell.
     expectDecl(
-      declarations(stacked, ".shell"),
+      declarations(stacked, ":root"),
       "--coddy-mobile-top-inset",
       /var\(--coddy-mobile-bar-h\)\s*\+\s*var\(--coddy-env-banner-h,\s*0px\)/,
+    );
+    expectDecl(
+      declarations(stacked, ":root"),
+      "--coddy-mobile-bar-h",
+      /^calc\(78px \+ env\(safe-area-inset-top, 0px\)\)$/,
     );
   });
 });
