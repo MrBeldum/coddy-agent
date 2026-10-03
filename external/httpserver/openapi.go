@@ -513,7 +513,7 @@ func openAPISpec() map[string]interface{} {
 					"summary": "List slash commands from skills (paginated)",
 					"description": "Returns skill-derived slash command **`name`** and **`description`** rows sorted by name. " +
 						"**`page`** (1-based) and **`page_size`** (1 to 200) are required. Optional **`prefix`** filters by case-insensitive name prefix. " +
-						"When **X-Coddy-Session-ID** names a session (a persisted one is loaded on demand), listing uses that session **cwd** when resolving **`${CWD}`** in configured skill directories; otherwise the server default cwd applies.",
+						"When **X-Coddy-Session-ID** names a session (a persisted one is loaded on demand), listing uses that session **cwd** when resolving **`${CWD}`** in configured skill directories; otherwise the folder in **`cwd`** applies (a new chat's picked folder), else the server default cwd.",
 					"operationId": "listSlashCommands",
 					"parameters": []interface{}{
 						map[string]interface{}{
@@ -521,6 +521,7 @@ func openAPISpec() map[string]interface{} {
 							"schema":      map[string]string{"type": "string"},
 							"description": "Optional session whose cwd scopes skill path expansion.",
 						},
+						listingCWDParam(),
 						map[string]interface{}{
 							"name": "page", "in": "query", "required": true,
 							"schema":      map[string]interface{}{"type": "integer", "minimum": 1},
@@ -721,15 +722,16 @@ func openAPISpec() map[string]interface{} {
 					"description": "What the **`@`** picker offers for **`q`**, the text after **`@`** (a leading **`\"`** opens a quoted path). " +
 						"Without a scheme it ranks the files and folders of the session **cwd** against **`q`** (fuzzy: the file name first, then path segments, then letters in order; inside a git checkout the index follows **`.gitignore`** and keeps dotfiles) and merges in the rules, subagents and plans whose names match. " +
 						"**`q`** starting with **`/`**, **`~`**, **`./`**, **`../`** or a drive letter browses the folder typed so far, filtered by the name after its last separator. " +
-						"**`session:`**, **`rule:`** and **`agent:`** list that kind; **`coddy:`** lists the pages of the documentation built into the binary, finds pages by slug or title and sections by their words, and after **`<page>#`** the sections of that page. An empty **`q`** offers the four scheme hints and the top of the workspace. " +
+						"**`session:`**, **`rule:`** and **`agent:`** list that kind; **`coddy:`** lists the pages of the documentation built into the binary, finds pages by slug or title and sections by their words, and after **`<page>#`** the sections of that page. An empty **`q`** offers the four scheme hints and the top of the workspace, and a **`q`** that starts a scheme's name puts that scheme's hint first. " +
 						"**`refresh=1`** rebuilds the workspace index even when the last build is fresh (the picker just opened). **`total`** counts every match before the cut to **`limit`**; **`indexing`** says the first index of the workspace is still being built.",
 					"operationId": "searchMentions",
 					"parameters": []interface{}{
 						map[string]interface{}{
 							"name": "X-Coddy-Session-ID", "in": "header", "required": false,
 							"schema":      map[string]string{"type": "string"},
-							"description": "Session the draft belongs to: its **cwd**, rules and plans answer. Without it the server's default cwd is searched.",
+							"description": "Session the draft belongs to: its **cwd**, rules and plans answer. Without it the folder in **`cwd`** is searched, else the server's default cwd.",
 						},
+						listingCWDParam(),
 						map[string]interface{}{
 							"name": "q", "in": "query", "required": false,
 							"schema":      map[string]string{"type": "string"},
@@ -774,6 +776,7 @@ func openAPISpec() map[string]interface{} {
 							"schema":      map[string]string{"type": "string"},
 							"description": "Session the draft would be sent to: its **cwd**, rules, plans and scope answer. Without it the server's default cwd is used, as for a first message.",
 						},
+						listingCWDParam(),
 					},
 					"requestBody": map[string]interface{}{
 						"required": true,
@@ -817,6 +820,7 @@ func openAPISpec() map[string]interface{} {
 							"schema":      map[string]string{"type": "string"},
 							"description": "Session whose **cwd** is the read root.",
 						},
+						listingCWDParam(),
 						map[string]interface{}{
 							"name": "path_rel", "in": "query", "required": true,
 							"schema":      map[string]string{"type": "string"},
@@ -2055,7 +2059,7 @@ func openAPISpec() map[string]interface{} {
 				"get": map[string]interface{}{
 					"summary": "List skills",
 					"description": "Returns all skills discovered from **`skills.dirs`** with their enabled/disabled status. The disabled state is read from the managed skills directory (`~/.coddy/skills/.disabled`). " +
-						"When **X-Coddy-Session-ID** names a session (a persisted one is loaded on demand), **`${CWD}`** in configured skill directories resolves against that session **cwd**, so project-local skills of that workspace are listed; otherwise the server default cwd applies.",
+						"When **X-Coddy-Session-ID** names a session (a persisted one is loaded on demand), **`${CWD}`** in configured skill directories resolves against that session **cwd**, so project-local skills of that workspace are listed; otherwise the folder in **`cwd`** applies, else the server default cwd.",
 					"operationId": "listSkills",
 					"parameters": []interface{}{
 						map[string]interface{}{
@@ -2063,6 +2067,7 @@ func openAPISpec() map[string]interface{} {
 							"schema":      map[string]string{"type": "string"},
 							"description": "Optional session whose cwd scopes skill path expansion.",
 						},
+						listingCWDParam(),
 					},
 					"responses": map[string]interface{}{
 						"200": map[string]interface{}{
@@ -4116,5 +4121,18 @@ func subagentEntryResponse(description string) map[string]interface{} {
 				},
 			},
 		},
+	}
+}
+
+// listingCWDParam is the cwd query of the read-only listings the composer asks
+// for while the user types: the folder a new chat picked before its session
+// exists (resolveListingCWD).
+func listingCWDParam() map[string]interface{} {
+	return map[string]interface{}{
+		"name": "cwd", "in": "query", "required": false,
+		"schema": map[string]string{"type": "string"},
+		"description": "Absolute path of an existing folder that names the workspace when no session is behind the request " +
+			"(X-Coddy-Session-ID absent, or naming a session the server does not have yet): the folder a new chat picked before its first message. " +
+			"Ignored next to a session the server has. 400 for a relative path or a missing folder.",
 	}
 }

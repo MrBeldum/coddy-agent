@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   SchemaForm,
   IconTrash,
@@ -37,8 +37,15 @@ type SkillUpdate = {
   update_available: boolean;
 };
 
-async function fetchInstalled(): Promise<InstalledSkill[]> {
-  const res = await fetch("/coddy/skills");
+// workspacePath names the folder ${CWD} in skills.dirs resolves against, so the
+// project skills listed are those of the chat's workspace, like Subagents.
+async function fetchInstalled(
+  workspacePath: string | undefined,
+): Promise<InstalledSkill[]> {
+  const path = (workspacePath || "").trim();
+  const res = await fetch(
+    path ? `/coddy/skills?cwd=${encodeURIComponent(path)}` : "/coddy/skills",
+  );
   if (!res.ok) return [];
   const data = (await res.json()) as { items?: InstalledSkill[] };
   return data.items ?? [];
@@ -280,8 +287,10 @@ export function SkillsSection(props: {
   schema: JsonSchema;
   value: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  workspacePath?: string | undefined;
 }) {
   const { schema, value, onChange } = props;
+  const workspacePath = props.workspacePath;
   const { t } = useT();
   const [installed, setInstalled] = useState<InstalledSkill[]>([]);
   const [updates, setUpdates] = useState<Record<string, SkillUpdate>>({});
@@ -311,11 +320,18 @@ export function SkillsSection(props: {
 
   // firstLoad guards the "Loading:" placeholder so a refresh never unmounts the
   // list (which would collapse height and jump the scroll to the top).
+  // A list asked for a workspace left since (Settings open while another
+  // folder is picked) must not paint over the list of the current one.
+  const installedGenRef = useRef(0);
   const loadInstalled = useCallback(async (firstLoad = false) => {
+    const gen = ++installedGenRef.current;
     if (firstLoad) setLoading(true);
-    setInstalled(await fetchInstalled());
-    if (firstLoad) setLoading(false);
-  }, []);
+    const rows = await fetchInstalled(workspacePath);
+    if (gen !== installedGenRef.current) return;
+    setInstalled(rows);
+    // The latest load ends the placeholder, whichever call started it.
+    setLoading(false);
+  }, [workspacePath]);
 
   const refreshUpdates = useCallback(async () => {
     const ups = await fetchUpdates();

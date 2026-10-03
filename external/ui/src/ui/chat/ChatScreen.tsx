@@ -162,6 +162,8 @@ export function ChatScreen(props: {
   turnProgress?: TurnProgress | null;
   /** Workspace context chips (folder / branch / worktree) above the composer field. */
   workspaceCtx?: import("./workspaceContext").WorkspaceContext | null;
+  /** The folder the chat runs in (the picked one before a session exists). */
+  chatWorkspacePath?: string;
   worktreePref?: boolean;
   /** The workspace is chosen once: locked as soon as the conversation starts. */
   workspaceLocked?: boolean;
@@ -667,6 +669,7 @@ export function ChatScreen(props: {
                 onAttachedFilesChange={setAttachedFiles}
                 focusEpoch={props.heroComposerFocusEpoch}
                 sessionId={props.sessionId}
+                workspacePath={props.chatWorkspacePath ?? ""}
                 contextIdle={!props.sessionId}
                 mode={props.mode}
                 modes={props.modes}
@@ -858,6 +861,7 @@ export function ChatScreen(props: {
                   attachedFiles={attachedFiles}
                   onAttachedFilesChange={setAttachedFiles}
                   sessionId={props.sessionId}
+                  workspacePath={props.chatWorkspacePath ?? ""}
                   contextIdle={false}
                   mode={props.mode}
                   modes={props.modes}

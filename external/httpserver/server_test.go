@@ -5493,3 +5493,145 @@ func TestReplyForErrorMapsProviderStatus(t *testing.T) {
 		})
 	}
 }
+
+// TestListingCWDQueryEdges pins the cwd query of the read-only listings: a new
+// chat names the folder picked before its session exists with it, so it has to
+// be an absolute existing directory, it never overrides a session's own
+// workspace, and a route that changes a workspace (MCP) does not take it.
+func TestListingCWDQueryEdges(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	defaultCWD := filepath.Join(root, "launch")
+	picked := filepath.Join(root, "data")
+	for _, d := range []string{home, defaultCWD, filepath.Join(picked, ".coddy", "skills", "rgs-local")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "skills", "rgs-local", "SKILL.md"),
+		[]byte("---\nname: rgs-local\ndescription: local\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "mcp.json"),
+		[]byte(`{"mcpServers":{"picked-only":{"command":"true"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(picked, "notes.txt")
+	if err := os.WriteFile(file, []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return string(acp.StopReasonEndTurn), nil
+	}
+	cfg := &config.Config{
+		Paths:  config.Paths{Home: home, CWD: defaultCWD},
+		Skills: config.Skills{Dirs: []string{"${CWD}/.coddy/skills"}},
+		Models: []config.ModelEntry{{Model: "openai/gpt-4o", MaxTokens: 100, Temperature: 0.2}},
+		Agent:  config.Agent{Model: "openai/gpt-4o"},
+	}
+	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), defaultCWD, nil)
+	srv := New(cfg, mgr, slog.Default(), defaultCWD)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	get := func(path, sid string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sid != "" {
+			req.Header.Set("X-Coddy-Session-ID", sid)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := ioReadAllClose(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode, string(b)
+	}
+	slash := "/coddy/slash-commands?page=1&page_size=200&cwd="
+
+	for name, cwd := range map[string]string{
+		"relative": "data",
+		"missing":  filepath.Join(root, "nope"),
+		"file":     file,
+	} {
+		if status, body := get(slash+url.QueryEscape(cwd), ""); status != http.StatusBadRequest {
+			t.Fatalf("%s cwd: status %d, want 400: %s", name, status, body)
+		}
+	}
+	if status, body := get(slash+url.QueryEscape(picked), ""); status != http.StatusOK || !strings.Contains(body, "rgs-local") {
+		t.Fatalf("picked cwd: status %d body %s", status, body)
+	}
+	// The composer's highlight check resolves a mention against the same folder.
+	checkRes, err := http.Post(ts.URL+"/coddy/mentions/check?cwd="+url.QueryEscape(picked), "application/json",
+		strings.NewReader(`{"text":"look at @notes.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkBody, _ := ioReadAllClose(checkRes.Body)
+	if checkRes.StatusCode != http.StatusOK || !strings.Contains(string(checkBody), `"kind":"file"`) {
+		t.Fatalf("mentions/check with cwd: status %d body %s", checkRes.StatusCode, checkBody)
+	}
+
+	// A session anchored on the server default: a cwd next to its header is
+	// ignored, even an invalid one.
+	sid := fmt.Sprintf("sess_%x", time.Now().UnixNano())
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/coddy/sessions/"+sid+"/workspace",
+		strings.NewReader(fmt.Sprintf(`{"path":%q}`, defaultCWD)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioReadAllClose(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("anchor session: status %d", res.StatusCode)
+	}
+	if status, body := get(slash+url.QueryEscape(picked), sid); status != http.StatusOK || strings.Contains(body, "rgs-local") {
+		t.Fatalf("session with cwd: status %d body %s", status, body)
+	}
+	if status, body := get(slash+"relative", sid); status != http.StatusOK {
+		t.Fatalf("session with a bad cwd: status %d body %s", status, body)
+	}
+	// The first send of a chat with no folder picked: the id is not on the
+	// server yet, so the folder next to it answers; without one it is a 404.
+	unknown := sid + "x"
+	if status, body := get(slash+url.QueryEscape(picked), unknown); status != http.StatusOK || !strings.Contains(body, "rgs-local") {
+		t.Fatalf("unknown session with cwd: status %d body %s", status, body)
+	}
+	if status, body := get("/coddy/slash-commands?page=1&page_size=200", unknown); status != http.StatusNotFound {
+		t.Fatalf("unknown session without cwd: status %d body %s", status, body)
+	}
+	if status, body := get(slash+url.QueryEscape(picked), "bad id!"); status != http.StatusBadRequest {
+		t.Fatalf("malformed session with cwd: status %d body %s", status, body)
+	}
+
+	// The MCP routes change a workspace's declarations: cwd does not select it,
+	// while a session anchored there does.
+	if status, body := get("/coddy/mcp?cwd="+url.QueryEscape(picked), ""); status != http.StatusOK || strings.Contains(body, "picked-only") {
+		t.Fatalf("mcp with cwd: status %d body %s", status, body)
+	}
+	pickedSID := sid + "p"
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/coddy/sessions/"+pickedSID+"/workspace",
+		strings.NewReader(fmt.Sprintf(`{"path":%q}`, picked)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioReadAllClose(res.Body)
+	if status, body := get("/coddy/mcp", pickedSID); status != http.StatusOK || !strings.Contains(body, "picked-only") {
+		t.Fatalf("mcp of a session in the picked folder: status %d body %s", status, body)
+	}
+}

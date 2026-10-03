@@ -392,6 +392,7 @@ export function SettingsSection(props: {
         schema={sub}
         value={asObject(doc.skills)}
         onChange={(v) => setKey("skills", v)}
+        workspacePath={props.workspacePath}
       />
     );
   }

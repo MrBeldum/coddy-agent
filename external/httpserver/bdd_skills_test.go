@@ -621,6 +621,110 @@ func (s *skCWDFeatureState) listSlashCommandsWithoutSession() error {
 	return s.listSlashCommands(false)
 }
 
+// pickedFolderQuery is the query the SPA adds to a cwd-scoped listing while a
+// new chat has no session yet: the folder picked on the start screen.
+func (s *skCWDFeatureState) pickedFolderQuery(project string) (string, error) {
+	dir, ok := s.projects[project]
+	if !ok {
+		return "", fmt.Errorf("unknown project %q", project)
+	}
+	return "&cwd=" + url.QueryEscape(dir), nil
+}
+
+func (s *skCWDFeatureState) listSlashCommandsPicked(project string, withSession bool) error {
+	q, err := s.pickedFolderQuery(project)
+	if err != nil {
+		return err
+	}
+	if err := s.do(http.MethodGet, "/coddy/slash-commands?page=1&page_size=200"+q, nil, withSession); err != nil {
+		return err
+	}
+	if s.status != http.StatusOK {
+		return fmt.Errorf("slash-commands status %d body %v", s.status, s.body)
+	}
+	return nil
+}
+
+func (s *skCWDFeatureState) listSlashCommandsWithoutSessionPicked(project string) error {
+	return s.listSlashCommandsPicked(project, false)
+}
+
+func (s *skCWDFeatureState) listSlashCommandsForSessionPicked(project string) error {
+	return s.listSlashCommandsPicked(project, true)
+}
+
+func (s *skCWDFeatureState) listSkillsWithoutSessionPicked(project string) error {
+	q, err := s.pickedFolderQuery(project)
+	if err != nil {
+		return err
+	}
+	if err := s.do(http.MethodGet, "/coddy/skills?"+strings.TrimPrefix(q, "&"), nil, false); err != nil {
+		return err
+	}
+	if s.status != http.StatusOK {
+		return fmt.Errorf("skills status %d body %v", s.status, s.body)
+	}
+	return nil
+}
+
+func (s *skCWDFeatureState) projectHasLocalSubagent(project, name string) error {
+	dir, ok := s.projects[project]
+	if !ok {
+		return fmt.Errorf("unknown project %q", project)
+	}
+	agents := filepath.Join(dir, ".coddy", "agents")
+	if err := os.MkdirAll(agents, 0o755); err != nil {
+		return err
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: Local subagent of project %s\n---\n\nReview the change.\n", name, project)
+	return os.WriteFile(filepath.Join(agents, name+".md"), []byte(body), 0o644)
+}
+
+func (s *skCWDFeatureState) searchMentionsPicked(query, project string) error {
+	q, err := s.pickedFolderQuery(project)
+	if err != nil {
+		return err
+	}
+	if err := s.do(http.MethodGet, "/coddy/mentions?q="+url.QueryEscape(query)+q, nil, false); err != nil {
+		return err
+	}
+	if s.status != http.StatusOK {
+		return fmt.Errorf("mentions status %d body %v", s.status, s.body)
+	}
+	return nil
+}
+
+func (s *skCWDFeatureState) mentionInserts() []string {
+	items, _ := s.body["items"].([]interface{})
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if m, ok := it.(map[string]interface{}); ok {
+			if v, _ := m["insert"].(string); v != "" {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+func (s *skCWDFeatureState) mentionCandidatesInclude(insert string) error {
+	for _, v := range s.mentionInserts() {
+		if v == insert {
+			return nil
+		}
+	}
+	return fmt.Errorf("mention candidates %v do not include %q", s.mentionInserts(), insert)
+}
+
+func (s *skCWDFeatureState) mentionCandidatesExclude(insert string) error {
+	for _, v := range s.mentionInserts() {
+		if v == insert {
+			return fmt.Errorf("mention candidates %v unexpectedly include %q", s.mentionInserts(), insert)
+		}
+	}
+	return nil
+}
+
 func (s *skCWDFeatureState) listSkillsForSession() error {
 	if err := s.do(http.MethodGet, "/coddy/skills", nil, true); err != nil {
 		return err
@@ -752,6 +856,13 @@ func initializeSkillsSessionWorkspaceScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^I switch that session workspace to the project folder "([^"]*)"$`, s.switchSessionWorkspaceToProject)
 	sc.Step(`^I list slash commands for that session$`, s.listSlashCommandsForSession)
 	sc.Step(`^I list slash commands without a session$`, s.listSlashCommandsWithoutSession)
+	sc.Step(`^I list slash commands without a session for the picked folder "([^"]*)"$`, s.listSlashCommandsWithoutSessionPicked)
+	sc.Step(`^I list slash commands for that session with the picked folder "([^"]*)"$`, s.listSlashCommandsForSessionPicked)
+	sc.Step(`^I list skills without a session for the picked folder "([^"]*)"$`, s.listSkillsWithoutSessionPicked)
+	sc.Step(`^the project folder "([^"]*)" has a local subagent "([^"]*)"$`, s.projectHasLocalSubagent)
+	sc.Step(`^I search the mentions "([^"]*)" without a session for the picked folder "([^"]*)"$`, s.searchMentionsPicked)
+	sc.Step(`^the mention candidates include "([^"]*)"$`, s.mentionCandidatesInclude)
+	sc.Step(`^the mention candidates do not include "([^"]*)"$`, s.mentionCandidatesExclude)
 	sc.Step(`^I list skills for that session$`, s.listSkillsForSession)
 	sc.Step(`^I prompt that session with "([^"]*)"$`, s.promptSession)
 	sc.Step(`^I read the server configuration$`, s.readServerConfiguration)

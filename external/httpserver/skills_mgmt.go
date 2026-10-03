@@ -40,8 +40,9 @@ type skillRowResponse struct {
 
 // coddySkillsGet lists all skills with their enabled/disabled state. ${CWD} in
 // skills.dirs resolves against the session named by the optional
-// X-Coddy-Session-ID header, or the server default workspace without it, the
-// same way /coddy/slash-commands does.
+// X-Coddy-Session-ID header, else the folder in the cwd query (Settings → Skills
+// of a new chat), else the server default workspace, the same way
+// /coddy/slash-commands does.
 func (s *Server) coddySkillsGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
@@ -51,7 +52,7 @@ func (s *Server) coddySkillsGet(w http.ResponseWriter, r *http.Request) {
 	installDir := cfg.Skills.ManagedDir(cfg.Paths.Home)
 	loader := skills.NewLoader(cfg.Skills.Dirs)
 
-	cwd, ok := s.resolveSessionCWD(w, r)
+	cwd, ok := s.resolveListingCWD(w, r)
 	if !ok {
 		return
 	}

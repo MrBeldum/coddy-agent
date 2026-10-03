@@ -118,6 +118,51 @@ func (s *Server) resolveSessionCWD(w http.ResponseWriter, r *http.Request) (stri
 	return ap, true
 }
 
+// resolveListingCWD picks the workspace of a read-only listing the composer
+// asks for while the user types (skills, slash commands, mentions and the
+// subagents they offer, the file a mention names): the session named by
+// X-Coddy-Session-ID when the server has it, exactly as resolveSessionCWD
+// does, else the folder in the cwd query parameter, else the server default
+// cwd. The cwd parameter is how a new chat names the folder picked on the start
+// screen before its session exists; the SPA sends it next to the header as
+// well, which covers the first send of a chat with no folder picked, whose id
+// the server only learns from that turn. It must be an absolute path to an
+// existing directory (400 otherwise) and is ignored when the session exists,
+// whose own workspace always wins. A query and not a header, because a folder
+// name may not be ASCII. Routes that change a workspace (MCP declarations,
+// trust, folder creation) stay on resolveSessionCWD and never take cwd.
+func (s *Server) resolveListingCWD(w http.ResponseWriter, r *http.Request) (string, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("cwd"))
+	if raw == "" {
+		return s.resolveSessionCWD(w, r)
+	}
+	if sid := strings.TrimSpace(r.Header.Get("X-Coddy-Session-ID")); sid != "" {
+		if session.ValidateFolderSessionID(sid) != nil || s.sessionKnown(sid) {
+			return s.resolveSessionCWD(w, r)
+		}
+	}
+	if !filepath.IsAbs(raw) {
+		http.Error(w, `{"error":{"message":"cwd must be an absolute path"}}`, http.StatusBadRequest)
+		return "", false
+	}
+	abs := filepath.Clean(raw)
+	fi, err := os.Stat(abs)
+	if err != nil || !fi.IsDir() {
+		http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, "folder not found: "+abs), http.StatusBadRequest)
+		return "", false
+	}
+	return abs, true
+}
+
+// sessionKnown reports whether the server holds the session, live or on disk.
+func (s *Server) sessionKnown(sid string) bool {
+	if s.mgr.SessionByID(sid) != nil {
+		return true
+	}
+	fs := s.mgr.FileStore()
+	return fs != nil && fs.HasPersistedSnapshot(sid)
+}
+
 func (s *Server) coddySlashCommandsGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
@@ -141,7 +186,7 @@ func (s *Server) coddySlashCommandsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cwdAbs, ok := s.resolveSessionCWD(w, r)
+	cwdAbs, ok := s.resolveListingCWD(w, r)
 	if !ok {
 		return
 	}
