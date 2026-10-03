@@ -227,7 +227,7 @@ agent:
   model: "openai/gpt-5.6-terra"  # optional default LLM until the client overrides per session;
                                # unset, interactive surfaces pick a model per session, while
                                # coddy -p / coddy acp / API calls without a model report "no model configured"
-  max_turns: 0                 # ReAct iterations per prompt, recoveries included; 0 (default) = no limit
+  max_turns: 165               # ReAct iterations per prompt, recoveries included; 0 explicitly disables the limit
   llm_retry_max: 3             # shared per-step budget: transport retries + no-answer recoveries
                                # (default 3; 0 disables these retries, not separately configured continuations)
   llm_retry_base_ms: 1000      # initial backoff between LLM retries; a server-provided
@@ -241,9 +241,9 @@ agent:
   wait_for_limit_reset: false        # wait for a hit usage limit to lift and re-issue the call (off: the turn ends with the error)
   wait_for_limit_reset_max_ms: 14400000  # total wait per turn (4 h), the retry wrapper's sleeps on a limit included; under 60 s it also bounds ordinary 429 retries; 0 never waits
   loop_guard: true             # stop a response that repeats itself, and a tool called over and over with identical args
-  loop_tool_repeat_limit: 3    # identical tool calls in a row before the guard steps in (0 disables)
+  loop_tool_repeat_limit: 2    # identical calls in successive ReAct responses before the guard steps in (0 disables)
   loop_stream_repeat_cycles: 5 # identical output cycles in one stream before it is cut (0 disables)
-  loop_nudge_max: 2            # nudges before the guard stops the turn with a notice
+  loop_nudge_max: 1            # nudges before the guard stops the turn with a notice
 
 # System prompt templates
 prompts:

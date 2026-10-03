@@ -144,8 +144,8 @@
         },
         "max_turns": {
           "type": "integer",
-          "description": "Cap on the ReAct steps (LLM calls) of one prompt turn. 0, the default, sets no cap; a turn that reaches a cap set here ends with a notice that names it.",
-          "default": 0,
+          "description": "Cap on the ReAct steps (LLM calls) of one prompt turn. Defaults to 165; set 0 to disable the cap. A turn that reaches the cap ends with a notice that names it.",
+          "default": 165,
           "minimum": 0
         },
         "llm_retry_max": {
@@ -200,8 +200,8 @@
             "integer",
             "null"
           ],
-          "description": "Consecutive identical tool calls (same name, same canonical arguments) before the loop guard steps in. 0 disables the tool-repeat check.",
-          "default": 3,
+          "description": "Consecutive identical tool calls in successive ReAct responses (same name, same canonical arguments) before the loop guard steps in. 0 disables the tool-repeat check.",
+          "default": 2,
           "minimum": 0
         },
         "loop_stream_repeat_cycles": {
@@ -219,7 +219,7 @@
             "null"
           ],
           "description": "How many times one turn may be nudged back on track before the loop guard stops it with a notice.",
-          "default": 2,
+          "default": 1,
           "minimum": 0
         },
         "wait_for_limit_reset": {

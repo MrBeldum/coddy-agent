@@ -239,9 +239,9 @@ messages: [
 
 6. CHECK_COMPLETION
    - If no tool calls in last response -> DONE (stopReason: end_turn)
-   - If max_turns is set and turn_count >= max_turns -> DONE (stopReason: max_turns;
-     the turn's stop notice names the key that set the limit). max_turns 0, the
-     default, is no step limit
+   - If turn_count >= max_turns -> DONE (stopReason: max_turns;
+     the turn's stop notice names the key that set the limit). max_turns defaults
+     to 165; an explicit 0 disables the step limit
    - Otherwise -> back to step 2
 
    Loop guard (**`agent.loop_guard`**, default on) can end the turn earlier:

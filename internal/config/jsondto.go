@@ -108,13 +108,13 @@ type ModelJSON struct {
 
 // AgentJSON mirrors Agent for JSON APIs. Pointer fields keep the unset/explicit
 // distinction where an explicit 0 means something different from "unset":
-// loop-guard counters, llm_retry_max (0 disables retries),
+// max_turns (0 disables the cap), loop-guard counters, llm_retry_max (0 disables retries),
 // llm_first_token_timeout_ms (0 disables the silence guard) and
 // llm_stream_idle_timeout_ms (0 disables the stall guard).
 type AgentJSON struct {
 	QueueMode              string `json:"queue_mode,omitempty"`
 	Model                  string `json:"model"`
-	MaxTurns               int    `json:"max_turns,omitempty"`
+	MaxTurns               *int   `json:"max_turns,omitempty"`
 	LLMRetryMax            *int   `json:"llm_retry_max,omitempty"`
 	LLMRetryBaseMS         int    `json:"llm_retry_base_ms,omitempty"`
 	LLMMinIntervalMS       int    `json:"llm_min_interval_ms,omitempty"`
@@ -457,7 +457,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Agent = AgentJSON{
 		QueueMode:              c.Agent.QueueMode,
 		Model:                  c.Agent.Model,
-		MaxTurns:               c.Agent.MaxTurns,
+		MaxTurns:               intPtr(c.Agent.MaxTurns),
 		LLMRetryMax:            cloneIntPtr(c.Agent.LLMRetryMax),
 		LLMRetryBaseMS:         c.Agent.LLMRetryBaseMS,
 		LLMMinIntervalMS:       c.Agent.LLMMinIntervalMS,
@@ -672,7 +672,6 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	cfg.Agent = Agent{
 		QueueMode:              j.Agent.QueueMode,
 		Model:                  j.Agent.Model,
-		MaxTurns:               j.Agent.MaxTurns,
 		LLMRetryMax:            cloneIntPtr(j.Agent.LLMRetryMax),
 		LLMRetryBaseMS:         j.Agent.LLMRetryBaseMS,
 		LLMMinIntervalMS:       j.Agent.LLMMinIntervalMS,
@@ -684,6 +683,10 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		LoopNudgeMax:           cloneIntPtr(j.Agent.LoopNudgeMax),
 		WaitForLimitReset:      j.Agent.WaitForLimitReset,
 		WaitForLimitResetMaxMS: cloneIntPtr(j.Agent.WaitForLimitResetMaxMS),
+	}
+	if j.Agent.MaxTurns != nil {
+		cfg.Agent.MaxTurns = *j.Agent.MaxTurns
+		cfg.Agent.maxTurnsSet = true
 	}
 	cfg.Prompts = Prompts{
 		Dir: j.Prompts.Dir, AgentPrompt: j.Prompts.AgentPrompt, PlanPrompt: j.Prompts.PlanPrompt, AskPrompt: j.Prompts.AskPrompt,

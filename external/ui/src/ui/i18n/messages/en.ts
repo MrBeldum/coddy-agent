@@ -396,7 +396,7 @@ export const messagesEn: Record<string, string> = {
     "What Enter does with a message written while a turn runs: steer joins the running turn at its next step, after_turn starts a prompt of its own after the answer. Tab sends the other way. Unset, the browser and the console ask on the first such message.",
   "settings.schema.agent.max_turns.label": "Max turns",
   "settings.schema.agent.max_turns.desc":
-    "Cap on ReAct iterations (LLM calls plus tool rounds) for one user request; 0 means no limit.",
+    "Cap on ReAct iterations (LLM calls plus tool rounds) for one user request. The default is 165; 0 disables the cap.",
   "settings.schema.agent.llm_retry_max.label": "LLM retry max",
   "settings.schema.agent.llm_retry_max.desc":
     "Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits.",
@@ -420,7 +420,7 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.agent.loop_tool_repeat_limit.label":
     "Loop tool repeat limit",
   "settings.schema.agent.loop_tool_repeat_limit.desc":
-    "Consecutive identical tool calls before the loop guard steps in (0 disables the check).",
+    "Consecutive identical tool calls in successive ReAct responses before the loop guard steps in (0 disables the check).",
   "settings.schema.agent.loop_stream_repeat_cycles.label":
     "Loop stream repeat cycles",
   "settings.schema.agent.loop_stream_repeat_cycles.desc":
