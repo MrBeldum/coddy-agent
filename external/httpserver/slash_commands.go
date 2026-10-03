@@ -30,8 +30,12 @@ func (s *Server) skillDirsSignature(cwd string) string {
 	if s.activeCfg() != nil {
 		home = strings.TrimSpace(s.activeCfg().Paths.Home)
 	}
-	for _, d := range s.activeCfg().Skills.Dirs {
-		exp := filepath.Clean(skills.ExpandConfiguredPath(d, cwd, home))
+	for _, d := range s.activeCfg().Skills.SearchDirs() {
+		raw := skills.ExpandConfiguredPath(d, cwd, home)
+		if raw == "" {
+			continue
+		}
+		exp := filepath.Clean(raw)
 		st, err := os.Stat(exp)
 		if err != nil {
 			parts = append(parts, fmt.Sprintf("%s:missing", exp))
@@ -54,7 +58,7 @@ func (s *Server) listSkillSummariesCached(cwdAbs string) ([]skills.SkillSummary,
 	}
 	s.slashMu.Unlock()
 
-	loader := skills.NewLoader(s.activeCfg().Skills.Dirs)
+	loader := skills.NewLoader(s.activeCfg().Skills.SearchDirs())
 	loaded, err := loader.LoadAll(cleanCWD, s.activeCfg().Paths.Home, s.activeCfg().Skills.ManagedDir(s.activeCfg().Paths.Home))
 	if err != nil {
 		return nil, err

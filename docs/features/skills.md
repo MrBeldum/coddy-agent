@@ -326,36 +326,37 @@ The lockfile records the archive address next to the marketplace, and the versio
 
 ![Settings, Skills tab: auto-discovery, the resolved skills.dirs, remote sources and installed skills](../assets/screenshot-fullhd-settings-skills.png)
 
-*Settings, Skills tab: auto-discovery, the resolved skills.dirs, the remote sources with the built-in one greyed out, and the installed skills, the bundled ones among them*
+*Settings, Skills tab: auto-discovery, the extra directories of skills.dirs, the remote sources with the built-in one greyed out, and the installed skills, the bundled ones among them*
 
-Coddy searches all directories in `skills.dirs` and deduplicates by skill name. **Later directories have higher priority** — if the same skill name appears in multiple directories, the version from the directory listed last wins.
+Every workspace reads four skill folders, whatever `config.yaml` says, and then the extra directories of `skills.dirs`. They are read in this order, and **the lower a folder is in the list, the stronger it is**: a skill whose name is found in several folders is taken from the last of them.
 
-Default directories (lowest → highest priority):
+| Order | Folder | What it holds |
+|-------|--------|---------------|
+| 1 (weakest) | `${HOME}/.agents/skills/` | Your skills shared with every agent; `npx skills` and `npx skillsbd` install here |
+| 2 | `.agents/skills/` of the project | The project's skills shared with every agent that works on it |
+| 3 | `${CODDY_HOME}/skills/` (`~/.coddy/skills/` by default) | Coddy's own skills: the standard delivery, marketplace and plugin installs, skills installed from Settings |
+| 4 | `.coddy/skills/` of the project | The project's skills for Coddy |
+| 5 (strongest) | each entry of `skills.dirs`, in its order | Directories you add yourself, for example a team folder |
 
-| Priority | Path | Purpose |
-|----------|------|---------|
-| lowest | `~/.agents/skills/` | Global skills installed by `npx skills` / `npx skillsbd` — shared with all agents |
-| ↑ | `~/.coddy/skills/` | Coddy-specific skills; may contain symlinks into `~/.agents/skills/` |
-| highest | `${CWD}/.coddy/skills/` | Project-local skills — override anything from global/user directories |
-
-Override in `config.yaml`:
+So a project's `.agents/skills` overrides your `~/.agents/skills`, Coddy's folders override both agents folders, the project's `.coddy/skills` overrides Coddy's own, and a directory of `skills.dirs` overrides all four. The four defaults cannot be configured away: `skills.dirs` only adds to them, and a config without the key reads just the four.
 
 ```yaml
 skills:
   dirs:
-    - "~/.agents/skills"
-    - "${CODDY_HOME}/skills"
-    - "${CWD}/.coddy/skills"
-    - "~/my-team-skills"
+    - "~/my-team-skills"        # read after the four defaults, wins a name over them
+    - "${CWD}/tools/skills"     # a folder of the workspace, like a relative "tools/skills"
 ```
 
-`${CODDY_HOME}` expands when the config file is loaded; `${CWD}` stays in the entry and expands per session, against the workspace of the session that loads its skills.
+- `${HOME}` and `~` expand to your home folder, `${CODDY_HOME}` when the config file is loaded. `${CWD}`, and an entry written as a relative path (`.agents/skills`, `tools/skills`), name a folder of the **workspace of the session**, not of the directory the server was started from.
+- A folder named twice - a default folder spelled out again in `skills.dirs`, as configs written before this layout did, or the project open in your home folder so that `${HOME}/.agents/skills` and the project's `.agents/skills` are the same - is read once, **at its last place**. Naming a default folder in `skills.dirs` therefore moves it below the directories listed before it. A link to a folder that is already in the list counts as that folder.
+- A folder that does not exist is skipped quietly, so the defaults cost nothing in a project that has neither `.agents/skills` nor `.coddy/skills`.
+- `coddy skills list` prints the folders it read, in this order, under **Search roots:**; Settings → Skills shows each skill with the file it came from.
 
-A skill may be a symbolic link that leads anywhere on the disk, outside the project included: a skill folder linked into `.coddy/skills` (`ln -s ~/shared-skills/review .coddy/skills/review`), a single `.md` skill file linked the same way, a `SKILL.md` that is itself a link, or the whole `.coddy/skills` directory as a link to a folder of skills. Every form is listed, invoked with `/name` and offered to `load_skill`; the model is told the skill's folder by its path through the link (`Skill directory: <project>/.coddy/skills/review`), so the files the skill names (`scripts/`, `references/`) are read and run from there. A link that leads nowhere is skipped. Deleting such a skill from Settings → Skills removes the link and leaves what it points at; when the whole skills directory is a link, the skill folder inside it is what gets deleted, as in any folder.
+A skill may be a symbolic link that leads anywhere on the disk, outside the project included: a skill folder linked into `.coddy/skills` or `.agents/skills` (`ln -s ~/shared-skills/review .coddy/skills/review`), a single `.md` skill file linked the same way, a `SKILL.md` that is itself a link, or a whole skills folder (`.agents/skills`, `.coddy/skills`, `~/.agents/skills`) as a link to a folder of skills. Every form is listed, invoked with `/name` and offered to `load_skill`; the model is told the skill's folder by its path through the link (`Skill directory: <project>/.coddy/skills/review`), so the files the skill names (`scripts/`, `references/`) are read and run from there. A link that leads nowhere is skipped. Deleting such a skill from Settings → Skills removes the link and leaves what it points at; when the whole skills directory is a link, the skill folder inside it is what gets deleted, as in any folder.
 
 `${CWD}` is resolved by the session, not by the process. A `coddy serve` server started from any directory (a user service started from `$HOME`, say) serves project-local skills to every session whose workspace is that project: pick the folder when the session is created (the composer's workspace picker, `POST /coddy/sessions/{id}/workspace`, or ACP `session/new` with `cwd`). The workspace is fixed once the conversation has messages, so a running chat keeps the skills of the folder it started in. `GET /coddy/slash-commands` and `GET /coddy/skills` take the session through **`X-Coddy-Session-ID`**; without it they describe the folder in the **`cwd`** query, and without both the server default workspace, which is also what `coddy skills list` prints for the directory it runs in.
 
-A new chat in the web UI has no session until its first message, so the folder picked on the start screen travels as the **`cwd`** query of those requests instead. Picking `data` and typing `/` lists the project skills of `data/.coddy/skills` at once, next to the global ones; pick a folder without them and they leave the menu, and a `/name` of another workspace is no longer marked as a skill in the composer or in the messages of the transcript. Settings → Skills lists the project skills of the same folder, and once the first message is sent the session is created in it, so the turn loads the same skills.
+A new chat in the web UI has no session until its first message, so the folder picked on the start screen travels as the **`cwd`** query of those requests instead. Picking `data` and typing `/` lists the project skills of `data/.agents/skills` and `data/.coddy/skills` at once, next to the global ones; pick a folder without them and they leave the menu, and a `/name` of another workspace is no longer marked as a skill in the composer or in the messages of the transcript. Settings → Skills lists the project skills of the same folder, and once the first message is sent the session is created in it, so the turn loads the same skills.
 
 ---
 
@@ -434,7 +435,7 @@ description: Short description shown in the catalog.
 Instructions the agent will follow when this skill is active.
 ```
 
-Then add the parent directory to `skills.dirs` in `config.yaml`, or drop the directory into `~/.coddy/skills/` or `${CWD}/.coddy/skills/`.
+Then drop the directory into one of the default folders (`~/.agents/skills/`, the project's `.agents/skills/`, `~/.coddy/skills/`, the project's `.coddy/skills/`), or add its parent directory to `skills.dirs` in `config.yaml`.
 
 In a running agent session, committing a change to `skills.dirs`, `skills.sources`, or `skills.auto_discovery` through the staged config tools (`config_set` + `config_commit`) immediately rebuilds the skill catalog. An external installer such as `coddy plugin install` or `npx skills add` changes files on disk, so follow it with an idempotent commit of `set skills.dirs=[...]` to refresh the running loader. Adding an entry to `skills.sources` alone still does not fetch or install anything.
 

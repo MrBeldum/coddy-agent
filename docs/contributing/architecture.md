@@ -216,7 +216,7 @@ persistence. Tools from MCP servers are appended to the LLM tool list in
 
 ### Skills loader (`internal/skills`)
 
-Loads `SKILL.md` from configured `skills.dirs` (see `docs/features/skills.md`). Default dirs (lowest → highest priority): **`~/.agents/skills`** (global, shared with `npx skills`/`npx skillsbd`), **`~/.coddy/skills`** (coddy-specific), **`${CWD}/.coddy/skills`** (project-local). Later dirs override earlier ones when the same skill name appears in multiple locations. The **standard delivery** - the skills the binary carries in **`internal/skills/bundled/`** - is prepended below all of them, and is also written into **`~/.coddy/skills`** on first sight (**`internal/skills/seed.go`**), so the copy on disk is what a session actually reads and the in-binary one is the fallback for a home that could not be written.
+Loads `SKILL.md` from the default skill folders and then the extra `skills.dirs` (see `docs/features/skills.md`). The defaults, always read, lowest → highest priority: **`${HOME}/.agents/skills`** (shared with `npx skills`/`npx skillsbd`), the project's **`.agents/skills`**, **`${CODDY_HOME}/skills`** (Coddy's own), the project's **`.coddy/skills`**; each entry of `skills.dirs` comes after them (`config.Skills.SearchDirs`, a folder named twice read at its last place). The **standard delivery** - the skills the binary carries in **`internal/skills/bundled/`** - is prepended below all of them, and is also written into **`~/.coddy/skills`** on first sight (**`internal/skills/seed.go`**), so the copy on disk is what a session actually reads and the in-binary one is the fallback for a home that could not be written.
 
 ### Subagents (`internal/subagents`)
 

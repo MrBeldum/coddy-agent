@@ -853,6 +853,11 @@ func TestSessionTurnActiveInProcessDuringTurn(t *testing.T) {
 }
 
 func TestSessionNewSendsAvailableSlashCommandsUpdate(t *testing.T) {
+	// The default skill folders are read in every workspace, ~/.agents/skills
+	// among them: an empty home keeps the operator's skills out of the count.
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("USERPROFILE", userHome)
 	skRoot := t.TempDir()
 	skillDir := filepath.Join(skRoot, "probe")
 	if err := os.MkdirAll(filepath.Join(skillDir, "demo"), 0o755); err != nil {

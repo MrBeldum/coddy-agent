@@ -38,7 +38,7 @@ my-project/
 
    `coddy rules list` prints the catalog with the source folder, the dialect each file was read with, whether it is in every prompt and what activates the others.
 
-3. **A skill in `.coddy/skills/<name>/SKILL.md`.** `${CWD}/.coddy/skills` is the highest-priority entry of the default `skills.dirs`, so a project skill overrides one of the same name from `~/.coddy/skills` or `~/.agents/skills` ([Skills](../features/skills.md)). The directory name is the slash command, `/release-notes` here; writing the file is the last recipe on this page. Run `coddy skills list` inside the project to see it listed for that directory.
+3. **A skill in `.coddy/skills/<name>/SKILL.md`.** `.coddy/skills` is the strongest of the four folders Coddy always reads, so a project skill overrides one of the same name from `~/.coddy/skills`, the project's `.agents/skills` or `~/.agents/skills`; only a directory you add to `skills.dirs` comes after it ([Skills](../features/skills.md)). The directory name is the slash command, `/release-notes` here; writing the file is the last recipe on this page. Run `coddy skills list` inside the project to see it listed for that directory.
 
 4. **MCP servers in `.coddy/mcp.json`** ([MCP servers](../features/mcp.md)). The file has Cursor's shape, one `mcpServers` object keyed by name; a URL-only entry is a streamable HTTP server, and `${CWD}` in `args` is the session workspace.
 

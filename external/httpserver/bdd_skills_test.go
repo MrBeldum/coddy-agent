@@ -932,6 +932,155 @@ func initializeSkillsSessionWorkspaceScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the skills directories include "([^"]*)"$`, s.skillsDirectoriesInclude)
 }
 
+// ---- features/skills_default_dirs.feature ----
+
+func (s *skCWDFeatureState) projectFolders(a, b string) error {
+	for _, name := range []string{a, b} {
+		dir := filepath.Join(s.root, "projects", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		s.projects[name] = dir
+	}
+	return nil
+}
+
+func writeDescribedSkill(dir, name, description string) error {
+	if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+		return err
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n# %s\n", name, description, name)
+	return os.WriteFile(filepath.Join(dir, name, "SKILL.md"), []byte(body), 0o644)
+}
+
+func (s *skCWDFeatureState) projectHasSkillIn(project, skill, rel, description string) error {
+	dir, ok := s.projects[project]
+	if !ok {
+		return fmt.Errorf("unknown project %q", project)
+	}
+	return writeDescribedSkill(filepath.Join(dir, filepath.FromSlash(rel)), skill, description)
+}
+
+func (s *skCWDFeatureState) coddyHomeHasSkill(skill, description string) error {
+	return writeDescribedSkill(filepath.Join(s.home, "skills"), skill, description)
+}
+
+func (s *skCWDFeatureState) extraDirHasSkill(extra, skill, description string) error {
+	return writeDescribedSkill(filepath.Join(s.root, extra), skill, description)
+}
+
+func (s *skCWDFeatureState) projectLinksFolderOutside(project, rel, skill string) error {
+	dir, ok := s.projects[project]
+	if !ok {
+		return fmt.Errorf("unknown project %q", project)
+	}
+	outside := filepath.Join(s.root, "outside-"+skill)
+	if err := writeDescribedSkill(outside, skill, "behind a link"); err != nil {
+		return err
+	}
+	link := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(outside, link)
+}
+
+// startServerWithSkills starts the server from a directory that is not a
+// project, with skillsBlock as the whole skills section of its config ("" for
+// none at all).
+func (s *skCWDFeatureState) startServerWithSkills(skillsBlock string) error {
+	if err := os.MkdirAll(s.home, 0o755); err != nil {
+		return err
+	}
+	cfgPath := filepath.Join(s.home, "config.yaml")
+	cfgYAML := `providers:
+  - name: local
+    type: openai
+    api_key: test-key
+models:
+  - model: local/gpt-4o
+    max_tokens: 4096
+    temperature: 0.1
+agent:
+  model: local/gpt-4o
+` + skillsBlock
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o644); err != nil {
+		return err
+	}
+	cfg, err := config.LoadWithPaths(config.Paths{Home: s.home, CWD: s.launch, ConfigPath: cfgPath})
+	if err != nil {
+		return err
+	}
+	runner := func(_ context.Context, _ *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		return string(acp.StopReasonEndTurn), nil
+	}
+	s.mgr = session.NewManager(cfg, noopSender{}, runner, slog.Default(), s.launch, nil)
+	s.srv = New(cfg, s.mgr, slog.Default(), s.launch)
+	s.ts = httptest.NewServer(s.srv.Handler())
+	return nil
+}
+
+func (s *skCWDFeatureState) startServerNoSkillDirs() error { return s.startServerWithSkills("") }
+
+func (s *skCWDFeatureState) startServerExtraSkillDir(extra string) error {
+	return s.startServerWithSkills(fmt.Sprintf("skills:\n  dirs:\n    - %q\n", filepath.ToSlash(filepath.Join(s.root, extra))))
+}
+
+func (s *skCWDFeatureState) slashCommandDescribed(name, description string) error {
+	items, _ := s.body["items"].([]interface{})
+	for _, it := range items {
+		m, ok := it.(map[string]interface{})
+		if !ok || m["name"] != name {
+			continue
+		}
+		if got, _ := m["description"].(string); got != description {
+			return fmt.Errorf("slash command %q is described %q, want %q", name, got, description)
+		}
+		return nil
+	}
+	return fmt.Errorf("slash commands %v do not include %q", s.itemNames(), name)
+}
+
+func initializeSkillsDefaultDirsScenario(sc *godog.ScenarioContext) {
+	s := &skCWDFeatureState{}
+	sc.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
+		return ctx, s.reset()
+	})
+	sc.After(func(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
+		s.close()
+		return ctx, nil
+	})
+	sc.Step(`^project folders "([^"]*)" and "([^"]*)"$`, s.projectFolders)
+	sc.Step(`^the project folder "([^"]*)" has the skill "([^"]*)" in "([^"]*)" described "([^"]*)"$`, s.projectHasSkillIn)
+	sc.Step(`^Coddy's own skills folder has the skill "([^"]*)" described "([^"]*)"$`, s.coddyHomeHasSkill)
+	sc.Step(`^the extra directory "([^"]*)" has the skill "([^"]*)" described "([^"]*)"$`, s.extraDirHasSkill)
+	sc.Step(`^the project folder "([^"]*)" links "([^"]*)" to a folder outside it with the skill "([^"]*)"$`, s.projectLinksFolderOutside)
+	sc.Step(`^a running coddy HTTP server with no skill directories configured$`, s.startServerNoSkillDirs)
+	sc.Step(`^a running coddy HTTP server with the extra skill directory "([^"]*)"$`, s.startServerExtraSkillDir)
+	sc.Step(`^a session anchored on the project folder "([^"]*)"$`, s.sessionAnchoredOnProject)
+	sc.Step(`^I switch that session workspace to the project folder "([^"]*)"$`, s.switchSessionWorkspaceToProject)
+	sc.Step(`^I list slash commands for that session$`, s.listSlashCommandsForSession)
+	sc.Step(`^I list slash commands without a session for the picked folder "([^"]*)"$`, s.listSlashCommandsWithoutSessionPicked)
+	sc.Step(`^the slash commands include "([^"]*)"$`, s.slashCommandsInclude)
+	sc.Step(`^the slash commands do not include "([^"]*)"$`, s.slashCommandsExclude)
+	sc.Step(`^the slash command "([^"]*)" is described "([^"]*)"$`, s.slashCommandDescribed)
+}
+
+func TestSkillsDefaultDirsFeature(t *testing.T) {
+	suite := godog.TestSuite{
+		Name:                "skills_default_dirs",
+		ScenarioInitializer: initializeSkillsDefaultDirsScenario,
+		Options: &godog.Options{
+			Format:   "pretty",
+			Paths:    []string{"../../features/skills_default_dirs.feature"},
+			TestingT: t,
+		},
+	}
+	if suite.Run() != 0 {
+		t.Fatal("skills_default_dirs feature failed")
+	}
+}
+
 func TestSkillsSessionWorkspaceFeature(t *testing.T) {
 	suite := godog.TestSuite{
 		Name:                "skills_session_workspace",

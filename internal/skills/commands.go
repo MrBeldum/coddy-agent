@@ -46,13 +46,13 @@ func List(cfg *config.Config) error {
 	home := cfg.Paths.Home
 	cwd := "."
 
-	loader := NewLoader(cfg.Skills.Dirs)
+	loader := NewLoader(cfg.Skills.SearchDirs())
 	loaded, err := loader.LoadAll(cwd, home, managedDir)
 	if err != nil {
 		return err
 	}
 
-	printSkillSearchRoots(cfg.Skills.Dirs, cwd, home)
+	printSkillSearchRoots(cfg.Skills.SearchDirs(), cwd, home)
 
 	if len(loaded) == 0 {
 		fmt.Println("No skills found.")
@@ -137,7 +137,11 @@ func printSkillSearchRoots(skillDirs []string, cwd, home string) {
 	fmt.Println("Search roots:")
 	seen := make(map[string]bool)
 	for _, d := range skillDirs {
-		p := filepath.Clean(ExpandConfiguredPath(d, cwd, home))
+		exp := ExpandConfiguredPath(d, cwd, home)
+		if exp == "" {
+			continue
+		}
+		p := filepath.Clean(exp)
 		if seen[p] {
 			continue
 		}

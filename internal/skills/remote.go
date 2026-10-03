@@ -257,7 +257,7 @@ func DeleteSkill(cfg *config.Config, cwd, skillName string) error {
 	defer syncMu.Unlock()
 	managedDir := cfg.Skills.ManagedDir(cfg.Paths.Home)
 
-	loader := NewLoader(cfg.Skills.Dirs)
+	loader := NewLoader(cfg.Skills.SearchDirs())
 	loaded, err := loader.LoadAll(cwd, cfg.Paths.Home, managedDir)
 	if err != nil {
 		return err
@@ -302,8 +302,12 @@ func skillDeletePath(cfg *config.Config, cwd, filePath string) (string, error) {
 		victim = filepath.Dir(filePath)
 	}
 	victim = filepath.Clean(victim)
-	for _, d := range cfg.Skills.Dirs {
-		root := filepath.Clean(ExpandConfiguredPath(d, cwd, cfg.Paths.Home))
+	for _, d := range cfg.Skills.SearchDirs() {
+		exp := ExpandConfiguredPath(d, cwd, cfg.Paths.Home)
+		if exp == "" {
+			continue
+		}
+		root := filepath.Clean(exp)
 		if victim == root {
 			return "", fmt.Errorf("refusing to delete the skills directory itself")
 		}
@@ -964,7 +968,7 @@ func AvailablePlugins(ctx context.Context, cfg *config.Config, cwd string) ([]Av
 		cwd = "."
 	}
 	installed := map[string]bool{}
-	loader := NewLoader(cfg.Skills.Dirs)
+	loader := NewLoader(cfg.Skills.SearchDirs())
 	if loaded, err := loader.LoadAll(cwd, cfg.Paths.Home, cfg.Skills.ManagedDir(cfg.Paths.Home)); err == nil {
 		for _, sk := range loaded {
 			installed[CanonicalCommandName(sk)] = true

@@ -206,11 +206,12 @@ prompts:
   # ask_prompt: "ask.md"
 
 skills:
-  # dirs is the list of directories scanned for skills. Searched in order,
-  # later entries win on name conflicts. When empty, defaults are
-  # ~/.agents/skills, ${CODDY_HOME}/skills, ${CWD}/.coddy/skills.
-  # ${CWD} is the session workspace, resolved when a session loads its
-  # skills, so it is safe to write here even for a shared coddy serve server.
+  # Four folders are always read, lowest -> highest priority (a lower one
+  # wins a skill name): ${HOME}/.agents/skills, the project's .agents/skills,
+  # ${CODDY_HOME}/skills, the project's .coddy/skills. dirs only ADDS
+  # directories, read after the four and stronger than them. ${CWD} and a
+  # relative entry are the session workspace, resolved when a session loads
+  # its skills, so they are safe here even for a shared coddy serve server.
   dirs: []
   # sources lists remote skill sources installed on demand with `coddy skills sync`
   # (never fetched automatically). Each entry is a GitHub repo (owner/repo[@ref]),

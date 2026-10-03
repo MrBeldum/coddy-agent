@@ -262,8 +262,11 @@ func TestLoadFromCLIWhenConfigMissing_AppliesDefaults(t *testing.T) {
 	if cfg.Logger.Level != config.LogLevelInfo {
 		t.Fatalf("logger default level: %q", cfg.Logger.Level)
 	}
-	if len(cfg.Skills.Dirs) != 3 {
-		t.Fatalf("skills default dirs: len=%d", len(cfg.Skills.Dirs))
+	if len(cfg.Skills.Dirs) != 0 {
+		t.Fatalf("skills.dirs must stay empty without a config (the defaults are read beside it), got %q", cfg.Skills.Dirs)
+	}
+	if got := cfg.Skills.SearchDirs(); !reflect.DeepEqual(got, config.DefaultSkillDirs()) {
+		t.Fatalf("skills search dirs without a config: got %q, want the defaults", got)
 	}
 	if cfg.Sessions.Dir != "" {
 		t.Fatalf("sessions.dir default: %q", cfg.Sessions.Dir)
@@ -1835,5 +1838,34 @@ func TestLoadAgentModelOptional(t *testing.T) {
 	}
 	if cfg.Agent.Model != "" {
 		t.Fatalf("agent.model materialized: %q", cfg.Agent.Model)
+	}
+}
+
+// Every workspace reads four folders, lowest priority first: the user's agents
+// skills, the project's agents skills, Coddy's own, the project's Coddy
+// skills. skills.dirs only adds directories after them, which win a name over
+// the defaults; an absent key adds none.
+func TestSkillsDirsAddToTheFourDefaults(t *testing.T) {
+	want := []string{
+		"${HOME}/.agents/skills",
+		"${CWD}/.agents/skills",
+		"${CODDY_HOME}/skills",
+		"${CWD}/.coddy/skills",
+	}
+	if got := config.DefaultSkillDirs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("DefaultSkillDirs() = %q, want %q", got, want)
+	}
+	var unset config.Skills
+	unset.ApplyDefaults("/home/dev/.coddy", func(s string) string { return s })
+	if len(unset.Dirs) != 0 {
+		t.Fatalf("an absent skills.dirs must stay empty, got %q", unset.Dirs)
+	}
+	if got := unset.SearchDirs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("absent skills.dirs reads %q, want the defaults %q", got, want)
+	}
+	set := config.Skills{Dirs: []string{"/srv/team-skills"}}
+	set.ApplyDefaults("/home/dev/.coddy", func(s string) string { return s })
+	if got := set.SearchDirs(); !reflect.DeepEqual(got, append(append([]string(nil), want...), "/srv/team-skills")) {
+		t.Fatalf("a set skills.dirs must come after the defaults, got %q", got)
 	}
 }

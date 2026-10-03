@@ -381,7 +381,7 @@ func pluginInstalledList(cfg *config.Config, cwd string) string {
 	if strings.TrimSpace(cwd) == "" {
 		cwd = "."
 	}
-	loader := NewLoader(cfg.Skills.Dirs)
+	loader := NewLoader(cfg.Skills.SearchDirs())
 	loaded, err := loader.LoadAll(cwd, cfg.Paths.Home, cfg.Skills.ManagedDir(cfg.Paths.Home))
 	if err != nil {
 		return fmt.Sprintf("failed to load skills: %v", err)

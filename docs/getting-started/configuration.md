@@ -317,18 +317,16 @@ memory:
 
 # Skills directories (Go: config.Skills, internal/config/skills.go)
 skills:
-  # Directories to search for SKILL.md and optional root .md/.mdc skill files.
-  # Later entries have HIGHER priority: if the same skill name appears in multiple
-  # directories, the version from the last matching directory wins.
-  # Default dirs (lowest → highest priority):
-  #   ~/.agents/skills          - global skills, shared with npx skills / npx skillsbd
-  #   ${CODDY_HOME}/skills      - coddy-specific; may contain symlinks to ~/.agents/skills
-  #   ${CWD}/.coddy/skills      - project-local; overrides everything above
-  # ${CODDY_HOME} and ${CWD} expand at runtime (per-session cwd for ${CWD}).
+  # Four folders are always read, lowest -> highest priority, whatever this
+  # key says (a lower folder wins a skill name over the ones above it):
+  #   ${HOME}/.agents/skills    - your skills shared with every agent (npx skills / npx skillsbd)
+  #   .agents/skills            - the project's skills shared with every agent
+  #   ${CODDY_HOME}/skills      - Coddy's own: the standard delivery, installed skills
+  #   .coddy/skills             - the project's skills for Coddy
+  # dirs only ADDS directories, read after the four and stronger than them.
+  # ${HOME} and ~ are your home, ${CWD} and a relative path the session's workspace.
   dirs:
-    - "~/.agents/skills"
-    - "${CODDY_HOME}/skills"
-    - "${CWD}/.coddy/skills"
+    - "~/my-team-skills"
 
 # Rules (Go: config.Rules, internal/config/rules.go)
 # One project folder is read under the session CWD: the first of .coddy/rules,

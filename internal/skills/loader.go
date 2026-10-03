@@ -98,8 +98,31 @@ func (l *Loader) LoadAll(cwd, agentHome string, installDir ...string) ([]*Skill,
 	}
 
 	// Load from directories in config order; later dirs override earlier ones.
+	// A folder named twice - a default folder spelled out again in
+	// skills.dirs, the workspace being the home folder, a project's
+	// .agents/skills linked to the user's - is read once, at its last (lowest
+	// in the list, strongest) place, so naming a default folder in skills.dirs
+	// moves it below the directories listed before it.
+	type dirRead struct{ path, key string }
+	reads := make([]dirRead, 0, len(l.Dirs))
+	lastAt := make(map[string]int)
 	for _, dir := range l.Dirs {
 		expanded := expandPath(dir, cwd, agentHome)
+		if expanded == "" {
+			continue
+		}
+		key := filepath.Clean(expanded)
+		if real, err := filepath.EvalSymlinks(key); err == nil {
+			key = real
+		}
+		lastAt[key] = len(reads)
+		reads = append(reads, dirRead{path: expanded, key: key})
+	}
+	for i, rd := range reads {
+		if lastAt[rd.key] != i {
+			continue
+		}
+		expanded := rd.path
 		found, err := loadFromDir(expanded)
 		if err != nil {
 			continue
@@ -304,22 +327,44 @@ func parseFrontmatter(data []byte) (string, *frontmatter) {
 	return body, &fm
 }
 
-// expandPath resolves ${CODDY_HOME}, ${CWD}, and ~ in a path.
+// expandPath resolves ${CODDY_HOME}, ${HOME}, ${CWD} and ~ in a skills.dirs
+// entry. A relative entry (".agents/skills") names a folder of the workspace,
+// like ${CWD}/.agents/skills: it follows the session and the folder a new chat
+// picked, never the directory the process was started from. An entry of the
+// workspace with no workspace behind the call expands to "", so it reads
+// nothing instead of a folder at the root of the disk.
 func expandPath(path, cwd, agentHome string) string {
 	if agentHome != "" {
 		path = strings.ReplaceAll(path, "${CODDY_HOME}", agentHome)
 	}
-	path = strings.ReplaceAll(path, "${CWD}", cwd)
-	if strings.HasPrefix(path, "~/") {
+	if strings.Contains(path, "${HOME}") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = strings.ReplaceAll(path, "${HOME}", home)
+		}
+	}
+	if strings.Contains(path, "${CWD}") {
+		if cwd == "" {
+			return ""
+		}
+		path = strings.ReplaceAll(path, "${CWD}", cwd)
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
 		home, err := os.UserHomeDir()
 		if err == nil {
-			path = filepath.Join(home, path[2:])
+			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
 		}
+	}
+	if path != "" && !filepath.IsAbs(path) && !strings.Contains(path, "${") {
+		if cwd == "" {
+			return ""
+		}
+		path = filepath.Join(cwd, path)
 	}
 	return path
 }
 
-// ExpandConfiguredPath resolves ${CODDY_HOME}, ${CWD}, and ~ the same way as skill loading.
+// ExpandConfiguredPath resolves ${CODDY_HOME}, ${HOME}, ${CWD}, ~ and a
+// relative entry the same way as skill loading.
 func ExpandConfiguredPath(path, cwd, agentHome string) string {
 	return expandPath(path, cwd, agentHome)
 }

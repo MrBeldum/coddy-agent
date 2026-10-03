@@ -48,12 +48,10 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 		Instructions: InstructionsJSON{
 			Files: DefaultInstructionFiles(),
 		},
+		// skills.dirs only adds directories to the default folders
+		// (DefaultSkillDirs), which are read beside it and never written in.
 		Skills: SkillsJSON{
-			Dirs: []string{
-				"~/.agents/skills",
-				"${CODDY_HOME}/skills",
-				"${CWD}/.coddy/skills",
-			},
+			Dirs: []string{},
 		},
 		MCPServers: []MCPServerJSON{},
 		MCP:        MCPJSON{ProjectTrust: ProjectTrustAsk, IdleTimeoutSeconds: intPtr(MCPDefaultIdleTimeoutSeconds)},

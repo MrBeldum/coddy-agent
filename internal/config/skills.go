@@ -59,20 +59,45 @@ func (c *Skills) ManagedDir(coddyHome string) string {
 	return expandSkillsHome("~/.coddy/skills")
 }
 
-// ApplyDefaults fills empty Dirs during config load. Sources stays exactly as
-// the file has it: the marketplace of the standard delivery is a system source
-// (SystemSkillsSource), listed beside this key rather than inside it.
+// DefaultSkillDirs are the skill directories every workspace reads, whatever
+// skills.dirs says, lowest priority first: the user's agents skills (shared
+// with every agent that reads ~/.agents/skills), the project's agents skills,
+// Coddy's own skills (where the standard delivery and installed skills land),
+// the project's Coddy skills. A name found in several is taken from the last,
+// so a project overrides the user and Coddy's folders override the agents
+// ones. The placeholders stay in the entries: ${CWD} expands per session
+// against its workspace (the folder a new chat picked included), ${HOME} and
+// ${CODDY_HOME} when the loader reads them.
+func DefaultSkillDirs() []string {
+	return []string{
+		"${HOME}/.agents/skills",
+		"${CWD}/.agents/skills",
+		"${CODDY_HOME}/skills",
+		"${CWD}/.coddy/skills",
+	}
+}
+
+// SearchDirs is every skill directory a workspace reads, lowest priority
+// first: DefaultSkillDirs, then the extra directories of skills.dirs in their
+// order. Every reader of skills goes through it, so the defaults cannot be
+// configured away and an extra directory wins a name over all of them. A
+// folder named twice (an old config that spelled the defaults out) is read
+// once, at its first place (the skills loader drops the repeat).
+func (c Skills) SearchDirs() []string {
+	return append(DefaultSkillDirs(), c.Dirs...)
+}
+
+// ApplyDefaults leaves Dirs as the file has it: skills.dirs only adds
+// directories to DefaultSkillDirs (see SearchDirs), so an absent key means no
+// extra ones. Sources stays exactly as the file has it too: the marketplace of
+// the standard delivery is a system source (SystemSkillsSource), listed beside
+// this key rather than inside it.
 func (c *Skills) ApplyDefaults(coddyHome string, expandCODDYHome func(string) string) {
 	if c.AutoDiscovery == nil {
 		v := true
 		c.AutoDiscovery = &v
 	}
 	if len(c.Dirs) == 0 {
-		c.Dirs = []string{
-			"~/.agents/skills",
-			"${CODDY_HOME}/skills",
-			"${CWD}/.coddy/skills",
-		}
 		return
 	}
 	for i := range c.Dirs {

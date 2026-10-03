@@ -2032,6 +2032,10 @@ func TestResponsesDirectPersistsAssistantModel(t *testing.T) {
 
 func TestCoddySlashCommandsGetPagingAndPrefix(t *testing.T) {
 	root := t.TempDir()
+	// The default skill folders are read beside skills.dirs, ~/.agents/skills
+	// among them: an empty home keeps the operator's skills out of the count.
+	t.Setenv("HOME", filepath.Join(root, "user-home"))
+	t.Setenv("USERPROFILE", filepath.Join(root, "user-home"))
 	home := filepath.Join(root, "home")
 	skillsDir := filepath.Join(root, "skills")
 	if err := os.MkdirAll(filepath.Join(home, "memory"), 0o755); err != nil {

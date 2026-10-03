@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/skills"
 	"github.com/EvilFreelancer/coddy-agent/internal/hooks"
 )
 
@@ -51,9 +52,15 @@ func (r *runner) paths() {
 	}
 
 	// ${CODDY_HOME} survives the load for the per-session consumers, so a
-	// probe that only expanded ${CWD} would stat a literal placeholder.
+	// probe that only expanded ${CWD} would stat a literal placeholder. Skill
+	// folders expand the way the skills loader reads them (${HOME}, a relative
+	// entry against the workspace).
 	for i, d := range cfg.Skills.Dirs {
-		r.readableDir(fmt.Sprintf("skills.dirs[%d]", i), config.ExpandPathVars(d, r.req.Paths))
+		dir := skills.ExpandConfiguredPath(d, r.req.Paths.CWD, r.req.Paths.Home)
+		if dir == "" {
+			continue
+		}
+		r.readableDir(fmt.Sprintf("skills.dirs[%d]", i), dir)
 	}
 	for i, d := range cfg.Subagents.Dirs {
 		r.readableDir(fmt.Sprintf("subagents.dirs[%d]", i), config.ExpandPathVars(d, r.req.Paths))

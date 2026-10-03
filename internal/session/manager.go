@@ -156,7 +156,7 @@ type Manager struct {
 // ACP client omits cwd; may be empty if every session supplies a non-empty cwd.
 // store may be nil to disable persistence.
 func NewManager(cfg *config.Config, server acp.UpdateSender, runner AgentRunner, log *slog.Logger, defaultCWD string, store *FileStore) *Manager {
-	skillsDirs := append([]string(nil), cfg.Skills.Dirs...)
+	skillsDirs := cfg.Skills.SearchDirs()
 	m := &Manager{
 		server:     server,
 		runner:     runner,
@@ -374,7 +374,7 @@ func (m *Manager) storeConfig(next *config.Config) (*config.Config, string) {
 	// The policy the live sessions were reconciled under is swapped in the
 	// same order as the configurations themselves.
 	previousTrust, _ := m.mcpTrust.Swap(next.MCP.ResolvedProjectTrust()).(string)
-	m.skillsLoad = skills.NewLoader(append([]string(nil), next.Skills.Dirs...))
+	m.skillsLoad = skills.NewLoader(next.Skills.SearchDirs())
 	m.cfgAt.Store(next)
 	// The global servers the pool keeps follow the configuration: a server
 	// added or switched on starts, one removed, switched off or redeclared
@@ -404,7 +404,7 @@ func (m *Manager) ReloadConfigForSession(ctx context.Context, st *State) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	loader := skills.NewLoader(append([]string(nil), next.Skills.Dirs...))
+	loader := skills.NewLoader(next.Skills.SearchDirs())
 	var warnings []string
 	var loadedSkills []*skills.Skill
 	if st != nil {
