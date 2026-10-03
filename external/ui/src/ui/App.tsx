@@ -2182,7 +2182,11 @@ export function App() {
     setSessionsOpen(false);
     setSchedulerOpen(false);
     setSchedulerEditor(null);
-    setTasksOpen(false);
+    // On desktop Tasks is the side panel of the chat on screen, not a screen of
+    // the rail: the backdrop that takes History down after a pick there leaves
+    // it open on the chat picked. The stacked shell shows it full screen, so
+    // there the backdrop closes it with the rest.
+    if (isStackedShell()) setTasksOpen(false);
     setDocsRoute(null);
     // The chat's address that follows does not take the swarm screen down by
     // itself (applyLocationHash leaves it on a session), so it goes here.
