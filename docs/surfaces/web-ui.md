@@ -350,13 +350,17 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 
 ### Per-session workspace (folder / branch / worktree chips)
 
-![The Open folder dialog with New folder leading the footer](../assets/ui-folder-picker/folder-picker-after-dark-1280.png)
+![The Open folder dialog with New folder and Show hidden on the left of the footer](../assets/ui-folder-picker/folder-picker-after-dark-1280.png)
 
-*The Open folder dialog with New folder leading the footer*
+*The Open folder dialog with New folder and Show hidden on the left of the footer*
 
 ![The inline name row for a new folder](../assets/ui-folder-picker/folder-picker-new-row-dark-1280.png)
 
 *The inline name row for a new folder*
+
+![The Open folder dialog on a phone, opened where History opens](../assets/ui-folder-picker/folder-picker-phone-dark-390.png)
+
+*The Open folder dialog on a phone, opened where History opens*
 
 - A chip row renders at the top of the composer card (**`WorkspaceChips.tsx`**, helpers in **`chat/workspaceContext.ts`**): **folder chip** (main project basename and path for a worktree, otherwise the current folder), **branch chip** (current git branch; only when the workspace is a git repository), and a **worktree checkbox**. The session cwd remains inside its worktree.
 - **Wrapping**: the chips share one **`flex-wrap`** row (**`.composer-context-row`**) with the environment chip and the improve-prompt control; **`.composer-context-chips`** is **`display: contents`** so each chip wraps on its own. On a narrow viewport only the overflow moves down (e.g. environment+folder, then branch+worktree), and the worktree checkbox stays beside the branch until the branch name is long enough to push it.
