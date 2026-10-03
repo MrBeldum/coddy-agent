@@ -1486,29 +1486,42 @@ func (a *Agent) runReActLoop(
 			return string(acp.StopReasonEndTurn), nil
 		}
 
-		// Execute all tool calls.
+		// Execute all tool calls. The repeat detector tracks a call across ReAct
+		// responses, not duplicates a model intentionally put in one batch (for
+		// example, parallel subagents with the same prompt).
+		seenInResponse := make(map[string]bool, len(response.ToolCalls))
+		blockedInResponse := make(map[string]bool, len(response.ToolCalls))
 		for i, tc := range response.ToolCalls {
 			if ctx.Err() != nil {
 				a.recordSkippedToolCalls(&messages, response.ToolCalls[i:], toolCallInterruptedResult)
 				return string(acp.StopReasonCancelled), nil
 			}
 
-			// A model stuck on the identical call (same name, same canonical arguments)
-			// would otherwise burn the whole max_turns budget without an answer. Skip
-			// the execution and tell it so; every tool_call_id still gets a result,
-			// because OpenAI-compatible endpoints reject the next request otherwise.
-			if _, tripped := toolRepeats.Observe(tc.Name, tc.InputJSON); tripped {
-				if loopNudges >= loopNudgeBudget {
-					a.recordSkippedToolCalls(&messages, response.ToolCalls[i:], toolLoopSkippedResult)
-					return string(acp.StopReasonRefused), fmt.Errorf(
-						"stopped: the model kept requesting the same %s call with identical arguments", tc.Name)
+			key := canonicalToolCallKey(tc.Name, tc.InputJSON)
+			if !seenInResponse[key] {
+				seenInResponse[key] = true
+				// A model stuck on the identical call (same name, same canonical arguments)
+				// across ReAct responses would otherwise burn the whole max_turns budget
+				// without an answer. Skip the execution and tell it so; every tool_call_id
+				// still gets a result, because OpenAI-compatible endpoints reject the next
+				// request otherwise.
+				if _, tripped := toolRepeats.Observe(tc.Name, tc.InputJSON); tripped {
+					blockedInResponse[key] = true
+					if loopNudges >= loopNudgeBudget {
+						a.recordSkippedToolCalls(&messages, response.ToolCalls[i:], toolLoopSkippedResult)
+						return string(acp.StopReasonRefused), fmt.Errorf(
+							"stopped: the model kept requesting the same %s call with identical arguments", tc.Name)
+					}
+					loopNudges++
+					// The counter deliberately keeps running: clearing it here (as Roo does,
+					// where the trip is a blocking question to the user) would let the model
+					// execute the same call limit-1 more times per nudge. A genuinely
+					// different call resets the counter on its own.
+					a.log.Warn("loop guard blocked a repeated tool call", "tool", tc.Name, "nudge", loopNudges)
+					a.recordSkippedToolCalls(&messages, response.ToolCalls[i:i+1], toolLoopNudge)
+					continue
 				}
-				loopNudges++
-				// The counter deliberately keeps running: clearing it here (as Roo does,
-				// where the trip is a blocking question to the user) would let the model
-				// execute the same call limit-1 more times per nudge. A genuinely
-				// different call resets the counter on its own.
-				a.log.Warn("loop guard blocked a repeated tool call", "tool", tc.Name, "nudge", loopNudges)
+			} else if blockedInResponse[key] {
 				a.recordSkippedToolCalls(&messages, response.ToolCalls[i:i+1], toolLoopNudge)
 				continue
 			}

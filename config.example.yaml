@@ -134,7 +134,7 @@ models:
 
 agent:
   model: "openai/gpt-5.6-terra"
-  max_turns: 0             # ReAct steps per prompt; 0 (the default) sets no limit
+  max_turns: 165           # ReAct steps per prompt; set 0 to disable the limit
   # queue_mode: steer       # Enter during a turn: steer or after_turn; unset asks on first use
   # LLM retry and pacing. Transport retries and consecutive empty-answer or
   # first-token recoveries share llm_retry_max extra attempts per model step.
@@ -152,9 +152,9 @@ agent:
   # identical arguments. The model is nudged back on track first; only a turn
   # that keeps looping is stopped with a notice.
   # loop_guard: true
-  # loop_tool_repeat_limit: 3     # identical tool calls in a row before intervening (0 disables)
+  # loop_tool_repeat_limit: 2     # identical calls in successive ReAct responses before intervening (0 disables)
   # loop_stream_repeat_cycles: 5  # identical output cycles in one stream before it is cut (0 disables)
-  # loop_nudge_max: 2             # nudges before the turn is stopped
+  # loop_nudge_max: 1             # nudges before the turn is stopped
   # Auto-continue when a usage limit resets (Claude Desktop style). A provider
   # pause the retries could never cover (a 429 naming a reset far ahead) ends
   # the turn with the error by default; with the wait on, a top-level turn

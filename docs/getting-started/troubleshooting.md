@@ -262,17 +262,19 @@ Field reference: [`agent`](../reference/config.md#agent), [`providers`](../refer
 
 **Symptom.** The agent stops working with the task unfinished, and a notice under the last answer says why: `Stopped after 40 steps, the step limit set by agent.max_turns. ...`, or `The answer was cut off at the model's output limit (max_tokens). ...`. The console prints the same line, `coddy -p` writes it to stderr, and a Telegram chat receives it as a message of its own ([issue #255](https://github.com/coddy-project/coddy-agent/issues/255)).
 
-**Cause.** A limit ended the turn, not the model. `agent.max_turns` caps the ReAct steps of one turn. It is off by default (`0`), so this notice appears only when the configuration sets it; a subagent takes its limit from its definition's `max_turns`, then `subagents.max_turns`. `max_tokens` on a model caps one answer.
+**Cause.** A limit ended the turn, not the model. `agent.max_turns` caps the ReAct steps of one turn at 165 by default. Set it to `0` only to explicitly disable the cap; a subagent takes its limit from its definition's `max_turns`, then `subagents.max_turns`. `max_tokens` on a model caps one answer.
 
 **Fix.** Send a message to let the agent continue, or raise the limit that the notice names:
 
 ```yaml
 agent:
-  max_turns: 0          # no step limit
+  max_turns: 240        # a larger step limit for this task
 models:
   - model: openai/gpt-5.6-terra
     max_tokens: 32000
 ```
+
+Set `max_turns: 0` only when deliberately disabling the step cap.
 
 ## `coddy update` refuses to overwrite a packaged binary
 

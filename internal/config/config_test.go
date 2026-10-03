@@ -273,6 +273,53 @@ func TestLoadFromCLIWhenConfigMissing_AppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadFromCLIWhenConfigMissing_UsesLoopSafetyDefaults(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(config.EnvCODDYHome, home)
+	cfgPath := filepath.Join(home, "empty.yaml")
+	if err := os.WriteFile(cfgPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvCODDYConfig, cfgPath)
+
+	cfg, err := config.LoadFromCLI(config.CLIPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Agent.MaxTurns; got != 165 {
+		t.Fatalf("agent.max_turns = %d, want 165", got)
+	}
+	if got := cfg.Agent.EffectiveLLMRetryMax(); got != 3 {
+		t.Fatalf("agent.llm_retry_max = %d, want 3", got)
+	}
+	if got := cfg.Agent.EffectiveLoopToolRepeatLimit(); got != 2 {
+		t.Fatalf("agent.loop_tool_repeat_limit = %d, want 2", got)
+	}
+	if got := cfg.Agent.EffectiveLoopNudgeMax(); got != 1 {
+		t.Fatalf("agent.loop_nudge_max = %d, want 1", got)
+	}
+
+	path := filepath.Join(home, "unlimited.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  max_turns: 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unlimited, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unlimited.Agent.MaxTurns; got != 0 {
+		t.Fatalf("explicit YAML agent.max_turns = %d, want 0", got)
+	}
+
+	fromJSON, err := config.ParseAndValidateConfigJSON([]byte(`{"agent":{"max_turns":0}}`), config.Paths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fromJSON.Agent.MaxTurns; got != 0 {
+		t.Fatalf("explicit JSON agent.max_turns = %d, want 0", got)
+	}
+}
+
 func TestLoadLegacyLoggerFileAddsOutputs(t *testing.T) {
 	content := `
 providers:

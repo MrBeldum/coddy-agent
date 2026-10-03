@@ -212,7 +212,7 @@ func TestCheckWrongTypeExplainsTheFix(t *testing.T) {
 	t.Run("word for a number", func(t *testing.T) {
 		rep := checkYAML(t, withModeline("agent:\n  max_turns: many\n"))
 		f := onlyError(t, rep)
-		if !strings.Contains(f.Fix, "max_turns: 0") {
+		if !strings.Contains(f.Fix, "max_turns: 165") {
 			t.Errorf("fix %q should show the schema default as an example", f.Fix)
 		}
 	})
