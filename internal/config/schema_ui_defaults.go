@@ -45,18 +45,17 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 			PlanPrompt:  "plan.md",
 			AskPrompt:   "ask.md",
 		},
+		// instructions.files only adds files after the AGENTS.md and
+		// DESIGN.md documents, which are read without being listed.
 		Instructions: InstructionsJSON{
 			Files: DefaultInstructionFiles(),
 		},
+		// skills.dirs only adds directories to the default folders
+		// (DefaultSkillDirs), which are read beside it and never written in.
 		Skills: SkillsJSON{
-			Dirs: []string{
-				"~/.agents/skills",
-				"${CODDY_HOME}/skills",
-				"${CWD}/.coddy/skills",
-			},
+			Dirs: []string{},
 		},
-		MCPServers: []MCPServerJSON{},
-		MCP:        MCPJSON{ProjectTrust: ProjectTrustAsk, IdleTimeoutSeconds: intPtr(MCPDefaultIdleTimeoutSeconds)},
+		MCP: MCPJSON{ProjectTrust: ProjectTrustAsk, IdleTimeoutSeconds: intPtr(MCPDefaultIdleTimeoutSeconds)},
 		Tools: ToolsJSON{
 			PermissionMode:   PermModeAsk,
 			CommandAllowlist: nil,
@@ -89,7 +88,7 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 		},
 		Subagents: SubagentsJSON{
 			Enabled:               boolPtr(true),
-			Dirs:                  DefaultSubagentDirs(),
+			Dirs:                  []string{}, // the default folders are read beside subagents.dirs
 			ProjectTrust:          SubagentsProjectTrustAsk,
 			MaxConcurrent:         SubagentsDefaultMaxConcurrent,
 			MaxDepth:              intPtr(SubagentsDefaultMaxDepth),

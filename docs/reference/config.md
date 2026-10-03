@@ -16,10 +16,10 @@ Every field is optional unless marked **required**; an empty `config.yaml` (or n
 
 Agent sessions expose a typed configuration tool family with staged, uci-like semantics:
 
-- `config_get` reads a dotted path from the active YAML file. Secret-shaped fields (including `api_key_command` and any key ending in `_api_key`, such as `tools.websearch.brave_api_key`), MCP environment values, and HTTP header values are returned as `<redacted>`.
+- `config_get` reads a dotted path from the active YAML file. Secret-shaped fields (including `api_key_command` and any key ending in `_api_key`, such as `tools.websearch.brave_api_key`) and environment and header values (an `env` or `headers` entry, a `default_headers` value) are returned as `<redacted>`; the MCP server list of the HTTP API shows the values of both mcp.json files the same way.
 - `config_set` **stages** UCI-style commands (`set`, `add_list`, `del_list`, `delete`) without touching the file. Unknown schema paths and commands that would make the config invalid are rejected at staging time. Echoed command lists mask secret-shaped values as `<redacted>`; the staged store keeps the original values.
 - `config_changes` lists the staged commands that a commit would apply (secrets redacted).
-- `config_commit` applies the staged batch: validates, snapshots the previous file to `config.yaml.prev` (an empty document when the config file did not exist yet, so the first commit stays reversible), writes atomically, and hot-reloads skills, rules, built-in tools, and configured MCP servers. Because a commit can start MCP processes and change the permission policy itself, it prompts for tool permission in both `ask` and `accept_edits` modes - only `tools.permission_mode: bypass` skips the dialog - and the prompt lists the staged commands with secrets redacted. The agent is additionally instructed to ask the user to confirm saving first. If runtime reload fails, the file is restored and the staged commands are kept; if even that restore fails, the staged list stays consumed so a blind retry cannot replay it.
+- `config_commit` applies the staged batch: validates, snapshots the previous file to `config.yaml.prev` (an empty document when the config file did not exist yet, so the first commit stays reversible), writes atomically, and hot-reloads skills, rules, built-in tools, and the MCP trust policy. Because a commit can start MCP processes (a changed `mcp.project_trust`) and change the permission policy itself, it prompts for tool permission in both `ask` and `accept_edits` modes - only `tools.permission_mode: bypass` skips the dialog - and the prompt lists the staged commands with secrets redacted. The agent is additionally instructed to ask the user to confirm saving first. If runtime reload fails, the file is restored and the staged commands are kept; if even that restore fails, the staged list stays consumed so a blind retry cannot replay it.
 - `config_revert` discards staged commands (all of them, or those under one path).
 - `config_rollback` restores the pre-commit snapshot over the active file (swapping the two, so a second rollback undoes the first) and hot-reloads. It carries the same permission policy as `config_commit`, and the agent warns the user before calling it.
 
@@ -28,15 +28,15 @@ Commands and paths are dotted like OpenWrt's `uci` CLI, with a selector for name
 | Command | Meaning |
 |---|---|
 | `set agent.max_turns=40` | Set a mapping field |
-| `set mcp_servers[name=context7]={"command":"npx"}` | Select a sequence object by scalar field; append it when setting if absent |
+| `set providers[name=openrouter]={"type":"openai"}` | Select a sequence object by scalar field; append it when setting if absent |
 | `add_list skills.dirs=/opt/skills` | Append a sequence entry |
 | `del_list skills.dirs=/opt/skills` | Remove a matching sequence entry |
-| `delete mcp_servers[name=context7]` | Delete a field or entry |
+| `delete providers[name=openrouter]` | Delete a field or entry |
 | `skills.dirs.0` (path form) | Sequence index |
 
 The root path (`.` or `/`) is read-only. Values are JSON for objects and arrays; string-typed fields take the literal text. Staged commands persist in the session bundle, so they survive restarts and HTTP permission resumes.
 
-The bundled `/configure-coddy` skill teaches the agent this syntax, the confirm-then-commit workflow, and the safe discovery/install workflow for MCP servers and skills; it also carries the agent-facing catalog of configuration areas and must be updated together with this reference on any schema change. Process-level listener changes may still require restarting the relevant command; the hot reload is specifically guaranteed for the current session's agent configuration, skills, rules, built-in tools, and global MCP clients.
+The bundled `/configure-coddy` skill teaches the agent this syntax, the confirm-then-commit workflow, and the safe discovery/install workflow for MCP servers and skills; it also carries the agent-facing catalog of configuration areas and must be updated together with this reference on any schema change. Process-level listener changes may still require restarting the relevant command; the hot reload is specifically guaranteed for the current session's agent configuration, skills, rules, built-in tools, and the MCP trust policy. MCP servers are not part of this file (see [`mcp`](#mcp)).
 
 ## Field reference
 
@@ -109,11 +109,11 @@ Override the built-in system prompt templates (Go text/template).
 
 ### `instructions`
 
-Files read from the session working directory and appended to the system prompt (AGENTS.md convention). The agent home's own AGENTS.md and DESIGN.md are read on top of this list whenever they exist, ahead of the project's pair, and are not named here. See https://coddy.dev/docs/features/rules.
+Files the operator adds to the system prompt (AGENTS.md convention), after the documents every session reads anyway: the AGENTS.md and DESIGN.md of the agent home, then those of the session folder, and the nested ones of a folder a tool enters, none of which is named here or can be turned off. A file already in the prompt is not read twice. See https://coddy.dev/docs/features/rules.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `instructions.files` | list of strings | ["AGENTS.md","DESIGN.md"] | Instruction files, read in the order listed. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. |
+| `instructions.files` | list of strings | [] | Extra instruction files, appended after the AGENTS.md and DESIGN.md documents in the order listed; empty by default. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. An entry naming a document the prompt already carries is skipped. |
 
 ### `skills`
 
@@ -121,39 +121,18 @@ Directories scanned for skills (SKILL.md and root .md/.mdc files).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `skills.dirs` | list of strings | ["~/.agents/skills","${CODDY_HOME}/skills","${CWD}/.coddy/skills"] | Search paths; later entries win on name conflicts. Defaults (lowest to highest priority): ~/.agents/skills, ${CODDY_HOME}/skills, ${CWD}/.coddy/skills. ${CODDY_HOME} expands when the file is loaded; ${CWD} stays in the entry and expands per session against that session's workspace. |
-| `skills.sources` | list of strings |  | Remote skill sources installed on demand with `coddy skills sync` (never fetched automatically). Each entry is a GitHub repo (owner/repo[@ref]), a git URL, or an http(s) URL to an agents-standard marketplace.json. Materialized into ${CODDY_HOME}/skills. EvilFreelancer/rpa-skills, the marketplace the bundled rpa-* skills are published from, is always in effect as a system source and is not listed here. See https://coddy.dev/docs/features/skills. |
+| `skills.dirs` | list of strings | [] | Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included). |
+| `skills.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for the project's .coddy/marketplaces.json, which travels with the checkout: "ask" (default) leaves its sources and marketplaces out of every sync until the operator approves that exact entry for that workspace; "allow" treats them like the operator's own ${CODDY_HOME}/marketplaces.json; "deny" never uses them (they are listed as switched off). What they install goes to ${CODDY_HOME}/skills. The project's skill folders (.coddy/skills, .agents/skills) are not affected. Skill marketplaces are not declared in config.yaml: they live in ${CODDY_HOME}/marketplaces.json and the project's .coddy/marketplaces.json, and an old skills.sources list is moved into the home file on load. See https://coddy.dev/docs/features/skills#project-marketplaces-and-trust. |
 | `skills.auto_discovery` | boolean or null | true | Offer the model-driven load_skill tool so the agent pulls a catalogued skill's full instructions into a turn on its own when the request matches, instead of requiring an explicit /name. Defaults to true. |
 
 ### `rules`
 
-Discovery of rule files from ${CODDY_HOME}/rules (the operator's own, applied in every workspace) and from one project folder under the session CWD, the first of .coddy/rules, .agents/rules, .cursor/rules, .claude/rules, .codex/rules that holds a rule file, plus the AGENTS.md and DESIGN.md of a folder a tool enters; .mdc files are Cursor rules, .md files Claude Code rules. See https://coddy.dev/docs/features/rules.
+Discovery of rule files from ${CODDY_HOME}/rules (the operator's own, applied in every workspace) and from one project folder under the session CWD, the first of .coddy/rules, .agents/rules, .cursor/rules, .claude/rules, .codex/rules that holds a rule file; .mdc files are Cursor rules, .md files Claude Code rules. The AGENTS.md and DESIGN.md documents are not rules in this sense and none of these settings turns them off. See https://coddy.dev/docs/features/rules.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `rules.auto_discover` | boolean or null | true | Scan the session CWD rule roots automatically. |
-| `rules.systems` | list of strings | [] | Restrict which rule systems are loaded: user (${CODDY_HOME}/rules), coddy, agents-dir (.agents/rules), cursor, claude, codex, agents (nested AGENTS.md and DESIGN.md). Empty means all. A project folder left out drops out of the chain; of the ones admitted, the first that holds a rule file is read. |
-
-### `mcp_servers`
-
-Model Context Protocol servers connected for every new session.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `mcp_servers` | list of objects |  | Model Context Protocol servers connected for every new session. |
-| `mcp_servers[].type` | string, one of `stdio`, `http`, `sse` |  | Transport. "stdio" (default when empty; url-only entries default to "http") runs a local command; "http" speaks streamable HTTP to url (with automatic legacy-SSE fallback); "sse" forces the legacy HTTP+SSE transport. |
-| `mcp_servers[].name` | string |  | Stable id referenced by the agent; must be unique in this list. |
-| `mcp_servers[].command` | string |  | Executable for stdio transport (leave empty when using an http url). ${CWD} expands to the session cwd. |
-| `mcp_servers[].args` | list of strings |  | Argv passed after command for stdio servers. ${CWD} expands to the session cwd. |
-| `mcp_servers[].env` | list of objects |  | Extra environment variables for the stdio child process. |
-| `mcp_servers[].env[].name` | string |  | Environment variable name. |
-| `mcp_servers[].env[].value` | string |  | Environment variable value. ${CWD} expands to the session cwd. |
-| `mcp_servers[].url` | string |  | HTTP(S) endpoint when type is "http". ${CWD} expands to the session cwd. |
-| `mcp_servers[].headers` | list of objects |  | Optional headers sent with MCP HTTP requests. ${CWD} in a value expands to the session cwd. |
-| `mcp_servers[].headers[].name` | string |  | HTTP header name. |
-| `mcp_servers[].headers[].value` | string |  | HTTP header value. |
-| `mcp_servers[].disabled` | boolean |  | Skip connecting this server without removing its definition. |
-| `mcp_servers[].disabled_tools` | list of strings |  | Tool names of this server hidden from the agent. |
+| `rules.auto_discover` | boolean or null | true | Scan the rule folders automatically: ${CODDY_HOME}/rules and the project folder of the session CWD. The AGENTS.md and DESIGN.md documents are read either way. |
+| `rules.systems` | list of strings | [] | Restrict which rule systems are loaded: user (${CODDY_HOME}/rules), coddy, agents-dir (.agents/rules), cursor, claude, codex. Empty means all. A project folder left out drops out of the chain; of the ones admitted, the first that holds a rule file is read. agents, which used to switch the nested AGENTS.md files, no longer affects them (they are always read); it is still accepted, and a list holding only agents loads no rule folder. |
 
 ### `mcp`
 
@@ -213,8 +192,8 @@ User-defined child agents the model can delegate to with spawn_agent. Definition
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `subagents.enable` | boolean or null | true | Register the spawn_agent tool and list the subagent catalog in the system prompt. |
-| `subagents.dirs` | list of strings | ["${CODDY_HOME}/agents","${CWD}/.claude/agents","${CWD}/.coddy/agents"] | Definition directories, lowest priority first; later entries override earlier ones by name. ${CODDY_HOME} and ${CWD} expand. Directories inside the workspace are project scope and follow project_trust. |
-| `subagents.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for definitions found inside the workspace, which travel with the checkout: "ask" loads them but refuses to spawn one until the operator approved that exact file for that workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust with the session workspace as cwd); "allow" treats them like the operator's own files; "deny" never reads them. |
+| `subagents.dirs` | list of strings | [] | Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy. |
+| `subagents.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for definitions found inside the workspace, which travel with the checkout: "ask" loads them but refuses to spawn one until the operator approved that exact file for that workspace (the shield in Settings -> Subagents, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust with the session workspace as cwd); "allow" treats them like the operator's own files; "deny" never reads them. |
 | `subagents.max_concurrent` | integer | 4 | How many subagent runs the whole process may have in flight at once, whatever session started them. Starting past the limit is refused, not queued. 0 uses the default. |
 | `subagents.max_depth` | integer or null | 1 | How deep spawning may nest: 1 lets a session spawn subagents that cannot spawn further; 0 forbids spawning everywhere. Omit for the default. |
 | `subagents.default_timeout_seconds` | integer | 1800 | Hard limit for one run whose definition and call give no timeout. Capped by tools.background.max_timeout_seconds. 0 uses the default. |
@@ -499,7 +478,7 @@ System prompt template overrides (`config.Prompts`, `internal/config/prompts.go`
 
 ### `instructions`
 
-Instruction files appended to the prompt (`config.Instructions`, `internal/config/instructions.go`). The default list is the operator's own `${CODDY_HOME}/AGENTS.md`, read in every workspace, followed by the project's `AGENTS.md`; writing a list replaces it. See [rules.md](../features/rules.md#your-own-instructions-and-rules).
+Instruction files the operator adds to the prompt (`config.Instructions`, `internal/config/instructions.go`). The list is empty by default and only adds: the `AGENTS.md` and `DESIGN.md` of the agent home, of the session folder and of the folders a tool enters are read whether or not it names them, and its files come after them, in the order listed. An entry naming a file the prompt already carries, such as the session folder's own `AGENTS.md`, is skipped. See [rules.md](../features/rules.md#agentsmd-and-designmd).
 
 ### `skills`
 
@@ -509,31 +488,19 @@ Skill discovery (`config.Skills`, `internal/config/skills.go`).
 
 Rules discovery (`config.Rules`, `internal/config/rules.go`), from the workspace folders and from the operator's own `${CODDY_HOME}/rules`. See [rules.md](../features/rules.md).
 
-### `mcp_servers`
-
-MCP servers connected for every new session (`[]config.MCPServerConfig`, `internal/config/mcp_servers.go`).
-
-```yaml
-mcp_servers:
-  - name: filesystem
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
-    disabled_tools: ["write_file"]
-```
-
-Servers can also be declared in Cursor-compatible mcp.json files: the user-global
-`${CODDY_HOME}/mcp.json` (`~/.coddy/mcp.json` by default, like Cursor's
-`~/.cursor/mcp.json`; together with this `mcp_servers` list it forms the "global"
-scope) and the project-local `<workspace>/.coddy/mcp.json` ("local" scope). Each file holds a single
-`mcpServers` object keyed by server name (`env` and `headers` are JSON objects;
-per-tool switches use `disabledTools`). Later levels override earlier ones by
-name: `mcp_servers` < `${CODDY_HOME}/mcp.json` < `./.coddy/mcp.json`. Entries from the
-project-local file need a workspace approval before they are started - see
-[`mcp`](#mcp) and `docs/features/mcp.md`.
-
 ### `mcp`
 
 MCP settings that are not tied to a single server entry (`config.MCP`, `internal/config/mcp.go`).
+
+The servers themselves are not declared in `config.yaml`. They live in two Cursor-compatible
+files, a single `mcpServers` object keyed by server name (`env` and `headers` are JSON
+objects, per-tool switches use `disabledTools`): the user-global `${CODDY_HOME}/mcp.json`
+(`~/.coddy/mcp.json` by default, like Cursor's `~/.cursor/mcp.json`, the "global" scope) and
+the project-local `<workspace>/.coddy/mcp.json` (the "local" scope), which wins a name over
+the global file and whose entries need a workspace approval before they are started. An old
+`mcp_servers` list in `config.yaml` is moved into `${CODDY_HOME}/mcp.json` on the next load,
+with a `config.yaml.bak-<time>` copy of the file kept, and `coddy -t` reports it as a warning.
+See [mcp.md](../features/mcp.md).
 
 Added for [issue #80](https://github.com/coddy-project/coddy-agent/issues/80).
 Approvals are recorded in `~/.coddy/mcp-trust.json`, keyed by the canonical workspace path

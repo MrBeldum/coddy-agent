@@ -9,7 +9,7 @@ This page is the narrative guide. Two companion artifacts cover the full key lis
 # yaml-language-server: $schema=https://coddy.dev/config.schema.json
 ```
 
-**Coddy writes that line itself.** Every save that rewrites `config.yaml` - the settings screen (`PUT /coddy/config`), `coddy mcp add`, a skill source, the agent's own `config_set` / `config_commit` - adds the header when the file has none, and leaves a `$schema` you chose yourself (a pinned tag, a local path) alone. The same saves keep your comments, including commented-out keys, the order the keys are already in and the way you wrote every value they do not change (see [Environment variable references](#environment-variable-references)). A save writes the keys the file already has plus whatever actually differs from the built-in defaults - optional fields that were never set are left out entirely rather than written as `null`, so a file that keeps whole sections commented out stays that way, and a provider or a model entry keeps only the fields it named. JetBrains IDEs do not read the header; if `config.yaml` is not validated there, map the same URL by hand under **Settings - Languages & Frameworks - Schemas and DTDs - JSON Schema Mappings**. VS Code can be told the same thing without touching the file:
+**Coddy writes that line itself.** Every save that rewrites `config.yaml` - the settings screen (`PUT /coddy/config`), a skill source, the agent's own `config_set` / `config_commit` - adds the header when the file has none, and leaves a `$schema` you chose yourself (a pinned tag, a local path) alone. The same saves keep your comments, including commented-out keys, the order the keys are already in and the way you wrote every value they do not change (see [Environment variable references](#environment-variable-references)). A save writes the keys the file already has plus whatever actually differs from the built-in defaults - optional fields that were never set are left out entirely rather than written as `null`, so a file that keeps whole sections commented out stays that way, and a provider or a model entry keeps only the fields it named. JetBrains IDEs do not read the header; if `config.yaml` is not validated there, map the same URL by hand under **Settings - Languages & Frameworks - Schemas and DTDs - JSON Schema Mappings**. VS Code can be told the same thing without touching the file:
 
 ```json
 "yaml.schemas": { "https://coddy.dev/config.schema.json": ["**/.coddy/config.yaml"] }
@@ -67,7 +67,7 @@ What an editor leaves in the file is not part of the configuration. A file writt
 - **memory** - `memory.additional_prompt` longer than `memory.additional_prompt_max_chars` is a warning at the key: the memory subagent reads the cut text;
 - **paths** - `sessions.dir`, `logger.file`, `scheduler.dir` and `memory.dir` are fine when missing as long as they can be created (the process makes them at start), and an error when a regular file stands in the way; `prompts.dir` has to exist, and a template missing from it is a warning; `skills.dirs`, `subagents.dirs` and `hooks.files` entries you wrote are warnings when missing, while absent defaults stay quiet; a hook file that exists has to parse; `swarm.tls` must load and every `dial.ca_file` must hold a certificate;
 - **LLM providers** - each provider is asked for its model list, which exercises the address, the proxy and the credential in one request (`coddy providers login` credentials included); a provider aimed at a vendor's official endpoint with nothing to present is reported without a request. Every `models[]` entry is then checked against that list: a model the server does not name is a warning, since some servers serve more than they list. A `max_tokens` on a `codex` model is a warning whatever the provider answers, since no request carries it;
-- **MCP servers** from `config.yaml` - the executable of a stdio server is resolved in `PATH` the way the spawn would, without spawning it; a remote server is asked for any HTTP answer, with its headers. Project-local `.coddy/mcp.json` declarations are not contacted: they sit behind the workspace trust gate;
+- **MCP servers** of `~/.coddy/mcp.json` - the executable of a stdio server is resolved in `PATH` the way the spawn would, without spawning it; a remote server is asked for any HTTP answer, with its headers. Project-local `.coddy/mcp.json` declarations are not contacted: they sit behind the workspace trust gate;
 - **Telegram** - when `gateways.telegram.enable` is true the token is checked against the Bot API (`getMe`), through `gateways.telegram.proxy` when set; the report names the bot;
 - **remotes** - each `httpserver.remotes[]` URL is asked for an answer (a warning when down, since it is used only on request), and the `--remote` target of a console or `acp` run has to accept the token;
 - **`coddy serve` only** - the subsystems the configuration and the typed flags enable are resolved as a start would (a surface this binary was not built with is an error, not a silent skip), each listen address is bound once and released, so a port another process holds is named together with the line that set it, and the relays in `swarm.join` and the upstreams a relay mounts are reached through their dial settings.
@@ -89,9 +89,8 @@ warning  skills.dirs[0]: /home/me/.coddy/skills does not exist
 warning  skills.dirs[1]: /opt/team-skills does not exist
          at /home/me/.coddy/config.yaml:22:34
          fix: create it or remove the entry; a ${CWD} entry is resolved per session, so a folder missing here may exist in another workspace
-error    mcp_servers[tickets]: command "ticket-mcp" not found in PATH
-         at /home/me/.coddy/config.yaml:20:14
-         fix: install it or write an absolute path in mcp_servers[tickets].command
+error    mcp.json[tickets]: command "ticket-mcp" not found in PATH
+         fix: install it or write an absolute path as the command of tickets in /home/me/.coddy/mcp.json
 warning  models[local/llama-4]: not in the model list of provider local (the server may still serve it)
          at /home/me/.coddy/config.yaml:11:5
          fix: check the model id; the provider lists gpt-oss-20b, qwen3.6-35b
@@ -114,11 +113,9 @@ warning  skills.dirs[0]: /home/me/.coddy/skills does not exist
 warning  skills.dirs[1]: /opt/team-skills does not exist
          at /home/me/.coddy/config.yaml:22:34
          fix: create it or remove the entry; a ${CWD} entry is resolved per session, so a folder missing here may exist in another workspace
-ok       mcp_servers[context7]: command "npx" resolves to /usr/bin/npx
-         at /home/me/.coddy/config.yaml:17:14
-error    mcp_servers[tickets]: command "ticket-mcp" not found in PATH
-         at /home/me/.coddy/config.yaml:20:14
-         fix: install it or write an absolute path in mcp_servers[tickets].command
+ok       mcp.json[context7]: command "npx" resolves to /usr/bin/npx
+error    mcp.json[tickets]: command "ticket-mcp" not found in PATH
+         fix: install it or write an absolute path as the command of tickets in /home/me/.coddy/mcp.json
 ok       providers[local]: openai at http://127.0.0.1:18731/v1 lists 2 models
          at /home/me/.coddy/config.yaml:3:5
 ok       models[local/qwen3.6-35b]: listed by provider local
@@ -260,6 +257,9 @@ prompts:
   #   {{.CWD}}      - session working directory
   #   {{.Tools}}    - markdown list of tool names and short descriptions for the current mode
   #   {{.Skills}}   - markdown block for active skills (omit section when empty via {{if .Skills}})
+  #   {{.Rules}}    - the AGENTS.md and DESIGN.md of the agent home and of the workspace, then the always-on rules
+  #   {{.Instructions}} - the files of instructions.files. A template that prints neither block still gets the
+  #                   documents and those files: in {{.Instructions}} when it has it, otherwise appended after it
   #   {{.TodoList}} - current session todo checklist as markdown lines (empty until coddy todo tools update state)
   #   {{.Memory}}   - session notes. The memory subagent's report is not rendered here: it travels in the <turn_context> block
   #   {{.UTCNow}}   - date and time in UTC (RFC3339), refreshed whenever the system prompt is rendered
@@ -317,48 +317,36 @@ memory:
 
 # Skills directories (Go: config.Skills, internal/config/skills.go)
 skills:
-  # Directories to search for SKILL.md and optional root .md/.mdc skill files.
-  # Later entries have HIGHER priority: if the same skill name appears in multiple
-  # directories, the version from the last matching directory wins.
-  # Default dirs (lowest → highest priority):
-  #   ~/.agents/skills          - global skills, shared with npx skills / npx skillsbd
-  #   ${CODDY_HOME}/skills      - coddy-specific; may contain symlinks to ~/.agents/skills
-  #   ${CWD}/.coddy/skills      - project-local; overrides everything above
-  # ${CODDY_HOME} and ${CWD} expand at runtime (per-session cwd for ${CWD}).
+  # Four folders are always read, lowest -> highest priority, whatever this
+  # key says (a lower folder wins a skill name over the ones above it):
+  #   ${HOME}/.agents/skills    - your skills shared with every agent (npx skills / npx skillsbd)
+  #   .agents/skills            - the project's skills shared with every agent
+  #   ${CODDY_HOME}/skills      - Coddy's own: the standard delivery, installed skills
+  #   .coddy/skills             - the project's skills for Coddy
+  # dirs only ADDS directories, read after the four and stronger than them.
+  # ${HOME} and ~ are your home, ${CWD} and a relative path the session's workspace.
   dirs:
-    - "~/.agents/skills"
-    - "${CODDY_HOME}/skills"
-    - "${CWD}/.coddy/skills"
+    - "~/my-team-skills"
 
 # Rules (Go: config.Rules, internal/config/rules.go)
 # One project folder is read under the session CWD: the first of .coddy/rules,
 # the shared .agents/rules, .cursor/rules, .claude/rules and .codex/rules that
 # holds a rule file, so another agent's mirror of the same rules is not loaded
-# twice. Your own ~/.coddy/rules joins it in every workspace, and nested
-# **/AGENTS.md are read for the folders a tool enters. Your own
-# ~/.coddy/AGENTS.md is read too, ahead of the project's, and has no key here.
-# .mdc files are read as Cursor rules, .md files as Claude Code rules.
+# twice. Your own ~/.coddy/rules joins it in every workspace. The AGENTS.md and
+# DESIGN.md documents - yours in ~/.coddy, the workspace's, and the nested ones
+# of the folders a tool enters - are read whatever these keys say and have no
+# key here. .mdc files are read as Cursor rules, .md files as Claude Code rules.
 # The rules that always apply go into {{.Rules}} in the system prompt (separate
 # from skills); a rule scoped to paths arrives with the tool result or message
 # that touches a matching path. See docs/features/rules.md.
 rules:
   auto_discover: true
-  systems: []   # optional: user, coddy, agents-dir, cursor, claude, codex, agents
+  systems: []   # optional: user, coddy, agents-dir, cursor, claude, codex ("agents" no longer affects the AGENTS.md files; alone it loads no rule folder)
 
-# MCP servers available to all sessions (Go: []config.MCPServerConfig, internal/config/mcp_servers.go)
-mcp_servers:
-  - name: "filesystem"
-    command: "npx"
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
-    env: []
-
-  # HTTP MCP server example
-  # - type: "http"
-  #   name: "my-api"
-  #   url: "https://my-mcp-server.example.com/mcp"
-  #   headers:
-  #     - name: "Authorization"
-  #       value: "Bearer ${MY_API_TOKEN}"
+# MCP servers are not declared here: they live in ~/.coddy/mcp.json (every
+# session) and <workspace>/.coddy/mcp.json (that project, once approved), a
+# Cursor-compatible "mcpServers" object. An old mcp_servers list is moved into
+# ~/.coddy/mcp.json on the next start. See docs/features/mcp.md.
 
 # Tool configuration (Go: config.Tools, internal/config/tools.go)
 tools:
@@ -377,7 +365,8 @@ tools:
 # from markdown definitions; each run is a background task with its own child session. See docs/features/subagents.md.
 # subagents:
 #   enable: true
-#   dirs: ["${CODDY_HOME}/agents", "${CWD}/.claude/agents", "${CWD}/.coddy/agents"]
+#   dirs: []                      # extra folders after ~/.agents/agents, .agents/agents,
+#                                 # ${CODDY_HOME}/agents and .coddy/agents, which are always read
 #   project_trust: ask            # ask (approve project files once per workspace) | allow | deny
 #   max_concurrent: 4             # subagent runs in flight across the whole process
 #   max_depth: 1                  # 1 = children cannot spawn further; 0 = nobody spawns

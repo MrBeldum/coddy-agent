@@ -15,7 +15,6 @@ type ConfigJSON struct {
 	Instructions InstructionsJSON `json:"instructions,omitempty"`
 	Skills       SkillsJSON       `json:"skills,omitempty"`
 	Rules        RulesJSON        `json:"rules,omitempty"`
-	MCPServers   []MCPServerJSON  `json:"mcp_servers,omitempty"`
 	MCP          MCPJSON          `json:"mcp,omitempty"`
 	Tools        ToolsJSON        `json:"tools,omitempty"`
 	Subagents    SubagentsJSON    `json:"subagents,omitempty"`
@@ -140,7 +139,7 @@ type PromptsJSON struct {
 // SkillsJSON mirrors Skills for JSON APIs.
 type SkillsJSON struct {
 	Dirs          []string `json:"dirs,omitempty"`
-	Sources       []string `json:"sources,omitempty"`
+	ProjectTrust  string   `json:"project_trust,omitempty"`
 	AutoDiscovery *bool    `json:"auto_discovery,omitempty"`
 }
 
@@ -153,31 +152,6 @@ type RulesJSON struct {
 // UIJSON mirrors UIConfig for JSON APIs.
 type UIJSON struct {
 	Enabled *bool `json:"enable,omitempty"`
-}
-
-// MCPServerJSON mirrors MCPServerConfig for JSON APIs.
-type MCPServerJSON struct {
-	Type          string           `json:"type,omitempty"`
-	Name          string           `json:"name"`
-	Command       string           `json:"command,omitempty"`
-	Args          []string         `json:"args,omitempty"`
-	Env           []EnvVarJSON     `json:"env,omitempty"`
-	URL           string           `json:"url,omitempty"`
-	Headers       []HTTPHeaderJSON `json:"headers,omitempty"`
-	Disabled      bool             `json:"disabled,omitempty"`
-	DisabledTools []string         `json:"disabled_tools,omitempty"`
-}
-
-// EnvVarJSON mirrors EnvVarConfig.
-type EnvVarJSON struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// HTTPHeaderJSON mirrors HTTPHeaderConfig.
-type HTTPHeaderJSON struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
 }
 
 // ToolsJSON mirrors Tools for JSON APIs.
@@ -502,27 +476,12 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Instructions = InstructionsJSON{Files: append([]string(nil), c.Instructions.Files...)}
 	out.Skills = SkillsJSON{
 		Dirs:          append([]string(nil), c.Skills.Dirs...),
-		Sources:       append([]string(nil), c.Skills.Sources...),
+		ProjectTrust:  c.Skills.ProjectTrust,
 		AutoDiscovery: cloneBoolPtr(c.Skills.AutoDiscovery),
 	}
 	out.Rules = RulesJSON{
 		AutoDiscover: cloneBoolPtr(c.Rules.AutoDiscover),
 		Systems:      append([]string(nil), c.Rules.Systems...),
-	}
-	for _, s := range c.MCPServers {
-		mj := MCPServerJSON{
-			Type: s.Type, Name: s.Name, Command: s.Command,
-			Args: append([]string(nil), s.Args...), URL: s.URL,
-			Disabled:      s.Disabled,
-			DisabledTools: append([]string(nil), s.DisabledTools...),
-		}
-		for _, e := range s.Env {
-			mj.Env = append(mj.Env, EnvVarJSON(e))
-		}
-		for _, h := range s.Headers {
-			mj.Headers = append(mj.Headers, HTTPHeaderJSON(h))
-		}
-		out.MCPServers = append(out.MCPServers, mj)
 	}
 	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust(), IdleTimeoutSeconds: cloneIntPtr(c.MCP.IdleTimeoutSeconds)}
 	out.Tools = ToolsJSON{
@@ -732,27 +691,12 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	cfg.Instructions = Instructions{Files: append([]string(nil), j.Instructions.Files...)}
 	cfg.Skills = Skills{
 		Dirs:          append([]string(nil), j.Skills.Dirs...),
-		Sources:       append([]string(nil), j.Skills.Sources...),
+		ProjectTrust:  j.Skills.ProjectTrust,
 		AutoDiscovery: cloneBoolPtr(j.Skills.AutoDiscovery),
 	}
 	cfg.Rules = Rules{
 		AutoDiscover: cloneBoolPtr(j.Rules.AutoDiscover),
 		Systems:      append([]string(nil), j.Rules.Systems...),
-	}
-	for _, s := range j.MCPServers {
-		mc := MCPServerConfig{
-			Type: s.Type, Name: s.Name, Command: s.Command,
-			Args: append([]string(nil), s.Args...), URL: s.URL,
-			Disabled:      s.Disabled,
-			DisabledTools: append([]string(nil), s.DisabledTools...),
-		}
-		for _, e := range s.Env {
-			mc.Env = append(mc.Env, EnvVarConfig(e))
-		}
-		for _, h := range s.Headers {
-			mc.Headers = append(mc.Headers, HTTPHeaderConfig(h))
-		}
-		cfg.MCPServers = append(cfg.MCPServers, mc)
 	}
 	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust, IdleTimeoutSeconds: cloneIntPtr(j.MCP.IdleTimeoutSeconds)}
 	cfg.Tools = Tools{

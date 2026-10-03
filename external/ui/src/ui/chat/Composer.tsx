@@ -85,6 +85,7 @@ import {
   shouldShowLlmFilter,
 } from "./llmModelMenu";
 import { fileTypeIcon } from "../messages/fileTypeIcon";
+import { applyWorkspaceQuery, workspaceScope } from "./workspaceScope";
 
 function fmtBytes(
   n: number,
@@ -448,6 +449,13 @@ export function Composer(props: {
   onCancelQueued?: (id: string) => void;
   /** Workspace context chips (folder / branch / worktree) above the field. */
   workspaceCtx?: WorkspaceContext | null;
+  /**
+   * The folder the chat runs in: the session's workspace, or before the first
+   * message the folder picked on the start screen. Sent as cwd with every
+   * cwd-scoped request (slash commands, mentions, the file a mention names),
+   * next to the session header, so a new chat lists what its folder holds.
+   */
+  workspacePath?: string;
   worktreePref?: boolean;
   /** The workspace is chosen once: locked as soon as the conversation starts. */
   workspaceLocked?: boolean;
@@ -995,13 +1003,10 @@ export function Composer(props: {
       if (prefix) {
         sp.set("prefix", prefix);
       }
-      const headers: Record<string, string> = {};
-      const sid = (props.sessionId || "").trim();
-      if (sid) {
-        headers["X-Coddy-Session-ID"] = sid;
-      }
+      const scope = workspaceScope(props.sessionId, props.workspacePath);
+      applyWorkspaceQuery(sp, scope);
       const res = await fetch(`/coddy/slash-commands?${sp.toString()}`, {
-        headers,
+        headers: scope.headers,
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
@@ -1012,7 +1017,7 @@ export function Composer(props: {
         page: number;
       };
     },
-    [props.sessionId],
+    [props.sessionId, props.workspacePath],
   );
 
   // Built-in deterministic commands (/compact, /plugin) are static per config, so
@@ -1051,20 +1056,17 @@ export function Composer(props: {
       if (refresh) {
         sp.set("refresh", "1");
       }
-      const headers: Record<string, string> = {};
-      const sid = (props.sessionId || "").trim();
-      if (sid) {
-        headers["X-Coddy-Session-ID"] = sid;
-      }
+      const scope = workspaceScope(props.sessionId, props.workspacePath);
+      applyWorkspaceQuery(sp, scope);
       const res = await fetch(`/coddy/mentions?${sp.toString()}`, {
-        headers,
+        headers: scope.headers,
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
       return (await res.json()) as MentionSearchBody;
     },
-    [props.sessionId],
+    [props.sessionId, props.workspacePath],
   );
 
   /** Clears the range panel; the composer text is left exactly as typed. */
@@ -1076,13 +1078,26 @@ export function Composer(props: {
     setAtRangeFile(null);
   }, []);
 
-  // A session switch changes the workspace behind every path: drop the loaded
-  // preview and any read still in flight, so the panel never shows another
-  // session's file. The next keystroke in the suffix fetches afresh.
+  // A session switch, or another folder picked before the session exists,
+  // changes the workspace behind every path and every skill: drop the loaded
+  // preview, the open pickers and any answer still in flight, so nothing of the
+  // previous workspace is shown. A prefix that matched nothing there may match
+  // here, so the remembered no-match is forgotten too. The next keystroke
+  // fetches afresh.
   useEffect(() => {
     closeAtRangePicker();
     setAtRangeSuppressed(null);
-  }, [props.sessionId, closeAtRangePicker]);
+    slashFetchGenRef.current++;
+    atFetchGenRef.current++;
+    setSlashOpen(false);
+    setSlashReplace(null);
+    setSlashNoMatch(null);
+    setSlashLoading(false);
+    setAtOpen(false);
+    setAtReplace(null);
+    setAtNoMatch(null);
+    setAtLoading(false);
+  }, [props.sessionId, props.workspacePath, closeAtRangePicker]);
 
   /**
    * Loads the mentioned file once per path. A path that does not resolve simply
@@ -1098,13 +1113,10 @@ export function Composer(props: {
       const gen = ++atRangeFetchGenRef.current;
       try {
         const sp = new URLSearchParams({ path_rel: pathRel });
-        const headers: Record<string, string> = {};
-        const sid = (props.sessionId || "").trim();
-        if (sid) {
-          headers["X-Coddy-Session-ID"] = sid;
-        }
+        const scope = workspaceScope(props.sessionId, props.workspacePath);
+        applyWorkspaceQuery(sp, scope);
         const res = await fetch(`/coddy/workspace/file?${sp.toString()}`, {
-          headers,
+          headers: scope.headers,
         });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -1129,7 +1141,7 @@ export function Composer(props: {
         }
       }
     },
-    [props.sessionId],
+    [props.sessionId, props.workspacePath],
   );
 
   const enhancePrompt = useCallback(async () => {
@@ -1532,7 +1544,7 @@ export function Composer(props: {
   useEffect(() => {
     mentionCheckGenRef.current++;
     setMentionMarks(new Map());
-  }, [props.sessionId]);
+  }, [props.sessionId, props.workspacePath]);
   useEffect(() => {
     const text = props.value;
     const gen = ++mentionCheckGenRef.current;
@@ -1540,16 +1552,11 @@ export function Composer(props: {
       return;
     }
     const timer = window.setTimeout(() => {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      const sid = (props.sessionId || "").trim();
-      if (sid) {
-        headers["X-Coddy-Session-ID"] = sid;
-      }
-      void fetch("/coddy/mentions/check", {
+      const scope = workspaceScope(props.sessionId, props.workspacePath);
+      const query = applyWorkspaceQuery(new URLSearchParams(), scope).toString();
+      void fetch(`/coddy/mentions/check${query ? `?${query}` : ""}`, {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json", ...scope.headers },
         body: JSON.stringify({ text }),
       })
         .then(async (res) => {
@@ -1574,7 +1581,7 @@ export function Composer(props: {
         });
     }, MENTION_CHECK_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [props.value, props.sessionId]);
+  }, [props.value, props.sessionId, props.workspacePath]);
 
   const maskComposerText = props.value.length > 0;
   const codeFenceEditing = inMarkdownFenceBeforeCaret(props.value, caretPos);

@@ -5641,7 +5641,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 .workspace-modal {
   display: flex;
   flex-direction: column;
-  width: min(720px, calc(100vw - 48px));
+  width: min(560px, calc(100vw - 48px));
   /* Roomy body for a folder with few children: 262px is the 140px of head,
      path row and actions plus the 120px of list the body used to claim through
      the list's own min-height. Stated on the dialog, the floor leaves the list
@@ -5658,16 +5658,12 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   overflow: hidden;
 }
 
+/* The head is the drawers' head (.sessions-head: 12px bold capitals, its
+   padding and rule), the one History and the Scheduler open with; this class
+   only keeps it from shrinking. Overriding its font here is what made the
+   title a 16px regular line unlike every other head. */
 .workspace-modal-head {
-  display: flex;
   flex: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
-  font-size: inherit;
-  font-weight: inherit;
-  color: inherit;
 }
 
 /* Editable path row: type or paste a path (a Windows user needs it to jump to
@@ -5683,18 +5679,24 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   border: 1px solid var(--coddy-glass-panel-border);
   background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
   color: var(--text);
-  font-size: 11.5px;
+  /* Inputs and buttons do not inherit the page font: without font: inherit
+     the field, the rows and the buttons of the dialog were drawn in the
+     browser's control font (Arial) instead of the app's. */
+  font: inherit;
+  font-size: 12px;
   outline: none;
 }
 
+/* Show hidden sits next to New folder on the left of the footer; its auto
+   margin is what sends Cancel / Open to the right. */
 .workspace-modal-show-hidden {
   display: flex;
   flex: none;
   align-items: center;
   gap: 6px;
-  margin-right: 6px;
+  margin-right: auto;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -5755,7 +5757,8 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 12.5px;
+  font: inherit;
+  font-size: 13px;
   text-align: left;
   padding: 7px 8px;
   border-radius: 8px;
@@ -5777,15 +5780,19 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   opacity: 0.6;
 }
 
+/* The name wins over a link's target: the target path is the part cut short,
+   the name only once it alone passes 70% of the row (a long target used to
+   squeeze "data-link" down to "da..."). */
 .workspace-modal-row-name {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  max-width: 70%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .workspace-modal-row-target {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   color: var(--muted);
   font-size: 11px;
@@ -5825,7 +5832,8 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   border: 1px solid var(--coddy-glass-panel-border);
   background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
   color: var(--text);
-  font-size: 12.5px;
+  font: inherit;
+  font-size: 13px;
   outline: none;
 }
 
@@ -5850,6 +5858,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
   background: transparent;
   color: var(--text);
+  font: inherit;
   font-size: 12.5px;
   padding: 6px 14px;
   border-radius: 9px;
@@ -5862,21 +5871,50 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   color: #fff;
 }
 
-/* New folder leads the footer, opposite the Cancel / Open pair. */
-.workspace-modal-btn--lead {
-  margin-right: auto;
+/* New folder leads the footer: a square as tall as the buttons beside it,
+   with the plus glyph of the scheduler's add button and its colours (the
+   colour rules are shared with .scheduler-btn-primary, light theme included,
+   so the two never drift apart). */
+.workspace-modal-btn--add {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  /* Stated, not derived: aspect-ratio on a stretched flex item left it 18px
+     wide in Chromium. The row stretches Cancel / Open to the same 32px. */
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 9px;
+  color: color-mix(in srgb, var(--text) 88%, var(--coddy-blend-base));
 }
 
-@media (max-width: 1199px) {
+.workspace-modal-btn--add svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* A phone opens the dialog where History opens: a glass panel under the top
+   bar, 10px from the sides and 14px from the bottom, the full height between
+   (the box and the tokens of .sessions.drawer on the stacked shell). Wider
+   screens keep the centred dialog above. */
+@media (max-width: 599px) {
   .workspace-modal {
-    width: calc(100vw - 28px);
+    position: fixed;
+    top: calc(var(--coddy-mobile-top-inset) + 6px);
+    right: max(10px, env(safe-area-inset-right, 0px));
+    bottom: 14px;
+    left: max(10px, env(safe-area-inset-left, 0px));
+    width: auto;
+    height: auto;
     min-height: 0;
     max-height: none;
-    height: calc(100dvh - var(--coddy-mobile-top-inset) - 28px);
-  }
-
-  .workspace-modal-head {
-    padding-inline: 14px;
+    border-radius: var(--coddy-glass-panel-radius);
+    border: 1px solid var(--coddy-glass-panel-border);
+    background: var(--coddy-glass-panel-bg);
+    backdrop-filter: var(--coddy-glass-panel-backdrop);
+    -webkit-backdrop-filter: var(--coddy-glass-panel-backdrop);
+    box-shadow: var(--coddy-glass-panel-shadow);
   }
 }
 
@@ -6888,14 +6926,18 @@ html:not([data-theme="light"]) .context-usage-note--error {
   .settings.drawer {
     z-index: 70;
   }
-  .shell {
-    /* The top bar the rail becomes, and under it the environment banner when
-       one is shown: the banner publishes its height (EnvHealthBanner.tsx), so
-       everything placed by the inset starts below both. */
+  /* The top bar the rail becomes, and under it the environment banner when
+     one is shown: the banner publishes its height on <html>
+     (EnvHealthBanner.tsx), so everything placed by the inset starts below
+     both. Declared on :root rather than .shell so a dialog portalled into
+     <body> (the folder browser) is placed by the same inset as the drawers. */
+  :root {
     --coddy-mobile-bar-h: calc(78px + env(safe-area-inset-top, 0px));
     --coddy-mobile-top-inset: calc(
       var(--coddy-mobile-bar-h) + var(--coddy-env-banner-h, 0px)
     );
+  }
+  .shell {
     /* Same rhythm as title row to first message (.messages-inner gap, sticky-head padding-bottom) */
     --coddy-mobile-chat-stack-gap: 12px;
     --coddy-mobile-title-sticky-top: calc(
@@ -7200,7 +7242,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
   flex-shrink: 0;
 }
 
-.scheduler-btn-primary {
+.scheduler-btn-primary,
+.workspace-modal-btn--add {
   border-color: rgba(147, 51, 234, 0.45);
   background: rgba(147, 51, 234, 0.2);
 }
@@ -7222,7 +7265,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
   background: var(--coddy-surface-raised);
 }
 
-[data-theme="light"] .scheduler-btn-primary {
+[data-theme="light"] .scheduler-btn-primary,
+[data-theme="light"] .workspace-modal-btn--add {
   border-color: rgba(124, 58, 237, 0.4);
   background: rgba(124, 58, 237, 0.12);
 }
@@ -9161,14 +9205,97 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 /* "Installed skills" heading row with the Refresh action on the right. */
-/* Footer of the Remote skill sources box: Add on the left, Sync all on the
-   right, on one level (matches the SchemaForm array's Add position). */
+/* Footer of the Marketplaces box: the add form on the left, Sync all on the
+   right, on one level; on a narrow box Sync all drops under the form. */
 .skills-sources-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
+}
+
+/* The add form: the address grows, the scope picker and Add keep their
+   size. */
+.skills-marketplace-add {
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skills-marketplace-add > .settings-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 40px;
+}
+
+.skills-marketplace-add > .skills-marketplace-scope {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.skills-marketplace-add > button {
+  flex: 0 0 auto;
+}
+
+/* A fieldset is as wide as its min-content unless told otherwise, and the
+   add form and the long addresses of this box would widen it past the panel
+   on a phone. */
+.skills-marketplaces-box {
+  min-inline-size: 0;
+  max-width: 100%;
+}
+
+/* The marketplaces list: one row per declared source or marketplace, laid
+   out like an MCP server row (text, then the 40px icon controls). */
+.skills-marketplaces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.skills-marketplace-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.skills-marketplace-head > button {
+  flex: 0 0 auto;
+}
+
+.skills-marketplace-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skills-marketplace-key {
+  font-family: var(--mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.skills-marketplace-source {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+/* A project entry the trust gate holds back reads dimmed, its shield amber
+   (.settings-btn-approve) and the note under it says why. */
+.skills-marketplace.is-held .skills-marketplace-text {
+  opacity: 0.65;
+}
+
+.skills-marketplace-note {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--text) 72%, transparent);
+  overflow-wrap: anywhere;
 }
 
 .skills-sync-all-btn {
@@ -9512,6 +9639,13 @@ html:not([data-theme="light"]) .context-usage-note--error {
   align-items: center;
   row-gap: 2px;
   min-width: 0;
+}
+
+/* The shield of a project definition stands at the end of its head, like
+   the MCP tab's, and never shrinks under a long name. */
+.subagents-item-head > .subagents-trust {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 /* The fold toggle is the app's chevron in front of the definition's name, the
@@ -14976,6 +15110,28 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
   .mcp-list-item-text {
     flex-basis: calc(100% - var(--mcp-row-inset));
+  }
+
+  /* Marketplaces: the same rule as an MCP row. The address and its badges
+     take the first line, the shield, Sync and trash wrap to the row's end,
+     and the add form puts its scope picker and Add under the address. */
+  .skills-marketplace-head {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
+  .skills-marketplace-text {
+    flex-basis: 100%;
+  }
+
+  .skills-marketplace-add {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .skills-marketplace-add > .settings-input:first-child {
+    flex-basis: 100%;
   }
 
   /* Settings maps (the default headers): a name and a value side by side left

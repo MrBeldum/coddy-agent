@@ -145,6 +145,10 @@ type Agent struct {
 	// memoryRun is the memory subagent this turn started, or nil
 	// (memory_run.go). The Agent lives for one turn, so it needs no reset.
 	memoryRun *memoryTurnRun
+	// docKeys are the keys of the documents the system prompt this turn froze
+	// carries (documentKeys, rules_prompt.go).
+	docKeysMu sync.Mutex
+	docKeys   map[string]bool
 }
 
 // NewAgent creates an Agent for a prompt turn.
@@ -2324,9 +2328,8 @@ func invokedSkillBlocks(text string, allSkills []*skills.Skill, managedDir strin
 // searching the disk for them. A skill read out of the binary has no folder.
 //
 // A skill served out of the binary has no folder of its own, but the standard
-// delivery writes the same skill into managedDir (skills.dirs may not list that
-// directory, and then the copy in the binary is the one loaded): when that copy
-// is on disk, its folder is the one named.
+// delivery writes the same skill into managedDir: when that copy is on disk,
+// its folder is the one named.
 func skillBodyForModel(sk *skills.Skill, managedDir string) string {
 	body := strings.TrimSpace(sk.Content)
 	if body == "" || !strings.EqualFold(filepath.Base(sk.FilePath), "SKILL.md") {

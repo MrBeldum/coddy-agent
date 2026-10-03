@@ -510,10 +510,10 @@ export const messagesEn: Record<string, string> = {
     "Register the spawn_agent tool and list the subagent catalog in the system prompt (default true).",
   "settings.schema.subagents.dirs.label": "Definition directories",
   "settings.schema.subagents.dirs.desc":
-    "Lowest priority first; later entries override earlier ones by name. ${CODDY_HOME} and ${CWD} expand. Directories inside the workspace are project scope and follow the trust policy.",
+    "Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy.",
   "settings.schema.subagents.project_trust.label": "Project definitions",
   "settings.schema.subagents.project_trust.desc":
-    'Definitions found inside the workspace travel with the checkout. "ask": load them but refuse to spawn one until it is approved for this workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust). "allow": treat them like your own files. "deny": never read them.',
+    'Definitions found inside the workspace travel with the checkout. "ask": load them but refuse to spawn one until it is approved for this workspace (the shield of its row in Definitions, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust). "allow": treat them like your own files. "deny": never read them.',
   "settings.schema.subagents.max_concurrent.label": "Max concurrent",
   "settings.schema.subagents.max_concurrent.desc":
     "How many subagent runs the whole process may have in flight at once (default 4). Extra spawns are refused, not queued.",
@@ -551,7 +551,10 @@ export const messagesEn: Record<string, string> = {
 
   "settings.schema.skills.dirs.label": "Skill directories",
   "settings.schema.skills.dirs.desc":
-    "Search paths for skills. Defaults: ~/.agents/skills (global, shared with npx skills / npx skillsbd), ${CODDY_HOME}/skills (coddy-specific), ${CWD}/.coddy/skills (project-local). ${CODDY_HOME} and ${CWD} expand at runtime.",
+    "Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included).",
+  "settings.schema.skills.project_trust.label": "Project marketplaces",
+  "settings.schema.skills.project_trust.desc":
+    'The project\'s .coddy/marketplaces.json travels with the checkout. "ask": leave its sources and marketplaces out of every sync until each entry is approved for this workspace (the shield in the list below, or coddy plugin marketplace trust). "allow": treat them like your own ~/.coddy/marketplaces.json. "deny": never use them; they are listed as switched off. What they install goes to ~/.coddy/skills; the project\'s skill folders are not affected.',
   "settings.schema.skills.auto_discovery.desc":
     "Let the agent load a matching skill's full instructions on its own (model-driven load_skill tool), instead of only when you type /name. Defaults to on.",
 
@@ -663,7 +666,7 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.system.instructions.label": "Instructions",
   "settings.schema.system.instructions.files.label": "Instruction files",
   "settings.schema.system.instructions.files.desc":
-    'Filenames relative to session CWD to read as instructions. Defaults to ["AGENTS.md"].',
+    "Extra files added to the prompt after the AGENTS.md and DESIGN.md documents, which are always read (the agent home's, the session folder's, the nested ones). Empty by default; a relative path is read from the session folder, and a file already in the prompt is not read twice.",
   "settings.schema.logger.label": "Logger",
   "settings.schema.logger.level.label": "Level",
   "settings.schema.logger.level.desc":
@@ -812,6 +815,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.error.delete": "Failed to delete {name}",
   "mcp.error.invalidEntry": "Invalid entry.",
   "mcp.error.saveServer": "Failed to save server",
+  "mcp.error.saveChanged":
+    "The entry changed in its file since this editor opened. Cancel and open it again to see what it holds now.",
   "mcp.error.load": "Could not load the MCP servers: {message}",
   "mcp.error.request": "MCP request failed: {message}",
   "mcp.discovery.legend": "MCP discovery",
@@ -835,11 +840,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.switch.disableAria": "Disable MCP server {name}",
   "mcp.switch.enableAria": "Enable MCP server {name}",
   "mcp.edit.title": "Edit entry ({origin})",
-  "mcp.edit.readonlyTitle":
-    "Defined in config.yaml — edit it in the config sections",
   "mcp.edit.aria": "Edit {name}",
   "mcp.delete.title": "Delete from {origin}",
-  "mcp.delete.readonlyTitle": "Defined in config.yaml — cannot delete here",
   "mcp.delete.aria": "Delete {name}",
   "mcp.note.denied":
     "Project MCP servers are switched off by mcp.project_trust: deny. This entry is never started.",
@@ -858,11 +860,11 @@ export const messagesEn: Record<string, string> = {
   "mcp.editor.save": "Save",
   "mcp.editor.cancel": "Cancel",
   "mcp.discovery.description":
-    "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from config.yaml and ~/.coddy/mcp.json are yours and are never gated.",
+    "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from ~/.coddy/mcp.json are yours and are never gated.",
   "mcp.servers.description":
-    "Model Context Protocol servers from three levels: config.yaml (mcp_servers) and the global ~/.coddy/mcp.json, merged with the local ./.coddy/mcp.json of the project (Cursor-compatible; later levels override by name). Switch off a whole server or individual tools. A global server's switch is saved in the file that defines it, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn.",
+    "Model Context Protocol servers come from two files: the global ~/.coddy/mcp.json and the project's ./.coddy/mcp.json, which overrides a server of the same name (Cursor-compatible). Switch off a whole server or individual tools. A global server's switch is saved in ~/.coddy/mcp.json, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn, and an edit of ~/.coddy/mcp.json made outside this screen within a few seconds.",
   "mcp.empty":
-    "No MCP servers configured. Add one here (saved to the local ./.coddy/mcp.json or the global ~/.coddy/mcp.json) or declare it under mcp_servers in config.yaml.",
+    "No MCP servers configured. Add one here: it is saved to the project's ./.coddy/mcp.json or the global ~/.coddy/mcp.json.",
   "mcp.note.declaredBy":
     "Declared by {path}, which travels with the checkout, so it is neither started nor contacted yet. Approving covers exactly this declaration:",
   "mcp.note.namesOnly":
@@ -870,6 +872,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.note.workspaceFallback": "the session workspace",
   "mcp.editor.formatDescription":
     "One mcpServers entry in Cursor format: command/args/env (object), optional disabled and disabledTools. Saved to {path}.",
+  "mcp.editor.valuesHint":
+    "Env and header values are never shown. {placeholder} keeps the saved value, a new value replaces it, and a key you remove is deleted from the entry.",
 
   "mcp.trustOption.ask": "Ask — approve each project server once",
   "mcp.trustOption.allow": "Allow — start project servers automatically",
@@ -879,7 +883,7 @@ export const messagesEn: Record<string, string> = {
   "mcp.fact.contacts": "contacts",
   "mcp.fact.env": "env",
   "mcp.fact.headers": "headers",
-  "mcp.origin.config": "config.yaml",
+  "mcp.fact.reads": "reads",
   "mcp.origin.home": "~/.coddy/mcp.json",
   "mcp.origin.project": "./.coddy/mcp.json",
   // Settings -> Subagents: the definition catalog
@@ -888,7 +892,7 @@ export const messagesEn: Record<string, string> = {
     "The rules of the delegation pool: whether definitions that came with the checkout may run, how many runs go at once, how deep spawning nests, and how much time and how many rounds one run gets when its definition and the call leave them out.",
   "subagents.catalog.legend": "Definitions",
   "subagents.catalog.description":
-    'Every definition a session in this workspace can spawn: the built-ins, your own files under ~/.coddy/agents, and the .coddy/agents and .claude/agents files that came with the checkout. Under "ask" a project file runs only once it is approved for this workspace, from a terminal on the machine running coddy: coddy agents trust <name>.',
+    "Every definition a session in this workspace can spawn: the built-ins, your own files under ~/.agents/agents and ~/.coddy/agents, and the .agents/agents and .coddy/agents files that came with the checkout. Under \"ask\" a project file runs only once it is approved for this workspace: with its shield here, or with coddy agents trust <name> on the machine running coddy. Rewriting an approved file asks again.",
   "subagents.catalog.loading": "Loading definitions…",
   "subagents.catalog.empty":
     "No subagent definitions are visible from this workspace.",
@@ -902,7 +906,13 @@ export const messagesEn: Record<string, string> = {
   "subagents.badge.hidden": "hidden",
   "subagents.badge.needsApproval": "needs approval",
   "subagents.badge.needsApprovalTitle":
-    "Spawning it is refused until it is approved for this workspace: coddy agents trust {name}",
+    "Spawning it is refused until it is approved for this workspace: the shield, or coddy agents trust {name}",
+  "subagents.trust.approveTitle": "Approve spawning {name} in this workspace",
+  "subagents.trust.approvedTitle":
+    "Approved for this workspace, click to withdraw",
+  "subagents.trust.approveAria": "Approve subagent {name}",
+  "subagents.trust.withdrawAria": "Withdraw the approval of subagent {name}",
+  "subagents.error.trust": "Could not change the approval of {name}.",
   "subagents.fact.file": "file",
   "subagents.fact.model": "model",
   "subagents.fact.modelInherits": "the parent's model",
@@ -961,20 +971,51 @@ export const messagesEn: Record<string, string> = {
   "skills.error.install": "Failed to install {name}",
   "skills.status.updated": "Updated {name}.",
   "skills.status.installed": "Installed {name}.",
-  "skills.sources.legend": "Remote skill sources",
+  "skills.trust.legend": "Marketplace discovery",
+  "skills.trust.description":
+    "The project's .coddy/marketplaces.json arrives with the checkout, so the repository - not you - picks what a sync installs into ~/.coddy/skills. On ask its entries are neither synced nor offered until you approve each one for this workspace (the shield in the list below); rewriting an approved entry asks again. Entries you add to the project here are approved as you write them, and ~/.coddy/marketplaces.json is yours and never gated. Saved with the rest of the settings.",
+  "skills.sources.legend": "Marketplaces",
   "skills.sources.add": "Add",
+  "skills.sources.addAria": "Source to add",
+  "skills.sources.scopeAria": "Where to declare it",
+  "skills.sources.scope.global": "Yours (~/.coddy)",
+  "skills.sources.scope.local": "This project",
   "skills.sources.syncAll": "Sync all",
-  "skills.sources.syncAllTitle": "Fetch every configured marketplace",
+  "skills.sources.syncAllTitle": "Fetch every source and marketplace in effect",
   "skills.sources.completed": "Completed",
   "skills.sources.syncedTitle": "Synced",
   "skills.sources.syncTitle": "Sync {source}",
+  "skills.sources.heldSyncTitle": "Approve it for this workspace first",
+  "skills.sources.deniedSyncTitle":
+    "Project marketplaces are switched off by skills.project_trust: deny",
+  "skills.sources.scope.noSessionTitle":
+    "Send the first message of a chat in the project to declare a marketplace for it; until then this adds to yours",
   "skills.sources.syncAria": "Sync this marketplace",
-  "skills.sources.removeTitle": "Remove",
+  "skills.sources.removeTitle": "Remove from {path}",
   "skills.sources.systemTitle":
-    "Built into Coddy: in effect without being in config.yaml, and not removable",
+    "Built into Coddy: always in effect, always trusted, not removable",
   "skills.sources.removeAria": "Remove marketplace",
+  "skills.sources.kind.source": "all plugins",
+  "skills.sources.kind.marketplace": "catalog",
+  "skills.sources.origin.system": "built in",
+  "skills.sources.origin.home": "yours",
+  "skills.sources.origin.project": "from the project",
+  "skills.sources.trust.systemAria": "{source} is built into Coddy and always trusted",
+  "skills.sources.trust.approveTitle": "Approve syncing {source} in this workspace",
+  "skills.sources.trust.approvedTitle":
+    "Approved for this workspace, click to withdraw",
+  "skills.sources.trust.approveAria": "Approve {source} for this workspace",
+  "skills.sources.trust.withdrawAria": "Withdraw the approval of {source}",
+  "skills.sources.note.held":
+    "Declared by {path}, which travels with the checkout, so it is not synced until you approve it for this workspace with the shield.",
+  "skills.sources.note.denied":
+    "Project marketplaces are switched off by skills.project_trust: deny.",
+  "skills.sources.error.load": "Could not load the marketplaces.",
+  "skills.sources.error.add": "Could not add {source}.",
+  "skills.sources.error.remove": "Could not remove {source}.",
+  "skills.sources.error.trust": "Could not change the approval of {source}.",
   "skills.sources.description":
-    "GitHub repos (owner/repo[@ref]), git URLs, or an agents-standard marketplace.json URL. Saved to skills.sources; fetched only when you sync. The greyed-out rows are built into Coddy and cannot be removed.",
+    "Where remote skills come from. A source installs every plugin it publishes and keeps them in sync; a catalog (coddy plugin marketplace add) installs its plugins one by one. Yours are kept in ~/.coddy/marketplaces.json, the project's in its .coddy/marketplaces.json, which travels with the checkout: under \"ask\" a project entry is synced only once you approve it with the shield. Everything installs into ~/.coddy/skills, and nothing is fetched until you sync. The built-in rpa-skills marketplace is always in effect and always trusted.",
   "skills.sources.placeholder": "owner/repo  ·  https://…/marketplace.json",
   "skills.install.cliHint":
     "You can also install skills via npx skills or npx skillsbd - they land in ~/.agents/skills/ and are picked up automatically.",
