@@ -1,4 +1,4 @@
-//go:build gateway || gateway.telegram
+//go:build gateway || gateway.telegram || gateway.pachca
 
 package access_test
 
@@ -60,5 +60,28 @@ func TestEffectiveIsolation_Override(t *testing.T) {
 	}
 	if got := access.EffectiveIsolation(-9999, c); got != config.IsolationIndividual {
 		t.Fatalf("want individual got %s", got)
+	}
+}
+
+// TestPolicy_PachcaReadsLikeTelegram holds the Pachca block to the same rules.
+func TestPolicy_PachcaReadsLikeTelegram(t *testing.T) {
+	p := &config.PachcaGatewayConfig{
+		Admins:           []int64{1},
+		DefaultAccess:    "group:ops",
+		DefaultIsolation: config.IsolationShared,
+		UserGroups:       []config.GatewayUserGroup{{Name: "ops", UserIDs: []int64{2}}},
+		Chats:            []config.GatewayChatConfig{{ChatID: 50, Access: config.AccessAdmins, Isolation: config.IsolationAdmin}},
+	}
+	if lvl := access.EffectiveAccess(49, p); !access.CanAccess(2, lvl, p) || access.CanAccess(3, lvl, p) || !access.CanAccess(1, lvl, p) {
+		t.Fatalf("default group access misread: %s", lvl)
+	}
+	if lvl := access.EffectiveAccess(50, p); access.CanAccess(2, lvl, p) || !access.CanAccess(1, lvl, p) {
+		t.Fatalf("per-chat override misread: %s", lvl)
+	}
+	if got := access.EffectiveIsolation(49, p); got != config.IsolationShared {
+		t.Fatalf("default isolation: %s", got)
+	}
+	if got := access.EffectiveIsolation(50, p); got != config.IsolationAdmin {
+		t.Fatalf("override isolation: %s", got)
 	}
 }

@@ -525,7 +525,8 @@ tools:
 #                                  # notes; never answer the task itself"; the main agent never sees them
 #   additional_prompt_max_chars: 0 # cut additional_prompt at this many characters (a warning is logged); 0 = no cap
 
-# Messenger gateways (external/gateway/; build with: go build -tags gateway.telegram or -tags gateway).
+# Messenger gateways (external/gateway/; build with: go build -tags gateway, or
+# -tags gateway.telegram / -tags gateway.pachca for one adapter).
 # The bot is not a command of its own: set enable: true and `coddy serve` polls
 # Telegram alongside whatever else is on. With httpserver.enable the chats are
 # live sessions in the web UI - watchable while they run, continuable in either
@@ -554,12 +555,27 @@ tools:
 #       - chat_id: -1009876543210
 #         isolation: "admin"      # only respond to admin users
 #         access: "admins"
+#   # Pachca (Пачка) integration bot: reads the bot's events history, so the
+#   # machine needs no public address. Turn on "Save events history" in the
+#   # bot's outgoing webhook settings. See docs/surfaces/pachca.md.
+#   pachca:
+#     enable: false
+#     token: "${PACHCA_BOT_TOKEN}"     # optional: omit to read PACHCA_BOT_TOKEN from env/.env
+#     # proxy: none                    # inherit (default), none (direct), or a URL
+#     poll_interval_seconds: 2         # 1 to 60
+#     admins: [12345]                  # Pachca user IDs with elevated rights
+#     default_access: "all"            # all | admins | group:<name>
+#     default_isolation: "individual"  # individual | shared | admin
+#     chats:
+#       - chat_id: 334                 # a conversation, channel or thread chat id
+#         isolation: "shared"
+#         access: "all"
 
 logger:
   level: "info"
   # Raise or lower one subsystem without turning the whole process to debug.
   # A component is the dotted name a record carries in its "component" field
-  # (gateway, gateway.telegram, session, agent, scheduler); a parent name
+  # (gateway, gateway.telegram, gateway.pachca, session, agent, scheduler); a parent name
   # covers what is nested under it, and the longest match wins. The same spec
   # works on the command line: --log-level "info,gateway.telegram=debug".
   # levels:

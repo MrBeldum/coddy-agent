@@ -8,7 +8,8 @@
 #     scheduler       cron scheduler daemon and tools (see external/scheduler/)
 #     memory          long-term memory copilot and /coddy memory REST (see external/memory/)
 #     gateway.telegram  Telegram bot gateway only (coddy serve; see external/gateway/)
-#     gateway         all messenger gateways, currently Telegram (superset of gateway.telegram)
+#     gateway.pachca  Pachca bot gateway only (coddy serve; see external/gateway/pachca/)
+#     gateway         all messenger gateways: Telegram and Pachca (superset of both)
 #     cli      interactive console TUI (bare `coddy` on a terminal; see external/cli/)
 #     swarm    stateless relay that aggregates nodes (coddy serve; see external/swarm/)
 #   Examples: make build TAGS=http
@@ -267,6 +268,8 @@ TEST_TAG_SETS := \
 	http,scheduler,ui \
 	http,scheduler,ui,memory \
 	http,scheduler,ui,memory,cli \
+	gateway.telegram \
+	gateway.pachca \
 	gateway \
 	http,scheduler,ui,memory,cli,gateway \
 	http,scheduler,ui,memory,cli,swarm \

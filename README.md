@@ -65,6 +65,7 @@ agent:
 | Web UI and HTTP API | `coddy serve` | The embedded single-page app on `http://127.0.0.1:12345/`, OpenAI-compatible `/v1/*` endpoints and the `/coddy` REST surface, Swagger at `/docs/` | [Web UI](docs/surfaces/web-ui.md), [HTTP API](docs/reference/http-api.md), [video](docs/assets/video/web-ui.mp4) |
 | Editors | `coddy acp` | Zed, VS Code, Obsidian and scripts as ACP clients, with Coddy's modes, models, permissions and skills in the editor's composer | [Editors](docs/surfaces/editors.md), [Zed video](docs/assets/video/zed-acp.mp4), [VS Code video](docs/assets/video/vscode-acp.mp4) |
 | Telegram | `coddy serve` with `gateways.telegram.enable` | A bot with per-user sessions, access levels and group isolation; the same chat is live in the web UI | [Telegram gateway](docs/surfaces/gateway.md) |
+| Pachca | `coddy serve` with `gateways.pachca.enable` | A Pachca (Пачка) integration bot for direct chats, groups and threads; reads its events history, so no public address is needed | [Pachca gateway](docs/surfaces/pachca.md) |
 | Scheduler | `coddy serve` with `scheduler.enable` | Cron jobs as Markdown files, each run a session of its own | [Scheduler](docs/operate/scheduler.md) |
 | Swarm | `coddy serve` with `swarm.enable` | A relay that lists and reaches many Coddy nodes, including ones that can only dial out | [Swarm](docs/operate/swarm.md), [video](docs/assets/video/swarm.mp4) |
 | Remote | `coddy --remote host:port` | The console, an editor or the browser driving a `coddy serve` on another machine | [Remote mode](docs/operate/remote.md) |

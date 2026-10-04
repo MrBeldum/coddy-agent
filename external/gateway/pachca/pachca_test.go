@@ -1,0 +1,467 @@
+//go:build gateway || gateway.pachca
+
+package pachca
+
+// Unit tests of the edges: the events history walk, the client's 429 policy,
+// splitting and rendering, addressing. The happy paths are the godog specs in
+// bdd_test.go.
+
+import (
+	"context"
+	"fmt"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/logger"
+	"github.com/EvilFreelancer/coddy-agent/internal/pachcafake"
+)
+
+type testEnv struct {
+	fake   *pachcafake.Server
+	srv    *httptest.Server
+	runner *scriptRunner
+	bot    *Bot
+	client *Client
+	p      *poller
+}
+
+func newTestEnv(t *testing.T, opts pachcafake.Options, cfg *config.PachcaGatewayConfig) *testEnv {
+	t.Helper()
+	opts.Token = bddToken
+	fake := pachcafake.New(opts)
+	srv := httptest.NewServer(fake.Handler())
+	t.Cleanup(srv.Close)
+	if cfg == nil {
+		cfg = &config.PachcaGatewayConfig{}
+	}
+	cfg.Enabled, cfg.Token = true, bddToken
+	cfg.ApplyDefaults()
+	base, _, _ := logger.New(config.Logger{Level: config.LogLevelError, Format: config.LogFormatText, Outputs: []string{config.LogOutputStderr}})
+	runner := newScriptRunner()
+	b := New(cfg, runner, t.TempDir(), base, "", "", nil)
+	b.apiBase = srv.URL
+	c := NewClient(srv.URL, bddToken, nil)
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+	b.selfID = fake.BotUserID()
+	b.nickname = "coddy_bot"
+	b.setClient(c)
+	return &testEnv{fake: fake, srv: srv, runner: runner, bot: b, client: c, p: &poller{b: b, c: c, started: time.Now()}}
+}
+
+// startAt makes the bot begin after the newest event already in the log.
+func (e *testEnv) startAt(t *testing.T) {
+	t.Helper()
+	if err := e.p.tick(context.Background(), context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e.bot.state.watermark().empty() {
+		t.Fatal("the first tick set no watermark")
+	}
+}
+
+func (e *testEnv) dm(t *testing.T, userID int64, text string) pachcafake.Message {
+	t.Helper()
+	e.fake.AddUser(userID, fmt.Sprintf("u%d", userID), "U")
+	return e.fake.UserPosts(pachcafake.Post{UserID: userID, ChatID: e.fake.PersonalChat(userID), Content: text})
+}
+
+// tickUntilQuiet runs ticks until a pass completes with nothing left.
+func (e *testEnv) tickUntilQuiet(t *testing.T, max int) {
+	t.Helper()
+	for i := 0; i < max; i++ {
+		if err := e.p.tick(context.Background(), context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	if err := waitUntil(cond, what); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPoll_BacklogLargerThanOneTickIsNotSkipped(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.dm(t, 1, "before the start")
+	e.startAt(t)
+	const n = eventsPageSize*pagesPerTick + 37
+	for i := 0; i < n; i++ {
+		e.dm(t, int64(1000+i), fmt.Sprintf("m%d", i))
+	}
+	// The first tick reads its page budget and stops short of the watermark:
+	// nothing is dispatched and the watermark stays where it was.
+	wm := e.bot.state.watermark()
+	if err := e.p.tick(context.Background(), context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e.bot.state.watermark() != wm || e.runner.promptCount() != 0 {
+		t.Fatalf("an incomplete pass moved the watermark or dispatched: prompts=%d", e.runner.promptCount())
+	}
+	e.tickUntilQuiet(t, 3)
+	waitFor(t, func() bool { return e.runner.promptCount() == n }, fmt.Sprintf("%d turns", n))
+	seen := map[string]bool{}
+	e.runner.mu.Lock()
+	for _, p := range e.runner.prompts {
+		seen[p] = true
+	}
+	e.runner.mu.Unlock()
+	for i := 0; i < n; i++ {
+		if !seen[fmt.Sprintf("m%d", i)] {
+			t.Fatalf("message m%d was skipped", i)
+		}
+	}
+	if left := len(e.fake.Events()); left != 1 {
+		t.Fatalf("handled events are still in the history: %d (want only the one before the start)", left)
+	}
+}
+
+func TestPoll_FirstStartSkipsWhatWasThereBefore(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.dm(t, 1, "old")
+	e.dm(t, 2, "older still")
+	e.startAt(t)
+	e.tickUntilQuiet(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	if n := e.runner.promptCount(); n != 0 {
+		t.Fatalf("events from before the first start ran %d turn(s)", n)
+	}
+	if left := len(e.fake.Events()); left != 2 {
+		t.Fatalf("events from before the first start were deleted: %d left", left)
+	}
+}
+
+func TestPoll_EventsOfOneMillisecondAreAllHandled(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	at := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	e.fake.SetNow(func() time.Time { return at })
+	e.dm(t, 1, "first")
+	e.startAt(t)
+	e.dm(t, 2, "second")
+	e.dm(t, 3, "third")
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool { return e.runner.promptCount() == 2 }, "both events of the same millisecond")
+}
+
+func TestPoll_WithoutDeleteScopeTheWatermarkCarries(t *testing.T) {
+	scopes := []string{"messages:create", "messages:update", "messages:read", "chats:read", "profile:read", "webhooks:events:read"}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true, Scopes: scopes}, nil)
+	e.startAt(t)
+	e.dm(t, 1, "hello")
+	e.tickUntilQuiet(t, 3)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the turn")
+	if !e.p.noDelete {
+		t.Fatal("a refused delete did not switch the poller to the watermark alone")
+	}
+	e.tickUntilQuiet(t, 3)
+	time.Sleep(50 * time.Millisecond)
+	if n := e.runner.promptCount(); n != 1 {
+		t.Fatalf("an event left in the history ran again: %d turns", n)
+	}
+	if len(e.fake.Events()) != 1 {
+		t.Fatalf("the event should stay in the history, got %d", len(e.fake.Events()))
+	}
+}
+
+func TestPoll_AStoppingBotLeavesTheEventForTheNextProcess(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	wm := e.bot.state.watermark()
+	e.dm(t, 1, "late")
+	e.bot.mu.Lock()
+	e.bot.stopping = true
+	e.bot.mu.Unlock()
+	e.tickUntilQuiet(t, 1)
+	if e.bot.state.watermark() != wm {
+		t.Fatal("a refused event moved the watermark")
+	}
+	if len(e.fake.Events()) != 1 {
+		t.Fatalf("a refused event was deleted: %d events left", len(e.fake.Events()))
+	}
+}
+
+func TestPoll_AMessageDeliveredTwiceRunsOneTurn(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	m := e.dm(t, 1, "once")
+	e.fake.LogRaw("message_new", e.fake.Events()[0].Payload)
+	e.tickUntilQuiet(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	if n := e.runner.promptCount(); n != 1 {
+		t.Fatalf("message %d delivered twice ran %d turns", m.ID, n)
+	}
+}
+
+func TestPoll_EditsAndDeletesAreIgnored(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	m := e.dm(t, 1, "original")
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the first turn")
+	e.fake.UserEdits(m.ID, "edited")
+	e.tickUntilQuiet(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	if n := e.runner.promptCount(); n != 1 {
+		t.Fatalf("an edit ran a turn: %d turns", n)
+	}
+}
+
+func TestButton_AccessIsChecked(t *testing.T) {
+	cfg := &config.PachcaGatewayConfig{DefaultAccess: config.AccessAdmins, Admins: []int64{1}}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, cfg)
+	e.startAt(t)
+	e.dm(t, 1, "/model")
+	e.tickUntilQuiet(t, 2)
+	chat := e.fake.PersonalChat(1)
+	var menu pachcafake.Message
+	waitFor(t, func() bool {
+		for _, m := range e.fake.Messages(chat) {
+			if len(m.Buttons) > 0 {
+				menu = m
+				return true
+			}
+		}
+		return false
+	}, "the model menu")
+	data := buttonFor(menu, "rpa/qwen3.6-35b-a3b")
+	e.fake.AddUser(2, "stranger", "S")
+	if err := e.fake.UserClicks(2, menu.ID, data); err != nil {
+		t.Fatal(err)
+	}
+	e.tickUntilQuiet(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	if got := e.bot.store.LastModel(); got != "" {
+		t.Fatalf("a click from somebody without access switched the model to %q", got)
+	}
+}
+
+func TestClient_ShortRateLimitIsWaitedOut(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{}, nil)
+	var waited []time.Duration
+	e.client.sleep = func(_ context.Context, d time.Duration) error { waited = append(waited, d); return nil }
+	e.fake.AddFault(pachcafake.Fault{Route: "POST /messages", Status: 429, RetryAfter: 2})
+	chat := e.fake.PersonalChat(5)
+	if _, err := e.client.SendMessage(context.Background(), OutgoingMessage{Target: ChatTarget(chat), Content: "hi"}); err != nil {
+		t.Fatalf("a short 429 should be waited out: %v", err)
+	}
+	if len(waited) != 1 || waited[0] != 2*time.Second {
+		t.Fatalf("waited %v, want one pause of Retry-After", waited)
+	}
+	if n := len(e.fake.Messages(chat)); n != 1 {
+		t.Fatalf("the retried POST created %d messages", n)
+	}
+}
+
+func TestClient_DailyLimitAndLongPausesAreNotRetried(t *testing.T) {
+	cases := []pachcafake.Fault{
+		{Route: "POST /messages", Status: 429, RetryAfter: 3600, Body: `{"errors":[{"code":"rate_limit","message":"daily limit"}]}`, ContentType: "application/json"},
+		{Route: "POST /messages", Status: 429, RetryAfter: 2, Body: `{"errors":[{"code":"rate_limit","message":"daily limit"}]}`, ContentType: "application/json"},
+		{Route: "POST /messages", Status: 429, RetryAfter: 120},
+	}
+	for i, f := range cases {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			e := newTestEnv(t, pachcafake.Options{}, nil)
+			slept := false
+			e.client.sleep = func(context.Context, time.Duration) error { slept = true; return nil }
+			e.fake.AddFault(f)
+			_, err := e.client.SendMessage(context.Background(), OutgoingMessage{Target: ChatTarget(e.fake.PersonalChat(5)), Content: "hi"})
+			if !IsRateLimited(err) || slept {
+				t.Fatalf("want a rate limit error without a retry, got err=%v slept=%v", err, slept)
+			}
+		})
+	}
+}
+
+func TestClient_ServerErrorOnPostIsNotRetried(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{}, nil)
+	e.fake.AddFault(pachcafake.Fault{Route: "POST /messages", Status: 502})
+	_, err := e.client.SendMessage(context.Background(), OutgoingMessage{Target: ChatTarget(e.fake.PersonalChat(5)), Content: "hi"})
+	if !IsStatus(err, 502) {
+		t.Fatalf("want the 502 back, got %v", err)
+	}
+	if n := len(e.fake.Calls("POST /messages")); n != 1 {
+		t.Fatalf("a 502 on POST was retried: %d calls", n)
+	}
+}
+
+func TestSender_TooLongIsSplitUntilItFits(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{MaxContentRunes: 300}, nil)
+	chat := e.fake.PersonalChat(5)
+	s := e.bot.newSender(context.Background(), e.client, ChatTarget(chat), 0)
+	var words []string
+	for i := 0; i < 250; i++ {
+		words = append(words, fmt.Sprintf("w%03d", i))
+	}
+	text := strings.Join(words, " ")
+	s.deliver(context.Background(), text, 0)
+	var got []string
+	for _, m := range e.fake.Messages(chat) {
+		if utf8.RuneCountInString(m.Content) > 300 {
+			t.Fatalf("a piece of %d runes was accepted", utf8.RuneCountInString(m.Content))
+		}
+		got = append(got, m.Content)
+	}
+	if len(got) < 4 {
+		t.Fatalf("want the text split into pieces, got %d", len(got))
+	}
+	if strings.Join(strings.Fields(strings.Join(got, " ")), " ") != text {
+		t.Fatal("splitting lost or reordered words")
+	}
+}
+
+func TestSender_EmptyAnswerSettlesTheToolLine(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{}, nil)
+	chat := e.fake.PersonalChat(5)
+	s := e.bot.newSender(context.Background(), e.client, ChatTarget(chat), 0)
+	s.currentTool = "read"
+	s.stream()
+	s.Flush()
+	ms := e.fake.Messages(chat)
+	if len(ms) != 1 || ms[0].Content != "Done." {
+		t.Fatalf("want the tool line settled, got %+v", ms)
+	}
+}
+
+func TestSplitMessage_ReopensACutFence(t *testing.T) {
+	body := strings.Repeat("line of code\n", 60)
+	text := "intro\n\n```go\n" + body + "```\n\nafter"
+	chunks := splitMessage(text, 300)
+	if len(chunks) < 2 {
+		t.Fatalf("want several chunks, got %d", len(chunks))
+	}
+	for i, c := range chunks {
+		if utf8.RuneCountInString(c) > 300 {
+			t.Fatalf("chunk %d has %d runes", i, utf8.RuneCountInString(c))
+		}
+		if _, open := openFence(c); open {
+			t.Fatalf("chunk %d leaves a fence open:\n%s", i, c)
+		}
+	}
+	if !strings.HasPrefix(chunks[1], "```go\n") {
+		t.Fatalf("the second chunk does not reopen the block: %q", chunks[1][:20])
+	}
+}
+
+func TestRenderMarkdown(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"verbatim", "**bold** and `code`\n# Heading\n- item", "**bold** and `code`\n# Heading\n- item"},
+		{"table", "| a | bb |\n|---|:--:|\n| ccc | d |", "```text\na    bb\nccc  d\n```"},
+		{"quote", "> said\nplain", "│ said\nplain"},
+		{"fence untouched", "```\n| a | b |\n|---|---|\n> q\n```", "```\n| a | b |\n|---|---|\n> q\n```"},
+		{"unclosed fence", "```\n> q", "```\n> q"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := renderMarkdown(c.in); got != c.want {
+				t.Fatalf("got\n%s\nwant\n%s", got, c.want)
+			}
+		})
+	}
+}
+
+func TestMentionsAndCommands(t *testing.T) {
+	if !mentions("hi @Coddy_Bot!", "coddy_bot", 7) || !mentions("hi <@7>", "coddy_bot", 7) {
+		t.Fatal("a mention was missed")
+	}
+	if mentions("hi @coddy_bot_two", "coddy_bot", 7) || mentions("mail coddy_bot@x", "coddy_bot", 7) {
+		t.Fatal("a longer nickname counted as a mention")
+	}
+	if got := stripMention("@coddy_bot  /clear", "coddy_bot", 7); got != "/clear" {
+		t.Fatalf("stripMention: %q", got)
+	}
+	if got := stripMention("ask @coddy_bot_two and <@7> now", "coddy_bot", 7); got != "ask @coddy_bot_two and now" {
+		t.Fatalf("stripMention kept the wrong parts: %q", got)
+	}
+	cmd, args := parseCommand("/Model openai/gpt-4o")
+	if cmd != "model" || args != "openai/gpt-4o" {
+		t.Fatalf("parseCommand: %q %q", cmd, args)
+	}
+	if cmd, _ := parseCommand("/usr/bin/env is a path"); cmd != "" {
+		t.Fatalf("a path read as the command %q", cmd)
+	}
+	if knownCommand("permissions") {
+		t.Fatal("/permissions must not reach the session from a chat")
+	}
+	if !knownCommand("plan") || !knownCommand("clear") {
+		t.Fatal("a known command was not recognised")
+	}
+}
+
+func TestButtonValue_LongModelIDTravelsAsADigest(t *testing.T) {
+	long := "provider/" + strings.Repeat("x", 300)
+	models := []config.ModelEntry{{Model: "short/one"}, {Model: long}}
+	v := buttonValue(actionModel, long)
+	if len(actionModel)+1+len(v) > buttonDataMax || !strings.HasPrefix(v, digestPrefix) {
+		t.Fatalf("value %q does not fit a button", v)
+	}
+	if got, ok := resolveModelValue(models, v); !ok || got != long {
+		t.Fatalf("digest resolved to %q, %v", got, ok)
+	}
+	if got, ok := resolveModelValue(models, "short/one"); !ok || got != "short/one" {
+		t.Fatalf("a plain id resolved to %q, %v", got, ok)
+	}
+}
+
+func TestTargetForKey(t *testing.T) {
+	if tg, ok := targetForKey("pachca:user:42"); !ok || tg != UserTarget(42) {
+		t.Fatalf("direct key: %+v", tg)
+	}
+	if tg, ok := targetForKey("pachca:chat:900:user:42"); !ok || tg != ChatTarget(900) {
+		t.Fatalf("group key: %+v", tg)
+	}
+	if _, ok := targetForKey("$last_model"); ok {
+		t.Fatal("a reserved entry resolved to a target")
+	}
+}
+
+func TestPollState_PersistsTheWatermark(t *testing.T) {
+	path := t.TempDir() + "/state.json"
+	st := loadPollState(path)
+	st.advance(mark{CreatedAt: "2026-10-04T12:00:00.000Z", ID: "b"})
+	st.advance(mark{CreatedAt: "2026-10-04T12:00:00.000Z", ID: "a"}) // older: ignored
+	again := loadPollState(path)
+	if got := again.watermark(); got.ID != "b" {
+		t.Fatalf("watermark after reload: %+v", got)
+	}
+}
+
+func TestBot_AStartAfterAStopAnswersAgain(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.bot.pollEvery = bddPollFor
+	run := func() (context.CancelFunc, chan error) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- e.bot.Start(ctx) }()
+		waitFor(t, func() bool { return e.bot.connectedClient() != nil && !e.bot.state.watermark().empty() }, "the bot to connect and read the history")
+		return cancel, done
+	}
+	cancel, done := run()
+	e.dm(t, 1, "first")
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the first turn")
+	cancel()
+	<-done
+	// The hub starts the same Bot again after an error.
+	cancel, done = run()
+	defer func() { cancel(); <-done }()
+	e.dm(t, 1, "second")
+	waitFor(t, func() bool { return e.runner.promptCount() == 2 }, "a turn after the restart")
+}
+
+func TestSender_FinalAnswerOutlivesTheTurnContext(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{}, nil)
+	chat := e.fake.PersonalChat(5)
+	ctx, cancel := context.WithCancel(context.Background())
+	s := e.bot.newSender(ctx, e.client, ChatTarget(chat), 0)
+	s.responseBuf.WriteString("written before the timeout")
+	cancel()
+	s.Flush()
+	ms := e.fake.Messages(chat)
+	if len(ms) != 1 || ms[0].Content != "written before the timeout" {
+		t.Fatalf("the answer of a cut-off turn was lost: %+v", ms)
+	}
+}

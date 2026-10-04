@@ -103,6 +103,95 @@ func (r *runner) telegramProbes() []probe {
 	}}
 }
 
+// pachcaRequiredScopes are the scopes the Pachca bot cannot work without;
+// pachcaRecommendedScopes the one it works without, at a cost.
+var (
+	pachcaRequiredScopes = []string{
+		"messages:create", "messages:update", "messages:read",
+		"chats:read", "profile:read", "webhooks:events:read",
+	}
+	pachcaRecommendedScopes = []string{"webhooks:events:delete"}
+)
+
+// pachcaProbes checks the Pachca bot token when that bot is enabled:
+// GET /oauth/token/info needs no scope, answers 401 for a revoked token and
+// lists the scopes a live one carries.
+func (r *runner) pachcaProbes() []probe {
+	pc := &r.req.Cfg.Gateways.Pachca
+	if !pc.Enabled {
+		return nil
+	}
+	return []probe{func(ctx context.Context) []Check {
+		const path = "gateways.pachca"
+		token := pc.EffectiveToken()
+		if token == "" {
+			return []Check{r.check(StatusError, path, path, "no token: gateways.pachca.token is empty and "+config.PachcaBotTokenEnvVar+" is not set",
+				"set gateways.pachca.token or export "+config.PachcaBotTokenEnvVar)}
+		}
+		hc, err := llm.HTTPClientForOptionalProxy(pc.Proxy)
+		if err != nil {
+			return []Check{r.check(StatusError, path, path+".proxy", "proxy: "+err.Error(), "fix gateways.pachca.proxy")}
+		}
+		if hc == nil {
+			hc = &http.Client{}
+		}
+		base := strings.TrimRight(strings.TrimSpace(os.Getenv(config.PachcaAPIBaseEnv)), "/")
+		if base == "" {
+			base = config.DefaultPachcaAPIBase
+		}
+		redact := func(s string) string { return strings.ReplaceAll(s, token, "<token>") }
+		status, body, err := r.get(ctx, hc, base+"/oauth/token/info", nil, token)
+		if err != nil {
+			fix := "check the network"
+			if strings.TrimSpace(pc.Proxy) != "" {
+				fix += " and gateways.pachca.proxy"
+			}
+			return []Check{r.check(StatusError, path, path, fmt.Sprintf("cannot reach %s: %s", base, redact(shortErr(err))), fix)}
+		}
+		switch status {
+		case http.StatusOK:
+			var info struct {
+				Data struct {
+					UserID int64    `json:"user_id"`
+					Scopes []string `json:"scopes"`
+				} `json:"data"`
+			}
+			if jerr := json.Unmarshal(body, &info); jerr != nil || info.Data.UserID == 0 {
+				return []Check{r.check(StatusWarning, path, path, "Pachca answered, but not with a token description", "check that "+base+" is the Pachca API")}
+			}
+			have := map[string]bool{}
+			for _, s := range info.Data.Scopes {
+				have[s] = true
+			}
+			var missing, recommended []string
+			for _, s := range pachcaRequiredScopes {
+				if !have[s] {
+					missing = append(missing, s)
+				}
+			}
+			for _, s := range pachcaRecommendedScopes {
+				if !have[s] {
+					recommended = append(recommended, s)
+				}
+			}
+			if len(missing) > 0 {
+				return []Check{r.check(StatusError, path, path+".token", "the token lacks scopes the bot needs: "+strings.Join(missing, ", "),
+					"grant them in the bot's settings in Pachca (Integrations, the bot, API tab) and copy the new token")}
+			}
+			if len(recommended) > 0 {
+				return []Check{r.check(StatusWarning, path, path+".token", "the token cannot delete handled events ("+strings.Join(recommended, ", ")+"); the events history will keep growing",
+					"grant webhooks:events:delete in the bot's settings in Pachca")}
+			}
+			return []Check{r.check(StatusOK, path, path, fmt.Sprintf("token accepted by Pachca, bot user %d", info.Data.UserID), "")}
+		case http.StatusUnauthorized:
+			return []Check{r.check(StatusError, path, path+".token", "token rejected by Pachca (HTTP 401)",
+				"check gateways.pachca.token: a revoked or mistyped token is answered like this; the bot's settings in Pachca show the current one")}
+		default:
+			return []Check{r.check(StatusError, path, path, fmt.Sprintf("Pachca answered HTTP %d", status), "try again later or check gateways.pachca.proxy")}
+		}
+	}}
+}
+
 // mcpRemoteProbes asks every remote MCP server of <home>/mcp.json for any
 // HTTP answer. Project-local .coddy/mcp.json declarations are not contacted:
 // they sit behind the workspace trust gate, and a dry run must not be the

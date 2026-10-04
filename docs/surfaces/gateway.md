@@ -2,6 +2,8 @@
 
 The messenger gateway lets you drive a Coddy agent directly from a chat application such as Telegram. The agent runs the same ReAct loop, tools, and skills as in the HTTP UI or ACP mode — the gateway is only a transport layer.
 
+This page is about the Telegram bot and the gateway's common parts. The Pachca (Пачка) integration bot has a page of its own: [Pachca gateway](pachca.md).
+
 ## Contents
 
 - [Overview](#overview)
@@ -21,10 +23,10 @@ The messenger gateway lets you drive a Coddy agent directly from a chat applicat
 - [What the messenger needs, and where it is said](#what-the-messenger-needs-and-where-it-is-said)
 - [Writing a new adapter](#writing-a-new-adapter)
   - [1. Implement the Adapter interface](#1-implement-the-adapter-interface)
-  - [2. Register in Start()](#2-register-in-start)
+  - [2. Add serve_name.go and its stub](#2-add-serve_namego-and-its-stub)
   - [3. Implement acp.UpdateSender](#3-implement-acpupdatesender)
   - [4. Add a build tag](#4-add-a-build-tag)
-  - [5. Wire into hub.Start()](#5-wire-into-hubstart)
+  - [5. Register the subsystem in coddy serve](#5-register-the-subsystem-in-coddy-serve)
 - [The same session in the chat and in the browser](#the-same-session-in-the-chat-and-in-the-browser)
 - [Woken turns land in the chat](#woken-turns-land-in-the-chat)
 - [Pictures the agent looked at](#pictures-the-agent-looked-at)
@@ -36,10 +38,10 @@ The messenger gateway lets you drive a Coddy agent directly from a chat applicat
 ## Overview
 
 ```
-Telegram / future messengers
-         │  polling / webhooks
+Telegram / Pachca / future messengers
+         │  polling / events history
          ▼
-  external/gateway/          ← build tag: gateway | gateway.telegram
+  external/gateway/          ← build tag: gateway | gateway.telegram | gateway.pachca
     Hub (goroutine per adapter, auto-restart)
          │
          ▼
@@ -58,7 +60,7 @@ Telegram / future messengers
   Sender (per-message)       ← buffers agent output, sends back to chat
 ```
 
-Multiple gateways (Telegram today, Discord/Slack tomorrow) run in the same process and share the same session store.
+Multiple gateways (Telegram and Pachca today) run in the same process, each as a subsystem of its own with its own session map, over the same session manager.
 
 They also share it with everything else `coddy serve` started. One process, one
 `session.Manager`: the chat conversations are ordinary Coddy sessions, listed
@@ -71,7 +73,8 @@ and openable in the web UI while they are happening.
 | Tag | Includes |
 |-----|----------|
 | `gateway.telegram` | Telegram adapter only |
-| `gateway` | all adapters (currently Telegram; a superset for future integrations) |
+| `gateway.pachca` | Pachca adapter only |
+| `gateway` | all adapters (Telegram and Pachca) |
 
 `gateway` is part of the recommended full set, so the released binaries, the
 packages and the published image all carry it. Build it on its own only for a
@@ -81,6 +84,9 @@ slimmer binary:
 # Telegram only
 make build TAGS="gateway.telegram"
 
+# Pachca only
+make build TAGS="gateway.pachca"
+
 # All gateways
 make build TAGS="gateway"
 
@@ -88,7 +94,7 @@ make build TAGS="gateway"
 make build TAGS="http ui scheduler memory cli gateway swarm"
 ```
 
-Without either tag the `coddy serve` subcommand is present in the binary but returns a "not compiled" error when invoked — all other subcommands are unaffected.
+A bot enabled in `config.yaml` but not compiled into the binary is a startup error of `coddy serve` naming the tag; all other subcommands are unaffected.
 
 ---
 
@@ -651,22 +657,28 @@ type SessionRunner interface {
 
 `session.Manager` already satisfies this interface — pass it directly. `HandleSessionSetConfigOption` is what the `/model` inline keyboard calls, and the settings commands (`/agent`, `/model <id> --once`, ...) reach the session as prompt text through `HandleSessionPromptWithSender`, whose manager takes them off the start of the message; `HandleSessionList` is what `/resume` offers to the chat; `Cfg()` returns the loaded config (used by `/model` to list available models).
 
-### 2. Register in Start()
+### 2. Add serve_name.go and its stub
 
-In `external/gateway/start.go`, add a block for the new adapter next to the Telegram block:
+Each adapter is started by a function of its own in `external/gateway`, in a file under the adapter's tag, with a stub for builds without it. The Telegram pair is `serve_telegram.go` / `serve_telegram_stub.go`, the Pachca pair `serve_pachca.go` / `serve_pachca_stub.go`:
 
 ```go
 //go:build gateway || gateway.discord
 
-if cfg.Gateways.Discord.Enabled {
-    bot := discord.New(&cfg.Gateways.Discord, mgr, defaultCWD, log)
-    adapters = append(adapters, bot)
+package gateway
+
+// DiscordAvailable reports whether this binary carries the Discord adapter.
+const DiscordAvailable = true
+
+// ServeDiscord builds the Discord bot and runs it until ctx is cancelled.
+func ServeDiscord(ctx context.Context, opts Options) error {
+    bot := discord.New(&opts.Cfg.Gateways.Discord, opts.Mgr, opts.DefaultCWD,
+        logger.Component(opts.Log, logger.ComponentGatewayDiscord), storePath, opts.Mirror)
+    NewHub(logger.Component(opts.Log, logger.ComponentGateway), bot).Start(ctx)
+    return nil
 }
 ```
 
-Because the Telegram file uses `//go:build gateway || gateway.telegram` and the Discord file uses `//go:build gateway || gateway.discord`, adding the Discord code to `start.go` requires updating the build constraint on that file to include `|| gateway.discord` as well. The cleanest approach is to split `start.go` per-adapter and give each its own constraint file, then have a `start_base.go` (tagged `gateway || gateway.telegram || gateway.discord`) that defines the `Start` function skeleton.
-
-For a simpler one-adapter project, a single `start.go` with `//go:build gateway || gateway.telegram` is sufficient.
+The stub (`//go:build !(gateway || gateway.discord)`) sets `DiscordAvailable = false` and returns an error naming the tag. Give the adapter a session map file of its own: two `sessionstore.Store` instances rewriting one file would undo each other's writes.
 
 ### 3. Implement acp.UpdateSender
 
@@ -694,11 +706,11 @@ Follow the existing pattern:
 - `external/gateway/discord/*_test.go` → same constraint
 - Stub (if needed) → `//go:build !(gateway || gateway.discord)`
 
-Update the `start.go` / `start_stub.go` constraint to include the new tag.
+Add the tag to the constraint of the shared files - `gateway.go`, `hub.go`, `access`, `sessionstore`, `proxyutil` - and to `TEST_TAG_SETS` in the `Makefile`.
 
-### 5. Wire into hub.Start()
+### 5. Register the subsystem in coddy serve
 
-`hub.Start()` accepts any `[]gateway.Adapter`. No changes to Hub itself are needed — just `append` your adapter before calling `hub.Start(ctx)`.
+Add a `serve.Kind` for the bot in `internal/serve/subsystem.go` and a descriptor in `subsystems()` of `cmd/coddy/serve.go`: its `ConfigKey`, the `BuildTag`, `Available: gateway.DiscordAvailable`, `NeedsSessions: true`, a `Fingerprint` over every setting a rebuilt bot would read differently, and `Run` calling `gateway.ServeDiscord`. A bot that is a subsystem of its own is rebuilt alone when its settings change, and is refused by name when it is enabled in a binary without its tag. Add a line to the banner (`printServeBanner`) and a probe of the token to `internal/dryrun`.
 
 ---
 

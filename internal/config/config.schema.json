@@ -1446,7 +1446,7 @@
     "gateways": {
       "type": "object",
       "title": "Messenger gateways",
-      "description": "Messenger bot adapters (used only by binaries built with -tags gateway or -tags gateway.telegram; started by coddy serve alongside every other enabled subsystem). See https://coddy.dev/docs/surfaces/gateway.",
+      "description": "Messenger bot adapters (used only by binaries built with -tags gateway, or -tags gateway.telegram / gateway.pachca for one adapter; started by coddy serve alongside every other enabled subsystem). See https://coddy.dev/docs/surfaces/gateway and https://coddy.dev/docs/surfaces/pachca.",
       "additionalProperties": false,
       "properties": {
         "telegram": {
@@ -1533,6 +1533,111 @@
                   "chat_id": {
                     "type": "integer",
                     "description": "Telegram chat id (negative for groups/supergroups)."
+                  },
+                  "isolation": {
+                    "type": "string",
+                    "description": "Per-chat session isolation override.",
+                    "enum": [
+                      "individual",
+                      "shared",
+                      "admin"
+                    ]
+                  },
+                  "access": {
+                    "type": "string",
+                    "description": "Per-chat access override: \"all\", \"admins\", or \"group:<name>\"."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "pachca": {
+          "type": "object",
+          "description": "Pachca integration bot adapter: reads the bot's events history and answers through the Pachca REST API. Turn on Save events history (events_history_enabled) in the bot's outgoing webhook settings. See https://coddy.dev/docs/surfaces/pachca.",
+          "additionalProperties": false,
+          "properties": {
+            "enable": {
+              "type": "boolean",
+              "description": "Run the Pachca bot in this coddy serve process.",
+              "default": false
+            },
+            "token": {
+              "type": "string",
+              "description": "Access token of the Pachca integration bot. Leave empty to read the PACHCA_BOT_TOKEN environment variable (e.g. via ~/.coddy/.env).",
+              "default": ""
+            },
+            "proxy": {
+              "type": "string",
+              "description": "inherit (the default, the same as leaving the key out), none, or a proxy URL: http://, https://, socks5:// or socks5h://, read like providers[].proxy. inherit follows HTTPS_PROXY, HTTP_PROXY and NO_PROXY of the Coddy process; none connects directly; a proxy URL sends every Pachca API request through that proxy.",
+              "default": "inherit"
+            },
+            "poll_interval_seconds": {
+              "type": "integer",
+              "description": "How often the events history is read, in seconds (1 to 60). Pachca answers that method at about five requests per two seconds.",
+              "default": 2,
+              "minimum": 1,
+              "maximum": 60
+            },
+            "admins": {
+              "type": "array",
+              "description": "Pachca user IDs with elevated rights; admins always pass access checks.",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "default_access": {
+              "type": "string",
+              "description": "Fallback access level for chats without an override: \"all\", \"admins\", or \"group:<name>\".",
+              "default": "all"
+            },
+            "default_isolation": {
+              "type": "string",
+              "description": "Fallback session isolation for group chats: \"individual\" (session per user), \"shared\" (one session for all), \"admin\" (admins only, shared session).",
+              "default": "individual",
+              "enum": [
+                "individual",
+                "shared",
+                "admin"
+              ]
+            },
+            "user_groups": {
+              "type": "array",
+              "description": "Named sets of user IDs referenced from access fields as group:<name>.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Group name referenced as group:<name>."
+                  },
+                  "user_ids": {
+                    "type": "array",
+                    "description": "Pachca user IDs in this group.",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            },
+            "chats": {
+              "type": "array",
+              "description": "Per-chat overrides keyed by the Pachca chat id (a thread has a chat id of its own).",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "chat_id"
+                ],
+                "properties": {
+                  "chat_id": {
+                    "type": "integer",
+                    "description": "Pachca chat id."
                   },
                   "isolation": {
                     "type": "string",

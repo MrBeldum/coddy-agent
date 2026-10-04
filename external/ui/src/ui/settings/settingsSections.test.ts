@@ -107,7 +107,7 @@ test("the logger and the gateways are tabs of their own, out of System", () => {
   expect(byId.logger?.label).toBe("Logger");
   expect(byId.gateways?.kind).toBe("object");
   expect(byId.gateways?.label).toBe("Gateways");
-  expect(byId.gateways?.description).toBe("Telegram bot");
+  expect(byId.gateways?.description).toBe("Telegram and Pachca bots");
 });
 
 // The scheduler is a feature of its own, not a system knob: it has a tab.

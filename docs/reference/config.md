@@ -367,7 +367,7 @@ Cron-driven scheduled jobs (used only by binaries built with -tags scheduler). J
 
 ### `gateways`
 
-Messenger bot adapters (used only by binaries built with -tags gateway or -tags gateway.telegram; started by coddy serve alongside every other enabled subsystem). See https://coddy.dev/docs/surfaces/gateway.
+Messenger bot adapters (used only by binaries built with -tags gateway, or -tags gateway.telegram / gateway.pachca for one adapter; started by coddy serve alongside every other enabled subsystem). See https://coddy.dev/docs/surfaces/gateway and https://coddy.dev/docs/surfaces/pachca.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -386,6 +386,21 @@ Messenger bot adapters (used only by binaries built with -tags gateway or -tags 
 | `gateways.telegram.chats[].chat_id` | integer |  | Telegram chat id (negative for groups/supergroups). |
 | `gateways.telegram.chats[].isolation` | string, one of `individual`, `shared`, `admin` |  | Per-chat session isolation override. |
 | `gateways.telegram.chats[].access` | string |  | Per-chat access override: "all", "admins", or "group:<name>". |
+| `gateways.pachca` | object |  | Pachca integration bot adapter: reads the bot's events history and answers through the Pachca REST API. Turn on Save events history (events_history_enabled) in the bot's outgoing webhook settings. See https://coddy.dev/docs/surfaces/pachca. |
+| `gateways.pachca.enable` | boolean | false | Run the Pachca bot in this coddy serve process. |
+| `gateways.pachca.token` | string | "" | Access token of the Pachca integration bot. Leave empty to read the PACHCA_BOT_TOKEN environment variable (e.g. via ~/.coddy/.env). |
+| `gateways.pachca.proxy` | string | inherit | inherit (the default, the same as leaving the key out), none, or a proxy URL: http://, https://, socks5:// or socks5h://, read like providers[].proxy. inherit follows HTTPS_PROXY, HTTP_PROXY and NO_PROXY of the Coddy process; none connects directly; a proxy URL sends every Pachca API request through that proxy. |
+| `gateways.pachca.poll_interval_seconds` | integer | 2 | How often the events history is read, in seconds (1 to 60). Pachca answers that method at about five requests per two seconds. |
+| `gateways.pachca.admins` | list of integers |  | Pachca user IDs with elevated rights; admins always pass access checks. |
+| `gateways.pachca.default_access` | string | all | Fallback access level for chats without an override: "all", "admins", or "group:<name>". |
+| `gateways.pachca.default_isolation` | string, one of `individual`, `shared`, `admin` | individual | Fallback session isolation for group chats: "individual" (session per user), "shared" (one session for all), "admin" (admins only, shared session). |
+| `gateways.pachca.user_groups` | list of objects |  | Named sets of user IDs referenced from access fields as group:<name>. |
+| `gateways.pachca.user_groups[].name` | string |  | Group name referenced as group:<name>. |
+| `gateways.pachca.user_groups[].user_ids` | list of integers |  | Pachca user IDs in this group. |
+| `gateways.pachca.chats` | list of objects |  | Per-chat overrides keyed by the Pachca chat id (a thread has a chat id of its own). |
+| `gateways.pachca.chats[].chat_id` | integer |  | Pachca chat id. |
+| `gateways.pachca.chats[].isolation` | string, one of `individual`, `shared`, `admin` |  | Per-chat session isolation override. |
+| `gateways.pachca.chats[].access` | string |  | Per-chat access override: "all", "admins", or "group:<name>". |
 <!-- docsgen:config:end -->
 
 ## Notes

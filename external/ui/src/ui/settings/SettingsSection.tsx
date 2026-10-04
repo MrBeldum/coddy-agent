@@ -215,10 +215,10 @@ function providerProxyOverride(ctx: FieldOverrideContext) {
   );
 }
 
-// The Telegram bot's proxy reads like a provider's, so it gets the same
-// switch and URL field (Gateways tab, Telegram block).
+// A bot's proxy reads like a provider's, so it gets the same switch and URL
+// field (Gateways tab, the Telegram and Pachca blocks).
 function gatewaysFieldOverride(ctx: FieldOverrideContext) {
-  if (ctx.path !== "telegram.proxy") {
+  if (ctx.path !== "telegram.proxy" && ctx.path !== "pachca.proxy") {
     return null;
   }
   return (
@@ -227,13 +227,13 @@ function gatewaysFieldOverride(ctx: FieldOverrideContext) {
       onChange={ctx.onChange}
       label={schemaFieldLabel(
         "gateways",
-        "telegram.proxy",
+        ctx.path,
         ctx.schema.title,
         "proxy",
       )}
       description={schemaFieldDesc(
         "gateways",
-        "telegram.proxy",
+        ctx.path,
         ctx.schema.description,
       )}
       switchDescriptionKey="settings.gatewayProxy.ignoreSystemDesc"

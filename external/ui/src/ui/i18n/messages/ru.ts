@@ -221,7 +221,7 @@ export const messagesRu: Record<string, string> = {
   "settings.section.logger.label": "Логирование",
   "settings.section.logger.desc": "Уровень, приёмники, ротация",
   "settings.section.gateways.label": "Шлюзы",
-  "settings.section.gateways.desc": "Бот Telegram",
+  "settings.section.gateways.desc": "Боты Telegram и Пачки",
   "settings.group.agent.turn": "Модель и ходы",
   "settings.group.agent.retries": "Повторы",
   "settings.group.agent.timeouts": "Таймауты потока",
@@ -758,6 +758,53 @@ export const messagesRu: Record<string, string> = {
     "Переопределение изоляции сессий для конкретного чата.",
   "settings.schema.gateways.telegram.chats.access.label": "Доступ",
   "settings.schema.gateways.telegram.chats.access.desc":
+    "Переопределение доступа для конкретного чата: all, admins или group:<имя>.",
+  "settings.schema.gateways.pachca.label": "Пачка",
+  "settings.schema.gateways.pachca.desc": "Настройки бота интеграции Пачки.",
+  "settings.schema.gateways.pachca.enable.label": "Включено",
+  "settings.schema.gateways.pachca.enable.desc":
+    "Запускать бота Пачки (нужен сборочный тег gateway или gateway.pachca).",
+  "settings.schema.gateways.pachca.token.label": "Токен бота",
+  "settings.schema.gateways.pachca.token.desc":
+    "Токен доступа бота интеграции Пачки. Здесь необязателен: если оставить поле пустым, токен берётся из переменной окружения PACHCA_BOT_TOKEN (например, через .env). Секрет: если задан, хранится в config.yaml и показывается целиком.",
+  "settings.schema.gateways.pachca.proxy.label": "URL прокси",
+  "settings.schema.gateways.pachca.proxy.desc":
+    "Необязательный прокси для запросов к API Пачки. Для HTTP-прокси подходят http:// и https://, для SOCKS5 подходят socks5:// и socks5h://. Указанный URL заменяет системный прокси для бота. Пока поле пустое, бот ходит через системный прокси (HTTPS_PROXY, HTTP_PROXY, NO_PROXY).",
+  "settings.schema.gateways.pachca.poll_interval_seconds.label":
+    "Интервал опроса, секунды",
+  "settings.schema.gateways.pachca.poll_interval_seconds.desc":
+    "Как часто бот читает журнал событий, от 1 до 60 секунд (по умолчанию 2).",
+  "settings.schema.gateways.pachca.admins.label": "Администраторы",
+  "settings.schema.gateways.pachca.admins.desc":
+    "Идентификаторы пользователей Пачки с расширенными правами; администраторы всегда проходят проверку доступа.",
+  "settings.schema.gateways.pachca.default_access.label": "Доступ по умолчанию",
+  "settings.schema.gateways.pachca.default_access.desc":
+    "Резервный уровень доступа для чатов без переопределения: all, admins или group:<имя>.",
+  "settings.schema.gateways.pachca.default_isolation.label":
+    "Изоляция по умолчанию",
+  "settings.schema.gateways.pachca.default_isolation.desc":
+    "Резервная изоляция сессий для групповых чатов.",
+  "settings.schema.gateways.pachca.user_groups.label": "Группы пользователей",
+  "settings.schema.gateways.pachca.user_groups.desc":
+    "Именованные наборы идентификаторов пользователей, на которые ссылается access как group:<имя>.",
+  "settings.schema.gateways.pachca.user_groups.name.label": "Имя группы",
+  "settings.schema.gateways.pachca.user_groups.name.desc":
+    "Имя, на которое ссылается access как group:<имя>.",
+  "settings.schema.gateways.pachca.user_groups.user_ids.label":
+    "Идентификаторы пользователей",
+  "settings.schema.gateways.pachca.user_groups.user_ids.desc":
+    "Идентификаторы пользователей Пачки, входящие в эту группу.",
+  "settings.schema.gateways.pachca.chats.label": "Переопределения по чатам",
+  "settings.schema.gateways.pachca.chats.desc":
+    "Переопределение изоляции и доступа для отдельных чатов.",
+  "settings.schema.gateways.pachca.chats.chat_id.label": "Идентификатор чата",
+  "settings.schema.gateways.pachca.chats.chat_id.desc":
+    "Идентификатор чата Пачки: беседы, канала, личного чата или собственного чата треда.",
+  "settings.schema.gateways.pachca.chats.isolation.label": "Изоляция",
+  "settings.schema.gateways.pachca.chats.isolation.desc":
+    "Переопределение изоляции сессий для конкретного чата.",
+  "settings.schema.gateways.pachca.chats.access.label": "Доступ",
+  "settings.schema.gateways.pachca.chats.access.desc":
     "Переопределение доступа для конкретного чата: all, admins или group:<имя>.",
 
   "settings.combobox.toggleAria": "Показать параметры",
