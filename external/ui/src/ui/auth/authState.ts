@@ -25,6 +25,13 @@ export type AuthState = {
    */
   telegramRefused: boolean;
   /**
+   * The Mini App sign-in of an admin did not end in a session: "not_kept"
+   * when the server opened one and the browser did not keep its cookie (a
+   * Mini App in a frame of another site), "retry" when the launch was
+   * refused (used before, too old) and the Mini App has to be opened again.
+   */
+  telegramProblem: "" | "not_kept" | "retry";
+  /**
    * Whether the server has been asked yet. The app waits for it rather than
    * rendering and then yanking itself away to a sign-in screen.
    */
@@ -37,6 +44,7 @@ const initial: AuthState = {
   authenticated: false,
   user: "",
   telegramRefused: false,
+  telegramProblem: "",
   loaded: false,
 };
 
@@ -65,6 +73,7 @@ export function resetAuthStateForTests(): void {
   inflight = null;
   telegramTried = false;
   telegramRefused = false;
+  telegramProblem = "";
   setAuthState(initial);
 }
 
@@ -80,6 +89,7 @@ type AuthMeResponse = {
 // signs a launch once, and the server takes each launch once.
 let telegramTried = false;
 let telegramRefused = false;
+let telegramProblem: AuthState["telegramProblem"] = "";
 
 /**
  * signInWithTelegram posts the Mini App's launch data. It reports whether a
@@ -97,9 +107,12 @@ async function signInWithTelegram(initData: string): Promise<boolean> {
     });
     if (res.status === 403) {
       telegramRefused = true;
+    } else if (!res.ok) {
+      telegramProblem = "retry";
     }
     return res.ok;
   } catch {
+    telegramProblem = "retry";
     return false;
   }
 }
@@ -137,12 +150,16 @@ async function readAuthState(): Promise<AuthState> {
       telegramTried = true;
       if (await signInWithTelegram(launch.initData)) {
         next = await askAuthMe();
+        if (!next.state.authenticated) {
+          telegramProblem = "not_kept";
+        }
       }
     }
   }
   const state = {
     ...next.state,
     telegramRefused: telegramRefused && !next.state.authenticated,
+    telegramProblem: next.state.authenticated ? "" : telegramProblem,
   };
   setAuthState(state);
   return state;
@@ -165,6 +182,7 @@ async function askAuthMe(): Promise<{
           authenticated: body.authenticated === true,
           user: typeof body.user === "string" ? body.user : "",
           telegramRefused: false,
+          telegramProblem: "",
           loaded: true,
         },
         wantsTelegram: body.telegram_login === true,

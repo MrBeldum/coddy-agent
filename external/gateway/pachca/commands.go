@@ -176,7 +176,8 @@ func (b *Bot) handleButton(ctx context.Context, c *Client, p buttonPayload) bool
 	case actionPermission:
 		b.answerPermissionClick(ctx, c, p, value, key)
 	case actionModel:
-		if isGroup, _ := b.isGroup(ctx, c, p.ChatID, ""); isGroup && !b.cfg.IsAdmin(p.UserID) {
+		// A chat that cannot be read counts as a group, as everywhere else.
+		if isGroup, err := b.isGroup(ctx, c, p.ChatID, ""); (err != nil || isGroup) && !b.cfg.IsAdmin(p.UserID) {
 			b.reply(ctx, c, ChatTarget(p.ChatID), p.MessageID, adminOnlyNote)
 			return true
 		}

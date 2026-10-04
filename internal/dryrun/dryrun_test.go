@@ -874,3 +874,17 @@ func TestMiniAppChecks(t *testing.T) {
 		t.Errorf("an unreachable address: %+v", c)
 	}
 }
+
+func TestGatewayWithoutAdminsIsWarned(t *testing.T) {
+	t.Setenv(config.PachcaBotTokenEnvVar, "")
+	body := "gateways:\n  pachca:\n    enable: true\n"
+	if c := find(t, run(t, body, nil), "gateways.pachca.admins"); c.Status != StatusWarning || !strings.Contains(c.Message, "no admins") {
+		t.Errorf("no admins: %+v", c)
+	}
+	body = "gateways:\n  pachca:\n    enable: true\n    admins: [7]\n"
+	for _, c := range run(t, body, nil).Checks {
+		if c.Path == "gateways.pachca.admins" {
+			t.Errorf("a bot with admins was warned: %+v", c)
+		}
+	}
+}

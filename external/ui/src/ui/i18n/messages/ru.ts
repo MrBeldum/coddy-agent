@@ -32,6 +32,8 @@ export const messagesRu: Record<string, string> = {
   "auth.signIn.openInTab": "Открыть Coddy в отдельной вкладке",
   "auth.signIn.telegramNotAdmin":
     "Открыть Coddy из Telegram могут только админы бота.",
+  "auth.signIn.telegramRetry":
+    "Вход через Telegram не прошёл. Закройте Mini App и откройте заново.",
   "auth.signOut.action": "Выйти",
   "auth.signOut.tooltipUser": "Выйти ({user})",
 

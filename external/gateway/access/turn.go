@@ -14,26 +14,32 @@ import (
 // who is not its admin asks for what only an admin may do.
 const AdminOnlyNote = "only the bot's admins can do this"
 
-// nonAdminDeniedTools are the tools a turn of a messenger user who is not the
-// bot's admin may not call: they change the whole agent's configuration, its
-// scheduled runs or the session's model, or start work that escapes the
-// conversation (a subagent, a worktree).
-var nonAdminDeniedTools = []string{
-	"config_set", "config_revert", "config_commit", "config_rollback",
-	"switch_model", "spawn_agent", "worktree_create",
-	"coddy_scheduler_job_create", "coddy_scheduler_job_replace", "coddy_scheduler_job_patch",
-	"coddy_scheduler_job_delete", "coddy_scheduler_job_pause", "coddy_scheduler_job_resume",
-	"coddy_scheduler_job_run", "coddy_scheduler_job_cancel",
+// nonAdminTools are the only tools a turn of a messenger user who is not the
+// bot's admin may call: reading inside the session's working directory, the
+// built-in documentation, a web search, the session's own plan and to-do
+// list, and a question back. Everything else - the configuration, the model,
+// subagents, worktrees, the scheduler, background tasks, servers, MCP tools,
+// shell commands, writes, fetching a page from the server - is the admins'.
+var nonAdminTools = []string{
+	"read", "grep", "glob", "print_tree",
+	"coddy_docs_search", "coddy_docs_read", "websearch",
+	"question", "load_skill", "plan_read", "plan_list",
+	"coddy_todo_plan_read", "coddy_todo_plan_replace", "coddy_todo_plan_archive",
+	"coddy_todo_item_add", "coddy_todo_item_remove", "coddy_todo_item_update", "coddy_todo_item_move",
 }
 
 // NonAdminTurn is the restriction a bot puts on the turn of a user who is
-// not its admin: the tools above are refused, and every call that needs
-// approval asks the bot, which refuses it. An admin's turn runs unrestricted.
+// not its admin: only the tools above, reads kept inside the working
+// directory and out of the agent's home (and so are "@" mentions), and every
+// call that needs approval asked about - the bot refuses it - with the
+// session's "always allow" grants left aside. An admin's turn runs
+// unrestricted.
 func NonAdminTurn() *session.TurnRestriction {
 	return &session.TurnRestriction{
-		DeniedTools: append([]string(nil), nonAdminDeniedTools...),
-		AskAlways:   true,
-		Note:        AdminOnlyNote,
+		AllowedTools:       append([]string(nil), nonAdminTools...),
+		AskAlways:          true,
+		ConfineToWorkspace: true,
+		Note:               AdminOnlyNote,
 	}
 }
 

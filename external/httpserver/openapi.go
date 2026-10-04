@@ -1583,7 +1583,7 @@ func openAPISpec() map[string]interface{} {
 			"/coddy/auth/logout": map[string]interface{}{
 				"post": map[string]interface{}{
 					"summary":     "End the browser session on the server",
-					"description": "Drops the session server-side and expires the cookie, so a copy of it taken elsewhere stops working too. Idempotent: a request with no cookie, or with one this server no longer knows, still answers **200**. **403** for a cross-site attempt.",
+					"description": "Drops the session server-side and expires the cookie - the sign-in form's and, when the browser holds one, the Telegram Mini App's (`" + tgSessionCookieBaseName + "_<host digest>`) - so a copy of it taken elsewhere stops working too. Idempotent: a request with no cookie, or with one this server no longer knows, still answers **200**. **403** for a cross-site attempt.",
 					"operationId": "authLogout",
 					"security":    []interface{}{map[string]interface{}{}},
 					"responses": map[string]interface{}{

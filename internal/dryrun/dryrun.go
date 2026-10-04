@@ -132,6 +132,7 @@ func Run(ctx context.Context, req Request) *Report {
 	r.miniApp()
 	r.listeners()
 	r.unsentModelSettings()
+	r.gatewayAdmins()
 
 	var probes []probe
 	probes = append(probes, r.providerProbes()...)

@@ -4186,9 +4186,9 @@ func TestRestrictedTurnRefusesNamedToolsAndAsksForTheRest(t *testing.T) {
 		SessionID: h.sessionID,
 		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "switch and run"}},
 	}, snd, &session.PromptRunOpts{Restriction: &session.TurnRestriction{
-		DeniedTools: []string{"switch_model"},
-		AskAlways:   true,
-		Note:        "only the bot's admins may do that",
+		AllowedTools: []string{"run_command", "read"},
+		AskAlways:    true,
+		Note:         "only the bot's admins may do that",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -4218,5 +4218,65 @@ func TestRestrictedTurnRefusesNamedToolsAndAsksForTheRest(t *testing.T) {
 	h.prompt(t, "now switch")
 	if st.GetSelectedModelID() != "fake/b" {
 		t.Fatalf("the restriction outlived its turn: model %q", st.GetSelectedModelID())
+	}
+}
+
+// A confined turn reads inside the session's working directory only, calls
+// nothing outside its list (an MCP tool included), and does not ride on the
+// session's "always allow" grants.
+func TestRestrictedTurnIsConfinedAndIgnoresGrants(t *testing.T) {
+	h := newSettingsHarness(t, "fake/a")
+	st := h.mgr.SessionByID(h.sessionID)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("top secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(st.GetCWD(), "note.txt")
+	if err := os.WriteFile(inside, []byte("plain note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "ran")
+	cmd := "touch " + marker
+	st.AddCommandGrantIfNew(cmd)
+	h.provider("a").steps = []scriptStep{
+		toolStep(llm.ToolCall{ID: "r1", Name: "read", InputJSON: fmt.Sprintf(`{"path":%q}`, outside)}),
+		toolStep(llm.ToolCall{ID: "r2", Name: "read", InputJSON: `{"path":"note.txt"}`}),
+		toolStep(llm.ToolCall{ID: "m1", Name: "github__create_issue", InputJSON: `{}`}),
+		toolStep(llm.ToolCall{ID: "c1", Name: "run_command", InputJSON: fmt.Sprintf(`{"command":%q}`, cmd)}),
+		answerStep("done"),
+	}
+	snd := &refusingSender{}
+	if _, err := h.mgr.HandleSessionPromptWithSender(context.Background(), acp.SessionPromptParams{
+		SessionID: h.sessionID,
+		Prompt:    []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "go"}},
+	}, snd, &session.PromptRunOpts{Restriction: &session.TurnRestriction{
+		AllowedTools:       []string{"read", "run_command"},
+		AskAlways:          true,
+		ConfineToWorkspace: true,
+		Note:               "admins only",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var results []string
+	for _, m := range st.GetMessages() {
+		if m.Role == llm.RoleTool {
+			results = append(results, m.Content)
+		}
+	}
+	joined := strings.Join(results, "\n---\n")
+	if strings.Contains(joined, "top secret") {
+		t.Fatal("a confined turn read a file outside its working directory")
+	}
+	if !strings.Contains(joined, "plain note") {
+		t.Fatalf("a confined turn could not read inside its working directory:\n%s", joined)
+	}
+	if !strings.Contains(joined, "github__create_issue: admins only") {
+		t.Fatalf("an MCP tool outside the list was not refused:\n%s", joined)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a session grant ran a command in a restricted turn")
+	}
+	if len(snd.asked) != 1 {
+		t.Fatalf("the surface was asked %d times, want once for run_command", len(snd.asked))
 	}
 }

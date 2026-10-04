@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/access"
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/proxyutil"
@@ -372,6 +373,7 @@ func (b *Bot) sessionWorker(ctx context.Context, ch chan workerJob) {
 }
 
 func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message, key string) {
+	msg = commandAfterMention(msg, b.botName)
 	userID := msg.From.ID
 	chatID := msg.Chat.ID
 	text := strings.TrimSpace(msg.Text)
@@ -629,6 +631,26 @@ func changesSettings(msg *tgbotapi.Message) bool {
 		return true
 	}
 	return isSettingsCommand(msg)
+}
+
+// commandAfterMention turns "@bot /command args" into the command Telegram
+// would have marked had the mention not come first, so every check and
+// handler reads both forms the same: the filter of unknown commands and of
+// /permissions, the admin-only commands, the quote a reply would add.
+func commandAfterMention(msg *tgbotapi.Message, botName string) *tgbotapi.Message {
+	if msg == nil || msg.IsCommand() || botName == "" {
+		return msg
+	}
+	text := strings.TrimSpace(msg.Text)
+	stripped := stripMention(text, botName)
+	if stripped == text || leadingCommand(stripped, botName) == "" {
+		return msg
+	}
+	word := strings.Fields(stripped)[0]
+	out := *msg
+	out.Text = stripped
+	out.Entities = []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len(utf16.Encode([]rune(word)))}}
+	return &out
 }
 
 // leadingCommand is the lower-case command word text starts with ("/think",

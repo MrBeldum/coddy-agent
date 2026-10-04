@@ -752,3 +752,31 @@ func TestNonAdminTurnIsRestricted(t *testing.T) {
 		t.Fatalf("a non-admin's own agent was approved: %+v %v", res, err)
 	}
 }
+
+// In a shared group session everybody shares the asking session: only the
+// bot's admins may answer what the agent asks.
+func TestPermissionClickFromANonAdminInASharedGroupIsIgnored(t *testing.T) {
+	cfg := &config.PachcaGatewayConfig{Admins: []int64{9}, DefaultIsolation: config.IsolationShared}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, cfg)
+	key := "pachca:chat:600" // a shared group's key names no person
+	sid := e.bot.store.Get(key)
+	p := &chatPrompt{sessionID: sid, options: []acp.PermissionOption{{OptionID: "allow", Name: "Allow"}}, answer: make(chan *acp.PermissionResult, 1)}
+	e.bot.asks.mu.Lock()
+	e.bot.asks.pending["tok"] = p
+	e.bot.asks.mu.Unlock()
+	e.bot.answerPermissionClick(context.Background(), e.client, buttonPayload{UserID: 1, ChatID: 600}, "tok:0", key)
+	select {
+	case <-p.answer:
+		t.Fatal("a non-admin answered a permission request in a shared group")
+	default:
+	}
+	e.bot.answerPermissionClick(context.Background(), e.client, buttonPayload{UserID: 9, ChatID: 600}, "tok:0", key)
+	select {
+	case res := <-p.answer:
+		if res.OptionID != "allow" {
+			t.Fatalf("the admin's answer: %+v", res)
+		}
+	default:
+		t.Fatal("the admin's click did not answer the request")
+	}
+}

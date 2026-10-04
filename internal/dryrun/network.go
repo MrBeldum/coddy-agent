@@ -192,6 +192,28 @@ func (r *runner) pachcaProbes() []probe {
 	}}
 }
 
+// gatewayAdmins warns about an enabled bot with no admins: everybody it lets
+// in then only chats - nothing is approved, and /resume, /app, the Mini App
+// and the settings of a group are nobody's.
+func (r *runner) gatewayAdmins() {
+	gw := r.req.Cfg.Gateways
+	for _, b := range []struct {
+		path    string
+		enabled bool
+		admins  int
+	}{
+		{"gateways.telegram", gw.Telegram.Enabled, len(gw.Telegram.Admins)},
+		{"gateways.pachca", gw.Pachca.Enabled, len(gw.Pachca.Admins)},
+	} {
+		if !b.enabled || b.admins > 0 {
+			continue
+		}
+		r.rep.add(r.check(StatusWarning, b.path+".admins", b.path+".enable",
+			"the bot has no admins: everybody it lets in only chats - the agent gets no approval for a command, a write or a request, and the settings, /resume and the web UI are nobody's",
+			"list the messenger user ids of the people who may run the agent in full under "+b.path+".admins"))
+	}
+}
+
 // miniApp says when the bot will not advertise the web UI it is told to offer
 // as its Mini App: the web UI of this process asks for no sign-in.
 func (r *runner) miniApp() {

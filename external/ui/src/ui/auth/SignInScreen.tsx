@@ -31,6 +31,14 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
   const [error, setError] = useState("");
   // The server took the password, but the session it set did not come back.
   const [notKept, setNotKept] = useState(false);
+  // What happened to the Mini App's own sign-in, when the page is one.
+  const auth = snapshotAuth();
+  const telegramNote = auth.telegramRefused
+    ? t("auth.signIn.telegramNotAdmin")
+    : auth.telegramProblem === "retry"
+      ? t("auth.signIn.telegramRetry")
+      : "";
+  const telegramNotKept = auth.telegramProblem === "not_kept";
 
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -88,14 +96,10 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
           width={188}
           height={56}
         />
-        {snapshotAuth().telegramRefused && !snapshotAuth().loginRequired ? (
+        {telegramNote && !snapshotAuth().loginRequired ? (
           <div className="auth-card">
-            <p
-              className="auth-error"
-              role="alert"
-              data-testid="telegram-not-admin"
-            >
-              {t("auth.signIn.telegramNotAdmin")}
+            <p className="auth-error" role="alert" data-testid="telegram-note">
+              {telegramNote}
             </p>
           </div>
         ) : (
@@ -144,7 +148,7 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
               </p>
             ) : null}
 
-            {notKept ? (
+            {notKept || telegramNotKept ? (
               <p className="auth-error" role="alert">
                 {t("auth.signIn.notKept")}{" "}
                 <a

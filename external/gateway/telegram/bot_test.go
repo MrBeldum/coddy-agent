@@ -176,3 +176,28 @@ func TestAppCommandIsAdminOnly(t *testing.T) {
 		t.Fatalf("/app from a non-admin: %+v", replies)
 	}
 }
+
+// "@bot /command" is the command: a command nobody handles is dropped rather
+// than sent to the session, /permissions too, and an admin's /clear clears.
+func TestCommandAfterAMentionIsTheCommand(t *testing.T) {
+	f := newFakeAPI(t, tgfake.Options{BotUsername: "coddy_bot"})
+	runner := newScriptedRunner()
+	b := New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual, Admins: []int64{9}},
+		runner, t.TempDir(), slog.New(slog.DiscardHandler), "", nil)
+	b.botName = "coddy_bot"
+	for _, text := range []string{"@coddy_bot /plugin install evil/repo", "@coddy_bot /compact", "@coddy_bot /permissions bypass", "@coddy_bot /export x.md"} {
+		for _, uid := range []int64{5, 9} {
+			b.processMessage(context.Background(), f.api, f.userMessage(uid, uid, text), sessionstore.SessionKey(adapterName, uid, uid, config.IsolationIndividual, false))
+		}
+	}
+	if len(runner.prompts) != 0 {
+		t.Fatalf("commands after a mention reached the session: %q", runner.prompts)
+	}
+	key := sessionstore.SessionKey(adapterName, 9, 9, config.IsolationIndividual, false)
+	before := b.store.Get(key)
+	msg := f.userMessage(9, 9, "@coddy_bot /clear")
+	b.processMessage(context.Background(), f.api, msg, key)
+	if b.store.Peek(key) == before {
+		t.Fatal("an admin's \"@bot /clear\" did not start a new session")
+	}
+}

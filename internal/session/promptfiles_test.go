@@ -842,3 +842,36 @@ func TestDocMentionIsBoundedWithTheWayToReadTheRest(t *testing.T) {
 		t.Fatalf("a short page arrives whole: %s %s", short.URI, short.Text[max(0, len(short.Text)-200):])
 	}
 }
+
+// A restricted turn (a messenger user who is not the bot's admin) attaches
+// files of its working directory only: a mention of anything outside it, or
+// of the agent's home, stays plain text.
+func TestConfinedTurnMentionsStayInsideTheWorkspace(t *testing.T) {
+	root := t.TempDir()
+	m, sid := mentionTestManager(t, root)
+	st := m.SessionByID(sid)
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("top secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(st.GetCWD(), "note.txt"), []byte("plain note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.SetTurnRestriction(&session.TurnRestriction{ConfineToWorkspace: true})
+	defer st.SetTurnRestriction(nil)
+	scope := session.MentionScope{Confined: true, ConfineHome: m.Cfg().Paths.Home}
+	blocks := m.ResolvePromptMentions(context.Background(), st, []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "@" + outside + " and @note.txt"}}, scope)
+	var texts []string
+	for _, b := range blocks {
+		if b.Resource != nil {
+			texts = append(texts, b.Resource.Text)
+		}
+	}
+	joined := strings.Join(texts, "|")
+	if strings.Contains(joined, "top secret") || !strings.Contains(joined, "plain note") {
+		t.Fatalf("attachments of a confined turn: %q", texts)
+	}
+	if !session.PathInWorkspace("note.txt", st.GetCWD(), "") || session.PathInWorkspace("../x", st.GetCWD(), "") {
+		t.Fatal("PathInWorkspace misread a relative path")
+	}
+}

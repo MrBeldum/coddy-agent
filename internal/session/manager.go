@@ -1083,32 +1083,38 @@ func (m *Manager) HandleSessionPrompt(ctx context.Context, params acp.SessionPro
 	return m.HandleSessionPromptWithSender(ctx, params, m.server, nil)
 }
 
-// PromptRunOpts configures HandleSessionPromptWithSender for HTTP paths that acquire the
-// turn lock themselves - streaming ones before committing SSE headers, non-streaming ones
 // TurnRestriction is what a surface takes away from one turn.
 type TurnRestriction struct {
-	// DeniedTools are refused before they run, in every permission mode.
-	DeniedTools []string
+	// AllowedTools, when not nil, are the only tools the turn may call; any
+	// other call - an MCP tool included - is refused with Note.
+	AllowedTools []string
 	// AskAlways makes every call that needs approval ask the surface, as in
-	// the ask mode, even when the session runs under bypass or accept_edits.
+	// the ask mode, even when the session runs under bypass or accept_edits,
+	// and leaves the session's "always allow" grants aside.
 	AskAlways bool
+	// ConfineToWorkspace keeps the paths the turn reads - by a tool or by an
+	// "@" mention - inside the session's working directory and out of the
+	// agent's home, and resolves no "@" web page.
+	ConfineToWorkspace bool
 	// Note is what a refused tool call tells the model.
 	Note string
 }
 
-// Denies reports whether r refuses the tool named name.
-func (r *TurnRestriction) Denies(name string) bool {
-	if r == nil {
-		return false
+// Allows reports whether r lets the turn call the tool named name.
+func (r *TurnRestriction) Allows(name string) bool {
+	if r == nil || r.AllowedTools == nil {
+		return true
 	}
-	for _, d := range r.DeniedTools {
-		if d == name {
+	for _, a := range r.AllowedTools {
+		if a == name {
 			return true
 		}
 	}
 	return false
 }
 
+// PromptRunOpts configures HandleSessionPromptWithSender for HTTP paths that acquire the
+// turn lock themselves - streaming ones before committing SSE headers, non-streaming ones
 // before opening a relay for watchers.
 type PromptRunOpts struct {
 	// SkipTurnLock when true means the caller already holds the composer turn lock (e.g. coddy serve SSE).

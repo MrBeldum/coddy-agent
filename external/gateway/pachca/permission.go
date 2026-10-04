@@ -157,6 +157,12 @@ func permissionText(params acp.PermissionRequestParams) string {
 // answerPermissionClick resolves a permission button clicked by the person
 // whose session key is key.
 func (b *Bot) answerPermissionClick(_ context.Context, _ *Client, p buttonPayload, value, key string) {
+	// Approving what an agent asks is the bot's admins': in a shared group
+	// session anybody shares the asking session.
+	if !b.cfg.IsAdmin(p.UserID) {
+		b.log.Debug("pachca: permission click refused", "reason", "approvals are admin-only", "user", p.UserID, "chat", p.ChatID)
+		return
+	}
 	token, idx, ok := strings.Cut(value, ":")
 	if !ok {
 		return
