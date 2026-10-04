@@ -63,13 +63,13 @@ What ships is still the embedded copy: a change under `external/ui/src` is compl
 - **`make ui-test`** (`cd external/ui && npm test`) - the SPA's own vitest suite on its own (`npm run test:watch` while editing). `make test` runs it as well, and CI runs it once, in the job that reads the tag matrix. **`make ui-typecheck`** (`npm run typecheck`) is the TypeScript compiler over the same sources with no emit, the step `make lint` ends with: `vite` only transpiles, so a type error reaches the bundle unless this runs.
 - **The harnesses in `examples/`** - real binaries against a reachable model: `./examples/build_coddy.sh`, then `./examples/test_acp.sh` (ACP over stdio), `./examples/test_httpserver.sh` (a disposable `coddy serve`), `./examples/test_cli.sh` (the console in a pty, Linux only) and `./examples/test_swarm.sh` (three relays, no model needed). The layout and every script are in [examples/README.md](examples/README.md).
 
-The happy path of a feature is an executable Gherkin spec in the repo-root `features/` directory, run by a godog harness in the package that owns the behaviour (for example `external/httpserver/bdd_*_test.go`, with `Options.Paths` pointing at `../../features/<name>.feature`). Edge and error cases are ordinary unit tests next to the code, never scenarios. Specs stay deterministic and LLM-free through a stub runner, and they run under the tag that owns them as part of `make test`. Conventions are in the paired testing rule.
+The happy path of a feature is an executable Gherkin spec in the repo-root `features/` directory, run by a godog harness in the package that owns the behaviour (for example `external/httpserver/bdd_*_test.go`, with `Options.Paths` pointing at `../../features/<name>.feature`). Edge and error cases are ordinary unit tests next to the code, never scenarios. Specs stay deterministic and LLM-free through a stub runner, and they run under the tag that owns them as part of `make test`. Conventions are in the paired testing rule ([Cursor](.cursor/rules/testing.mdc), [Claude Code](.claude/rules/testing.md)).
 
 ## Making a change
 
 Branch from `main` with a prefix that matches the commit type and a short kebab-case slug: `feat/config-dry-run`, `fix/update-refresh-completions`, `docs/documentation-structure`, `chore/express-test-flow`.
 
-The flow is red, green, then the checks - in full in the paired workflow rule:
+The flow is red, green, then the checks - in full in the paired workflow rule ([Cursor](.cursor/rules/workflow.mdc), [Claude Code](.claude/rules/workflow.md)):
 
 1. For a feature, add or extend the happy-path `.feature` spec (and a failing unit test where one fits); for a bug, add the regression test that fails on the broken code. Run the narrowest scope that proves the failure is real.
 2. Make the smallest change that turns it green.
@@ -85,7 +85,7 @@ What the pull request has to carry depends on what moved:
 | a subcommand, a `serve` verb or a flag that `printUsage` lists | `packaging/man/coddy.1`, `packaging/completions/coddy.bash`, `packaging/completions/coddy.zsh` and `topLevelCommands` in `cmd/coddy/usage_test.go`; nothing generates them |
 | anything a user notices, or anything a page describes | the documentation, in the same pull request: the page that owns the area, an entry in `docs/nav.yaml` for a new page, a screenshot on the page for a visible UI or console change, `make docs` for the generated pages. Page types, capture recipes and the checks are in [docs/contributing/documentation.md](docs/contributing/documentation.md) |
 | a rename of a key, a command or a flag | a sweep with `git grep -nI '<old spelling>'` that comes back empty outside `docs/plans/`: docs, `config.example.yaml`, `examples/`, Go comments, the SPA dictionaries under `external/ui/src/ui/i18n/messages/` and the bundled skills included |
-| `.cursor/rules/*.mdc` or `.claude/rules/*.md` | the deliberate counterpart in the other native tree, with equivalent body and activation intent; Codex, OpenCode and ZCode adapters consume the Cursor representation and are tested by `make test-agent-rules` |
+| `.cursor/rules/*.mdc` or `.claude/rules/*.md` | the deliberate counterpart in the other native tree, with equivalent body and activation intent; Claude `paths:` maps to Cursor `globs:` with `alwaysApply: false`, while a Cursor always-on rule maps to a Claude rule without `paths:`; Codex, OpenCode and ZCode adapters consume the Cursor representation and are tested by `make test-agent-rules` |
 
 Two rules from the code review section of [AGENTS.md](AGENTS.md) come up often enough to repeat: a package that builds by default must not import one behind the `http`, `ui`, `scheduler`, `memory` or `gateway` tags, and project-local configuration (`.coddy/mcp.json`, hook files, subagent definitions) is never read or executed without the trust gate.
 
@@ -96,7 +96,7 @@ Two rules from the code review section of [AGENTS.md](AGENTS.md) come up often e
 - Follow the neighbouring files: import grouping, naming, error handling, table-driven tests where they clarify the cases, no real network in a test unless it is documented as integration-style.
 - The SPA is formatted with Prettier (`npm run fmt` in `external/ui`); [DESIGN.md](DESIGN.md) is its contract for tokens, layout and component behaviour, and the localization rules (every dictionary changed in the same commit) are in [AGENTS.md](AGENTS.md).
 
-The one-page version is the paired code-style rule.
+The one-page version is the paired code-style rule ([Cursor](.cursor/rules/code-style.mdc), [Claude Code](.claude/rules/code-style.md)).
 
 ## Pull requests
 
