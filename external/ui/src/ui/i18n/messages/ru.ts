@@ -27,6 +27,9 @@ export const messagesRu: Record<string, string> = {
     "Вход включён, но учётная запись не настроена. Выполните `coddy serve set-password` на сервере.",
   "auth.signIn.crossSite": "Запрос пришёл не с этой страницы.",
   "auth.signIn.failed": "Войти не удалось ({status}).",
+  "auth.signIn.notKept":
+    "Сервер принял вход, но браузер не сохранил его в этом фрейме, потому что страница встроена в другой сайт, например в Telegram Web.",
+  "auth.signIn.openInTab": "Открыть Coddy в отдельной вкладке",
   "auth.signOut.action": "Выйти",
   "auth.signOut.tooltipUser": "Выйти ({user})",
 

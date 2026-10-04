@@ -289,16 +289,52 @@ func (b *Bot) applyModel(ctx context.Context, bot *tgbotapi.BotAPI, cbq *tgbotap
 	// is what the next fresh chat session starts on.
 	b.store.SetLastModel(newModel)
 	cfg := b.runner.Cfg()
+	kb := buildModelKeyboard(cfg.Models, newModel)
+	// A tap on the model the menu already marks current leaves nothing to
+	// show, and Telegram refuses an edit that changes nothing ("message is
+	// not modified"). The menu's text names the same model as its tick.
+	if cbq.Message.ReplyMarkup != nil && sameInlineKeyboard(*cbq.Message.ReplyMarkup, kb) {
+		b.log.Debug("telegram: model menu already current", "session", sessionID, "model", newModel)
+		return
+	}
 	edit := tgbotapi.NewEditMessageTextAndMarkup(
 		cbq.Message.Chat.ID,
 		cbq.Message.MessageID,
 		modelMenuText(newModel),
-		buildModelKeyboard(cfg.Models, newModel),
+		kb,
 	)
 	edit.ParseMode = tgbotapi.ModeMarkdown
 	if _, err := bot.Request(edit); err != nil {
 		b.log.Debug("telegram: edit model message", "err", err)
 	}
+}
+
+// sameInlineKeyboard reports whether two inline keyboards show the same
+// buttons with the same payloads, row by row.
+func sameInlineKeyboard(a, b tgbotapi.InlineKeyboardMarkup) bool {
+	if len(a.InlineKeyboard) != len(b.InlineKeyboard) {
+		return false
+	}
+	for i := range a.InlineKeyboard {
+		ra, rb := a.InlineKeyboard[i], b.InlineKeyboard[i]
+		if len(ra) != len(rb) {
+			return false
+		}
+		for j := range ra {
+			if ra[j].Text != rb[j].Text || deref(ra[j].CallbackData) != deref(rb[j].CallbackData) ||
+				deref(ra[j].URL) != deref(rb[j].URL) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
