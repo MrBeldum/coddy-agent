@@ -41,6 +41,10 @@ type Sender struct {
 	// parent is the message the first post replies to; zero after it.
 	parent int64
 
+	// refuseApprovals is set for the turn of somebody who is not the bot's
+	// admin: every permission request is refused, the agent's own included.
+	refuseApprovals bool
+
 	mu          sync.Mutex
 	responseBuf strings.Builder
 	currentTool string
@@ -241,6 +245,9 @@ func (s *Sender) deliver(ctx context.Context, text string, editID int64) {
 // configured the bot decided that. A subagent stamped below bypass is asked
 // about in the chat, with buttons, and the click decides (permission.go).
 func (s *Sender) RequestPermission(ctx context.Context, params acp.PermissionRequestParams) (*acp.PermissionResult, error) {
+	if s.refuseApprovals {
+		return &acp.PermissionResult{Outcome: "cancelled", OptionID: "reject"}, nil
+	}
 	stamped := strings.TrimSpace(params.EffectivePermissionMode)
 	if stamped == "" || stamped == "bypass" {
 		return &acp.PermissionResult{Outcome: "allow", OptionID: "allow"}, nil

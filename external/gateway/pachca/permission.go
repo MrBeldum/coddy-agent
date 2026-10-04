@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/EvilFreelancer/coddy-agent/external/gateway/access"
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
@@ -189,6 +190,11 @@ func (b *Bot) RequestDetachedPermission(ctx context.Context, req agent.DetachedP
 	target, ok := targetForKey(key)
 	if !ok {
 		return nil, agent.ErrNoDetachedApprover
+	}
+	// The conversation of somebody who is not the bot's admin approves
+	// nothing, now as during its turns.
+	if !access.KeyIsAdmin(key, b.cfg) {
+		return &acp.PermissionResult{Outcome: "cancelled", OptionID: "reject"}, nil
 	}
 	res, err := b.permissions().ask(ctx, b, c, target, req.ParentSessionID, req.Params)
 	if err != nil {

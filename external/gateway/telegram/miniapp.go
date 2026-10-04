@@ -198,6 +198,12 @@ func setMenuButton(bot *tgbotapi.BotAPI, button menuButton) error {
 // browser. The session is only looked up, never created here.
 func (b *Bot) handleAppCommand(bot *tgbotapi.BotAPI, msg *tgbotapi.Message, key string) {
 	chatID := msg.Chat.ID
+	// The web UI is the whole agent; only the bot's admins open it from here,
+	// and the server signs in only them by Telegram's launch data.
+	if msg.From == nil || !b.cfg.IsAdmin(msg.From.ID) {
+		b.reply(bot, chatID, msg.MessageID, "Only the bot's admins can open Coddy's web UI.")
+		return
+	}
 	base := b.cfg.MiniApp.URL
 	if base == "" {
 		b.reply(bot, chatID, msg.MessageID,

@@ -246,6 +246,11 @@ func (b *Bot) RequestDetachedPermission(ctx context.Context, req agent.DetachedP
 	if !ok {
 		return nil, agent.ErrNoDetachedApprover
 	}
+	// The conversation of somebody who is not the bot's admin approves
+	// nothing, now as during its turns.
+	if !access.KeyIsAdmin(key, b.cfg) {
+		return &acp.PermissionResult{Outcome: "cancelled", OptionID: "reject"}, nil
+	}
 	res, err := b.asks.ask(ctx, api, b.log, chatID, req.ParentSessionID, req.Params)
 	if err != nil {
 		b.log.Warn("telegram: detached permission not delivered", "err", err, "chat", chatID, "session", req.ParentSessionID)

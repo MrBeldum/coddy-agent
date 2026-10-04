@@ -517,6 +517,14 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 		draftID:    b.draftSeq.Add(1),
 	})
 	sender.pictures = st
+	// Somebody who is not the bot's admin gets the conversation and nothing
+	// that changes the agent: the turn refuses the tools that would, and the
+	// chat approves nothing it is asked about.
+	var restriction *session.TurnRestriction
+	if !b.cfg.IsAdmin(userID) {
+		restriction = access.NonAdminTurn()
+		sender.refuseApprovals = true
+	}
 
 	// Anything else in this process that can show a session follows along.
 	// The chat stays in charge: permission prompts and questions never leave
@@ -531,6 +539,7 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	}, mirrored, &session.PromptRunOpts{
 		SkipUsagePublish:    true,
 		SurfaceSystemPrompt: surfaceSystemPrompt(rich),
+		Restriction:         restriction,
 	})
 	sender.Flush()
 

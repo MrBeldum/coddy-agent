@@ -427,6 +427,14 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 	b.log.Debug("pachca: prompt turn", "session", st.GetID(), "user", userID, "chat", in.msg.ChatID, "prompt_len", len(text))
 
 	sender := b.newSender(tctx, c, target, parent)
+	// Somebody who is not the bot's admin gets the conversation and nothing
+	// that changes the agent: the turn refuses the tools that would, and the
+	// chat approves nothing it is asked about.
+	var restriction *session.TurnRestriction
+	if !b.cfg.IsAdmin(userID) {
+		restriction = access.NonAdminTurn()
+		sender.refuseApprovals = true
+	}
 	// Anything else in this process that can show a session follows along;
 	// permission prompts and questions stay with the chat.
 	mirrored, releaseMirror := session.Mirror(b.mirror, st.GetID(), sender)
@@ -438,6 +446,7 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 	}, mirrored, &session.PromptRunOpts{
 		SkipUsagePublish:    true,
 		SurfaceSystemPrompt: surfaceSystemPrompt(),
+		Restriction:         restriction,
 	})
 	sender.Flush()
 

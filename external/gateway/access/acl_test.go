@@ -85,3 +85,22 @@ func TestPolicy_PachcaReadsLikeTelegram(t *testing.T) {
 		t.Fatalf("override isolation: %s", got)
 	}
 }
+
+func TestKeyIsAdmin(t *testing.T) {
+	p := &config.PachcaGatewayConfig{Admins: []int64{7}}
+	cases := map[string]bool{
+		"tg:user:7": true, "tg:user:8": false,
+		"tg:chat:-1:user:7": true, "tg:chat:-1:user:8": false,
+		"tg:chat:-1": false, "tg:chat:-1:admin": true,
+		"$last_model": false, "tg:user:x": false,
+	}
+	for key, want := range cases {
+		if got := access.KeyIsAdmin(key, p); got != want {
+			t.Errorf("KeyIsAdmin(%q) = %v, want %v", key, got, want)
+		}
+	}
+	r := access.NonAdminTurn()
+	if !r.AskAlways || !r.Denies("config_commit") || !r.Denies("switch_model") || r.Denies("read") {
+		t.Fatalf("restriction: %+v", r)
+	}
+}

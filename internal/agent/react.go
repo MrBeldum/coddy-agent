@@ -1780,6 +1780,15 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 	// operator may have switched the session to bypass from the previous
 	// call's dialog, and the rest of the batch runs under that.
 	env.PermissionMode = effectivePermMode(a.state, a.cfg)
+	if st := sessionStatePtr(a.state); st != nil {
+		if r := st.GetTurnRestriction(); r.Denies(tc.Name) {
+			note := strings.TrimSpace(r.Note)
+			if note == "" {
+				note = "this tool is not available in this turn"
+			}
+			return "", fmt.Errorf("%s: %s", tc.Name, note)
+		}
+	}
 	env.ToolCallID = strings.TrimSpace(tc.ID)
 	a.currentToolCallID = env.ToolCallID
 	a.callImages = nil
@@ -2804,6 +2813,13 @@ func configWriteTool(name string) bool {
 
 // effectivePermMode returns the session-level permission mode override, falling back to the config default.
 func effectivePermMode(state SessionState, cfg *config.Config) string {
+	// A restricted turn asks the surface before anything that needs approval:
+	// the surface knows who wrote the message, the session's mode does not.
+	if st := sessionStatePtr(state); st != nil {
+		if r := st.GetTurnRestriction(); r != nil && r.AskAlways {
+			return config.PermModeAsk
+		}
+	}
 	if m := state.EffectivePermissionMode(); m != "" {
 		return m
 	}

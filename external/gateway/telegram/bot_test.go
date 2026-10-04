@@ -11,6 +11,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/sessionstore"
+	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/tgfake"
@@ -138,5 +139,40 @@ func TestGroupSettingsCommandAfterAMentionIsAdminOnly(t *testing.T) {
 		if replies := f.repliesTo(-100, msg.MessageID); len(replies) != 1 || !strings.Contains(replies[0].Text, "Only the bot's admins") {
 			t.Fatalf("%q was not refused: %+v", text, replies)
 		}
+	}
+}
+
+// A message of somebody who is not the bot's admin runs a restricted turn,
+// and the chat approves nothing for it; an admin's turn is unrestricted.
+func TestNonAdminTurnIsRestricted(t *testing.T) {
+	f := newFakeAPI(t, tgfake.Options{BotUsername: "coddy_bot"})
+	runner := newScriptedRunner()
+	b := New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual, Admins: []int64{9}},
+		runner, t.TempDir(), slog.New(slog.DiscardHandler), "", nil)
+	b.botName = "coddy_bot"
+	for _, uid := range []int64{5, 9} {
+		key := sessionstore.SessionKey(adapterName, uid, uid, config.IsolationIndividual, false)
+		b.processMessage(context.Background(), f.api, f.userMessage(uid, uid, "hello"), key)
+	}
+	if len(runner.restricted) != 2 || !runner.restricted[0] || runner.restricted[1] {
+		t.Fatalf("restricted turns: %v, want [true false] for a user and an admin", runner.restricted)
+	}
+	s := b.chatSender(f.api, 5, 0, richConfig{})
+	s.refuseApprovals = true
+	res, err := s.RequestPermission(context.Background(), acp.PermissionRequestParams{SessionID: "x"})
+	if err != nil || res == nil || res.OptionID != "reject" {
+		t.Fatalf("a non-admin's own agent was approved: %+v %v", res, err)
+	}
+}
+
+func TestAppCommandIsAdminOnly(t *testing.T) {
+	f := newFakeAPI(t, tgfake.Options{})
+	b := miniAppBot(t, "https://coddy.example.com/", "")
+	b.cfg.Admins = []int64{1}
+	msg := f.userMessage(4242, 4242, "/app")
+	b.processMessage(t.Context(), f.api, msg, sessionstore.SessionKey(adapterName, 4242, 4242, config.IsolationIndividual, false))
+	replies := f.repliesTo(4242, msg.MessageID)
+	if len(replies) != 1 || !strings.Contains(replies[0].Text, "Only the bot's admins") {
+		t.Fatalf("/app from a non-admin: %+v", replies)
 	}
 }

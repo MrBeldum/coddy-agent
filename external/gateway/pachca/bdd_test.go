@@ -52,8 +52,10 @@ type scriptRunner struct {
 	prompts []string
 	// sessions records the session each prompt ran in.
 	sessions []string
-	perm     *permissionScript
-	answered []string
+	// restricted records whether each turn came with a restriction.
+	restricted []bool
+	perm       *permissionScript
+	answered   []string
 	// gate, when set, holds every turn until a value arrives.
 	gate chan struct{}
 }
@@ -91,6 +93,7 @@ func (r *scriptRunner) HandleSessionPromptWithSender(ctx context.Context, params
 	}
 	r.prompts = append(r.prompts, text.String())
 	r.sessions = append(r.sessions, params.SessionID)
+	r.restricted = append(r.restricted, opts != nil && opts.Restriction != nil)
 	answer := r.answer
 	perm := r.perm
 	gate := r.gate
@@ -762,6 +765,10 @@ func initializePachcaScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the person "([^"]*)" replies "([^"]*)" to that message in the group "([^"]*)"$`, w.repliesToThatMessage)
 	sc.Step(`^the agent was asked nothing$`, w.agentAskedNothing)
 	sc.Step(`^"([^"]*)" is not an admin of the Pachca bot and "([^"]*)" is$`, w.adminsAre)
+	sc.Step(`^"([^"]*)" is an admin of the Pachca bot$`, func(name string) error {
+		w.bot.cfg.Admins = append(w.bot.cfg.Admins, w.person(name))
+		return nil
+	})
 	sc.Step(`^the agent was asked (\d+) times?$`, w.agentAskedTimes)
 	sc.Step(`^the events history no longer holds that message$`, w.historyLacksMessage)
 	sc.Step(`^Pachca received "([^"]*)"$`, w.pachcaReceived)

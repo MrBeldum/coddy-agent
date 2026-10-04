@@ -1085,6 +1085,30 @@ func (m *Manager) HandleSessionPrompt(ctx context.Context, params acp.SessionPro
 
 // PromptRunOpts configures HandleSessionPromptWithSender for HTTP paths that acquire the
 // turn lock themselves - streaming ones before committing SSE headers, non-streaming ones
+// TurnRestriction is what a surface takes away from one turn.
+type TurnRestriction struct {
+	// DeniedTools are refused before they run, in every permission mode.
+	DeniedTools []string
+	// AskAlways makes every call that needs approval ask the surface, as in
+	// the ask mode, even when the session runs under bypass or accept_edits.
+	AskAlways bool
+	// Note is what a refused tool call tells the model.
+	Note string
+}
+
+// Denies reports whether r refuses the tool named name.
+func (r *TurnRestriction) Denies(name string) bool {
+	if r == nil {
+		return false
+	}
+	for _, d := range r.DeniedTools {
+		if d == name {
+			return true
+		}
+	}
+	return false
+}
+
 // before opening a relay for watchers.
 type PromptRunOpts struct {
 	// SkipTurnLock when true means the caller already holds the composer turn lock (e.g. coddy serve SSE).
@@ -1111,6 +1135,12 @@ type PromptRunOpts struct {
 	// another surface on the same session carries a different prefix - which
 	// costs that turn its cached prefix, deliberately.
 	SurfaceSystemPrompt string
+	// Restriction narrows what this turn may do: a surface that knows who
+	// wrote the message - a messenger bot and a user who is not its admin -
+	// says which tools are refused and that everything needing approval is
+	// asked about, whatever the session's permission mode. Turn-scoped, like
+	// SurfaceSystemPrompt, and never persisted.
+	Restriction *TurnRestriction
 
 	// BackgroundWake says the prompt was not typed by anybody: finished
 	// background tasks that finished with notification enabled started this
@@ -1425,6 +1455,10 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	if opts != nil && strings.TrimSpace(opts.SurfaceSystemPrompt) != "" {
 		state.SetSurfaceSystemPrompt(opts.SurfaceSystemPrompt)
 		defer state.SetSurfaceSystemPrompt("")
+	}
+	if opts != nil && opts.Restriction != nil {
+		state.SetTurnRestriction(opts.Restriction)
+		defer state.SetTurnRestriction(nil)
 	}
 	// A turn no person started says so, the same way: held for this turn
 	// only, taken by the agent for the first message, and announced to the

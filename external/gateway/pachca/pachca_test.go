@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/logger"
 	"github.com/EvilFreelancer/coddy-agent/internal/pachcafake"
@@ -725,5 +726,29 @@ func TestModel_ANonAdminPickIsNotRemembered(t *testing.T) {
 	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the typed /model turn")
 	if got := e.bot.store.LastModel(); got != "" {
 		t.Fatalf("a non-admin's typed /model became the bot's default: %q", got)
+	}
+}
+
+func TestNonAdminTurnIsRestricted(t *testing.T) {
+	cfg := &config.PachcaGatewayConfig{Admins: []int64{9}}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, cfg)
+	e.startAt(t)
+	e.dm(t, 1, "hello")
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the user's turn")
+	e.dm(t, 9, "hello")
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool { return e.runner.promptCount() == 2 }, "the admin's turn")
+	e.runner.mu.Lock()
+	got := append([]bool(nil), e.runner.restricted...)
+	e.runner.mu.Unlock()
+	if len(got) != 2 || !got[0] || got[1] {
+		t.Fatalf("restricted turns: %v, want [true false] for a user and an admin", got)
+	}
+	s := e.bot.newSender(context.Background(), e.client, UserTarget(1), 0)
+	s.refuseApprovals = true
+	res, err := s.RequestPermission(context.Background(), acp.PermissionRequestParams{SessionID: "x"})
+	if err != nil || res == nil || res.OptionID != "reject" {
+		t.Fatalf("a non-admin's own agent was approved: %+v %v", res, err)
 	}
 }

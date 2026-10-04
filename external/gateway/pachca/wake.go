@@ -13,6 +13,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/EvilFreelancer/coddy-agent/external/gateway/access"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
@@ -53,6 +54,12 @@ func (b *Bot) runWokenTurn(ctx context.Context, c *Client, target Target, wake a
 	b.log.Debug("pachca: woken turn", "session", st.GetID(), "target", target.EntityID, "tasks", len(wake.Tasks))
 	opts := wake.RunOpts()
 	opts.SurfaceSystemPrompt = surfaceSystemPrompt()
+	// Nobody typed this turn: it runs with the rights of whoever the
+	// conversation belongs to, and a shared group's belongs to everybody.
+	if key, ok := b.store.KeyFor(st.GetID()); !ok || !access.KeyIsAdmin(key, b.cfg) {
+		opts.Restriction = access.NonAdminTurn()
+		sender.refuseApprovals = true
+	}
 	result, err := b.runner.HandleSessionPromptWithSender(ctx, wake.PromptParams(), mirrored, opts)
 	if errors.Is(err, session.ErrSessionTurnBusy) {
 		// The person's own turn is still running: the waker asks again.

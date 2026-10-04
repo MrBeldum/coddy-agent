@@ -268,7 +268,7 @@ func TestMiniAppLinkCarriesTheSessionInTheQuery(t *testing.T) {
 
 func miniAppBot(t *testing.T, app string, store string) *Bot {
 	t.Helper()
-	return New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, MiniApp: config.TelegramMiniAppConfig{URL: app}},
+	return New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, MiniApp: config.TelegramMiniAppConfig{URL: app}, Admins: []int64{4242}},
 		newStubRunner(&config.Config{}), t.TempDir(), slog.New(slog.DiscardHandler), store, nil)
 }
 

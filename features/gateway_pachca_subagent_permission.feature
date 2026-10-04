@@ -1,13 +1,15 @@
 Feature: A subagent asks for permission in the Pachca chat
-  The bot allows what the chat's own agent asks; a subagent whose definition
+  The bot allows what an admin's own agent asks; a subagent whose definition
   narrowed what it may do is asked about in the chat with buttons, and only the
   person whose session asked may answer - during the turn that spawned it, and
-  after that turn ended.
+  after that turn ended. The conversation of somebody who is not the bot's
+  admin approves nothing.
 
   Background:
     Given a fake Pachca workspace whose bot is "coddy_bot"
     And a pachca gateway over a scripted agent pointed at it
     And the bot is started
+    And "anna" is an admin of the Pachca bot
 
   Scenario: A subagent of a running turn asks and a click answers it
     Given the agent's turn has a subagent "reviewer" that asks to run "go test ./..."
