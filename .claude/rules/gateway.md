@@ -115,5 +115,5 @@ Every test in `external/gateway/telegram` that needs Telegram reaches it through
 ## References
 
 @docs/surfaces/gateway.md
-@architecture.md
+@docs/contributing/architecture.md
 @internal/config/gateway.go
