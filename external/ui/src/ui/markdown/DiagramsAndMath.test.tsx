@@ -402,6 +402,19 @@ describe("formulas", () => {
     expect(screen.queryByTestId("md-math-inline")).toBeNull();
   });
 
+  test("a shell variable before a code span holding dollars keeps the code intact", () => {
+    const { container } = render(<Markdown text={"Set ${CODDY_HOME}/hooks.json and `echo $HOME$PATH` now."} />);
+    expect(container.querySelector(".md-inline-code")?.textContent).toBe("echo $HOME$PATH");
+    expect(container.textContent).toBe("Set ${CODDY_HOME}/hooks.json and echo $HOME$PATH now.");
+    expect(screen.queryByTestId("md-math-inline")).toBeNull();
+  });
+
+  test("a formula next to code with a dollar in it is still a formula", async () => {
+    const { container } = render(<Markdown text={"Take $x^2$ and run `a$b` too."} />);
+    await waitFor(() => expect(screen.getByTestId("md-math-inline").dataset.source).toBe("x^2"));
+    expect(container.querySelector(".md-inline-code")?.textContent).toBe("a$b");
+  });
+
   test("a range written as a formula is a formula", async () => {
     render(<Markdown text={"The interval $5-10$ holds."} />);
     await waitFor(() => expect(screen.getByTestId("md-math-inline").dataset.source).toBe("5-10"));

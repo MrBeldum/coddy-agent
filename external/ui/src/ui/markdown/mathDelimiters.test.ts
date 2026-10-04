@@ -84,9 +84,16 @@ describe("normalizeMathDelimiters", () => {
     expect(normalizeMathDelimiters(text)).toBe(text);
   });
 
-  it("returns text without delimiters unchanged", () => {
+  it("returns text without delimiters or dollar pairs unchanged", () => {
     const text = "Plain $5 text with (parens) and [brackets].";
     expect(normalizeMathDelimiters(text)).toBe(text);
+  });
+
+  it("escapes a dollar whose partner sits in a code span, and a literal pair's opener", () => {
+    expect(normalizeMathDelimiters("Set ${A}/x and `echo $B` now")).toBe("Set \\${A}/x and `echo $B` now");
+    expect(normalizeMathDelimiters("from $10 to $25 a month")).toBe("from \\$10 to $25 a month");
+    expect(normalizeMathDelimiters("Take $x^2$ and `a$b`")).toBe("Take $x^2$ and `a$b`");
+    expect(normalizeMathDelimiters("$$\nx\n$$")).toBe("$$\nx\n$$");
   });
 });
 

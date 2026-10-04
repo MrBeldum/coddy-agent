@@ -19,7 +19,7 @@ const BLANK = /^[ \t\r]*$/;
 const INDENTED = /^(?: {4}|\t)/;
 
 export function normalizeMathDelimiters(text: string): string {
-  if (!text.includes("\\(") && !text.includes("\\[")) return text;
+  if (!text.includes("\\(") && !text.includes("\\[") && !text.includes("$")) return text;
   const lines = text.split("\n");
   const out: string[] = [];
   let prose: string[] = [];
@@ -27,7 +27,7 @@ export function normalizeMathDelimiters(text: string): string {
   let indented = false;
   let previousBlank = true;
   const flush = () => {
-    if (prose.length) out.push(rewriteProse(prose.join("\n")));
+    if (prose.length) out.push(rewriteProse(escapeLiteralDollars(prose.join("\n"))));
     prose = [];
   };
   for (const line of lines) {
@@ -79,6 +79,101 @@ const CONTAINER_PREFIX = /^(?:[ \t]*>)+|^[ \t]*(?:[-*+]|\d+[.)])[ \t]+|^[ \t]+/;
 function linePrefix(text: string, at: number): string {
   const start = text.lastIndexOf("\n", at - 1) + 1;
   return text.slice(start, at);
+}
+
+/**
+ * Escapes, in a stretch of prose with no fenced code in it, every single
+ * dollar that would open a formula remark-math should not see: one whose
+ * partner dollar sits inside a code span (`${CODDY_HOME}/x and \`echo $HOME\``
+ * would otherwise swallow the opening backtick and break the code), and one
+ * whose span is text by the dollar rule (isLiteralDollarSpan). A pair that
+ * reads as a formula is left as it is; dollars inside code spans are code.
+ */
+function escapeLiteralDollars(text: string): string {
+  if (!text.includes("$")) return text;
+  const spans = codeSpans(text);
+  const inCode = (at: number) => spans.some(([a, b]) => at >= a && at < b);
+  const escapeAt = new Set<number>();
+  let i = 0;
+  while (i < text.length) {
+    const span = spans.find(([a, b]) => i >= a && i < b);
+    if (span) {
+      i = span[1];
+      continue;
+    }
+    if (text[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (text[i] !== "$") {
+      i++;
+      continue;
+    }
+    if (text[i + 1] === "$") {
+      // A double dollar: display or inline $$...$$, never mistaken for prose.
+      let end = i;
+      while (text[end] === "$") end++;
+      i = end;
+      continue;
+    }
+    const close = nextSingleDollar(text, i + 1);
+    if (close < 0) {
+      i++;
+      continue;
+    }
+    if (inCode(close) || isLiteralDollarSpan(text, i, close + 1, text.slice(i + 1, close))) {
+      escapeAt.add(i);
+      i++;
+      continue;
+    }
+    // A formula: its content is not prose to scan.
+    i = close + 1;
+  }
+  if (escapeAt.size === 0) return text;
+  let out = "";
+  for (let k = 0; k < text.length; k++) out += escapeAt.has(k) ? "\\$" : text[k];
+  return out;
+}
+
+/** The next lone `$` after `from` the way remark-math pairs it: past code, not past a blank line. */
+function nextSingleDollar(text: string, from: number): number {
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\n" && /^\n[ \t\r]*\n/.test(text.slice(i, i + 64))) return -1;
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch !== "$") continue;
+    if (text[i + 1] === "$") {
+      while (text[i + 1] === "$") i++;
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
+
+/** The [start, end) ranges of the code spans in a stretch of prose. */
+function codeSpans(text: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (text[i] !== "`") {
+      i++;
+      continue;
+    }
+    const end = codeSpanEnd(text, i);
+    let run = i;
+    while (text[run] === "`") run++;
+    if (end > run) out.push([i, end]);
+    i = end;
+  }
+  return out;
 }
 
 /** Rewrites the delimiters of a stretch of prose with no fenced code in it. */
