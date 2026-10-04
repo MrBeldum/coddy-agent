@@ -1105,6 +1105,41 @@ Automated checks:
 - Label fences with the language (for example `js`, `css`, `html`, `json`, `ts`, `python`, or `go`) to enable highlighting. Unlabelled or unsupported languages stay plain text. Highlighting also works while an answer is streaming.
 - Code colors follow all seven appearance themes immediately when switching themes. Each theme defines the shared `--syntax-*` palette in `external/ui/src/styles.css`; no separate syntax-theme setting is needed.
 - Each code block has a copy button that copies only that block content.
+- Mermaid and SVG fences are drawn as pictures and LaTeX as formulas: see [Diagrams and formulas](#diagrams-and-formulas).
+
+## Diagrams and formulas
+
+An answer that holds a diagram or a formula shows it drawn, not as source. This covers what an agent writes when asked to "draw the flow" or "show the formula": a Mermaid fence, an SVG fence, and LaTeX between dollars or LaTeX's own delimiters. The web UI and the Telegram Mini App draw them; the console, ACP clients and the messenger bots keep the text.
+
+![A Mermaid flowchart drawn in an answer, with the MMD and SVG buttons and the source switch in its head](../assets/web-ui/diagrams-flowchart-dark-1280.png)
+*A Mermaid fence in an answer: drawn by default, its source one click away.*
+
+![The source of a long Mermaid diagram, scrolling in its box, the source switch lit and the copy button in the corner of the text](../assets/web-ui/diagrams-source-dark-1280.png)
+*The source switch pressed: the diagram's text with its copy button.*
+
+- **What is drawn.** A fence labelled **`mermaid`** (flowcharts, sequence, class, state, ER, Gantt, pie, mindmap and the rest of what Mermaid draws) and a fence labelled **`svg`**. Any other label stays a code block: an **`xml`** fence that happens to hold an `<svg>` is not drawn.
+- **The block.** A head row names the kind (**Mermaid diagram**, **SVG image**) and carries, on the right, the formats to save it as and the source switch. **MMD** saves the Mermaid source (**`diagram.mmd`**) and **SVG** the drawn picture (**`diagram.svg`**); an SVG fence has **SVG** only, which saves its source (**`image.svg`**). The source switch is an icon of angle brackets, off by default, so the picture is what you see; pressed, it shows the source with a copy button in the top right corner of the text, and a source longer than about twenty lines scrolls in its box. A click on the picture opens it in the image viewer with zoom and pan.
+- **Errors.** A diagram Mermaid cannot parse shows its source with the reason under the head (**Could not draw the picture: Parse error on line 3: ... Expecting ..., got ...**), and the source switch stays pressed and disabled. If the renderer cannot be loaded at all (offline, a page older than the binary), the block shows the source with **Could not load the diagram renderer: reload the page**.
+- **Streaming.** A fence that is still arriving is drawn when it first appears and then again once its text has not changed for 300 ms, so Mermaid is not run on every token of a half-written diagram.
+- **Themes.** A diagram takes all its colours from the active appearance and is drawn again when the theme changes: nodes are tinted with the accent, edges are the text colour, and pie slices, chart series and git branches use the theme's accent and syntax colours, each kept far enough from the surface that the slice stands out and its label reads (4.5:1). This holds in all seven themes. An SVG is drawn as written.
+
+![A Gantt chart and a pie chart drawn in the dark theme, slices in the theme's accent and syntax colours](../assets/web-ui/diagrams-charts-dark-1280.png)
+*Charts take the theme's colours: the dark theme...*
+
+![The same Gantt chart and pie chart in the light theme](../assets/web-ui/diagrams-charts-light-1280.png)
+*...and the light one.*
+
+- **Safety.** The picture is an `<img>` with the SVG as a `data:` URL: an SVG drawn that way runs no script, loads nothing from the network and cannot style the page, so an SVG the model wrote is shown as it is. Mermaid runs with **`securityLevel: "strict"`**.
+
+![Inline and display formulas typeset by KaTeX, with the source switch on each display block](../assets/web-ui/diagrams-formulas-dark-1280.png)
+*Inline and display formulas; a price in the same paragraph stays text.*
+
+- **Formulas.** **`$...$`** and **`\(...\)`** are inline formulas; **`$$...$$`**, **`\[...\]`** and a **`math`** fence are display formulas. KaTeX typesets them (no **`\href`**, **`\url`** or **`\includegraphics`**: untrusted commands are off), building the formula's nodes itself in the page (**`katex.render`**), so no HTML string made from an answer is ever parsed. A display formula has the same head as a diagram with the source switch only (the source view carries the copy button), and scrolls sideways when it is wider than the transcript. An inline formula shows its source as a tooltip and copies it, dollars included, on a click (or Enter / Space). A **`\[...\]`** inside a quote or a list item stays on its line (typeset inline) rather than breaking the quote or the list, and LaTeX delimiters inside fenced or indented code are left as they are; a pair never spans a blank line, a new list item or a change of quote depth. Escaped brackets in prose (`a\[0\]`, `\(see below\)`) stay text.
+- **Dollars that are not math.** A single-dollar span is a formula only when no space follows the opening dollar or precedes the closing one and no letter or digit touches either dollar from outside (Pandoc's rule), and when it does not open as **`${NAME}`**. So "it costs $5 and $10", **`${CODDY_HOME}/hooks.json`**, **`$HOME$PATH`** and an argon2 hash stay text. Dollars inside code spans and fences are never math. Bad TeX shows KaTeX's own red source rather than an error.
+- **The agent knows.** Every turn the web UI sends names it (**`metadata.surface: "webui"`**), and the server adds a block to that turn's system prompt: the web UI draws **`mermaid`** and **`svg`** fences and typesets LaTeX, so a diagram, a chart or a formula is the answer when it says more than prose would, and colours are left to the theme. The block belongs to the turn and is never stored; the console, the remote console, the messenger bots and API clients do not get it and keep answering in text. A session used from the web UI and from another surface in turn pays for it with a cache miss on the switching turn.
+- **Where.** Everywhere the web UI renders Markdown: answers, thinking, tool cards, the plan card and the documentation reader.
+- **Loading.** Mermaid and KaTeX are not part of **`app.js`**. They are separate files under **`/chunks/`** (content-hashed names, embedded in the binary like the rest of the SPA), fetched the first time a page shows a diagram or a formula and then cached by the browser for good. A chat with neither downloads nothing extra.
+- **Code.** **`ui/markdown/DiagramBlock.tsx`** (the block), **`ui/markdown/pictureRender.ts`** (Mermaid's configuration, the theme palette, the SVG sizing and the cache), **`ui/markdown/MathFormula.tsx`** (KaTeX), **`ui/markdown/mathDelimiters.ts`** (LaTeX delimiters and the dollar rule), **`ui/markdown/renderers.ts`** (the on-demand imports). Tests: **`ui/markdown/DiagramsAndMath.test.tsx`**, **`ui/markdown/mathDelimiters.test.ts`**, **`features/web_ui_diagrams.feature`**; browser check: **`npm run check:diagrams`** (see [Checking diagrams and formulas](#checking-diagrams-and-formulas)).
 
 ## Markdown line editor (shared)
 
@@ -1554,6 +1589,17 @@ CODDY_BIN=../../build/coddy npm run check:telegram
 ```
 
 `CODDY_BROWSER_PATH` points at an installed Chromium instead of Playwright's download, `CODDY_SCENARIOS` runs some of `bot`, `open`, `half`, `sheets`, `theme` and `signin`, `CODDY_SCREENSHOTS` writes the captures this page and the gateway page show, and `CODDY_E2E_KEEP=1` leaves the stand running for a look.
+
+### Checking diagrams and formulas
+
+Whether Mermaid draws, whether the browser decodes the picture, whether KaTeX's fonts arrive and whether a picture fits the transcript are facts of a real engine. **`external/ui/scripts/diagram-check.mjs`** opens **`src/diagram-check.html`**, a stand that mounts an answer with six Mermaid diagrams (a flowchart, a sequence diagram, a mindmap, a Gantt chart, a pie and a class diagram), an SVG, a broken diagram, inline and display formulas and a price from the real components against the real stylesheet, in all seven themes at **360** and **1280px**, and fails when a picture is not drawn or sticks out of the column, the broken diagram does not name its error, a formula is not typeset, KaTeX's font did not load, the price became a formula, the page scrolls sideways, Mermaid and KaTeX were not fetched on demand, or anything was logged as an error.
+
+```bash
+cd external/ui && npx vite --port 5247 &
+CODDY_UI_URL=http://127.0.0.1:5247 npm --prefix external/ui run check:diagrams
+```
+
+The stand also takes **`?theme=<id>`**, **`?lang=ru`** and **`?case=<name>`** (one answer of the stand) for screenshots. **`CODDY_BROWSER_PATH`** and **`CODDY_ENGINE=webkit`** work as in the checks above. It is **not part of `make test`**: run it when a change touches the Markdown renderers, their styles or the build of the chunks.
 
 ### Checking the transcript at every width of the grid
 

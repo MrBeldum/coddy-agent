@@ -4712,14 +4712,15 @@ export function App() {
       // not chosen: sent, it would pin the session to it (#362).
       const sendReasoning =
         reasoningSel !== "" && !(sid.trim() && reasoningImpliedRef.current);
-      if (yamlSel || sendReasoning || runSlug || heldVersion > 0) {
-        const meta: Record<string, string> = {};
-        if (yamlSel) meta.model = yamlSel;
-        if (sendReasoning) meta.reasoning = reasoningSel;
-        if (runSlug) meta.runPlanSlug = runSlug;
-        if (heldVersion > 0) meta.settingsVersion = String(heldVersion);
-        reqBody.metadata = meta;
-      }
+      // The web UI names itself, so the turn's system prompt says what it
+      // draws: Mermaid and SVG fences as pictures, LaTeX as formulas
+      // (external/httpserver/webui_prompt.go).
+      const meta: Record<string, string> = { surface: "webui" };
+      if (yamlSel) meta.model = yamlSel;
+      if (sendReasoning) meta.reasoning = reasoningSel;
+      if (runSlug) meta.runPlanSlug = runSlug;
+      if (heldVersion > 0) meta.settingsVersion = String(heldVersion);
+      reqBody.metadata = meta;
       // A permission mode picked before the chat had a session goes first,
       // as the command that asks for it; the server takes it off the text.
       if (!sid.trim() && pendingPermissionModeRef.current) {
