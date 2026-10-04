@@ -7,13 +7,14 @@
  * Outgoing, an event goes the way the client offers: the mobile and desktop
  * apps inject `window.TelegramWebviewProxy.postEvent(type, json)`, the oldest
  * Windows client `window.external.notify(json)`, and a web client
- * (web.telegram.org) runs the app in an iframe and reads
- * `postMessage(json, "*")` from it. Incoming, the apps call
- * `window.Telegram.WebView.receiveEvent(type, data)` (older builds
- * `window.TelegramGameProxy.receiveEvent` or `TelegramGameProxy_receiveEvent`),
- * and a web client posts `{eventType, eventData}` to the frame. Nothing here
- * is installed until a launch is detected, so an ordinary browser runs none of
- * it.
+ * (web.telegram.org) runs the app in an iframe and reads the `postMessage`
+ * it sends to the parent's origin (parentOrigin), never to any origin.
+ * Incoming, the apps call `window.Telegram.WebView.receiveEvent(type, data)`
+ * (older builds `window.TelegramGameProxy.receiveEvent` or
+ * `TelegramGameProxy_receiveEvent`), and a web client posts
+ * `{eventType, eventData}` to the frame, heard from the parent at that origin
+ * only. Nothing here is installed until a launch is detected, so an ordinary
+ * browser runs none of it.
  *
  * Every event is presentation (heights, insets, colours, the back button):
  * nothing that arrives here is trusted with anything else. `set_custom_style`,
@@ -49,11 +50,39 @@ function inIframe(win: Window): boolean {
   }
 }
 
+/** TELEGRAM_WEB_ORIGIN is where Telegram's own web clients run. */
+export const TELEGRAM_WEB_ORIGIN = "https://web.telegram.org";
+
+/**
+ * parentOrigin is the origin of the page that frames the app, the only one
+ * its events go to and come from: the browser's own record of it
+ * (location.ancestorOrigins, which Firefox lacks), else the page the frame was
+ * loaded from (document.referrer, unless the parent sends none), else
+ * Telegram Web's.
+ */
+export function parentOrigin(win: Window): string {
+  const ancestors = win.location.ancestorOrigins;
+  const recorded = ancestors && ancestors.length > 0 ? ancestors[0] : "";
+  if (recorded && recorded !== "null") {
+    return recorded;
+  }
+  try {
+    const origin = new URL(win.document.referrer).origin;
+    if (origin && origin !== "null") {
+      return origin;
+    }
+  } catch {
+    /* no referrer, or not an address */
+  }
+  return TELEGRAM_WEB_ORIGIN;
+}
+
 /** createTelegramBridge installs the receivers on win and returns the bridge. */
 export function createTelegramBridge(win: Window = window): TelegramBridge {
   const w = win as TelegramWindow;
   const handlers = new Map<string, Set<TelegramEventHandler>>();
   const framed = inIframe(win);
+  const parent = framed ? parentOrigin(win) : "";
 
   const receive = (type: string, data: unknown) => {
     const set = handlers.get(type);
@@ -82,7 +111,7 @@ export function createTelegramBridge(win: Window = window): TelegramBridge {
         return;
       }
       if (framed) {
-        win.parent.postMessage(JSON.stringify({ eventType: type, eventData }), "*");
+        win.parent.postMessage(JSON.stringify({ eventType: type, eventData }), parent);
       }
     } catch (err) {
       console.error("telegram: post", type, err);
@@ -90,7 +119,7 @@ export function createTelegramBridge(win: Window = window): TelegramBridge {
   };
 
   const onMessage = (ev: MessageEvent) => {
-    if (ev.source !== win.parent) {
+    if (ev.source !== win.parent || ev.origin !== parent) {
       return;
     }
     let msg: unknown = ev.data;

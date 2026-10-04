@@ -623,3 +623,15 @@ could not fail, an MCP test that left its stub running for an hour, and the
 godog steps of the web UI reading one Vitest run per file (the package went
 from 950 s to 214 s on a loaded machine).
 
+## 12. Code scanning
+
+Semgrep's `wildcard-postmessage-configuration` flagged the one alert this
+change added: the bridge posted its events to Telegram Web's frame with the
+target origin `"*"`, as the SDK does. It now addresses the parent's origin
+(`parentOrigin` in `bridge.ts`): the browser's record of it
+(`location.ancestorOrigins`), else the origin of the page the frame was
+loaded from (`document.referrer`), else `https://web.telegram.org`, and it
+takes a message from `window.parent` at that origin only. Firefox has no
+`ancestorOrigins`, so a parent there that sends no referrer is taken for
+Telegram Web, which is the parent a Mini App has in that browser.
+

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Composer } from "../chat/Composer";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { CODDY_UI_THEME_COOKIE } from "../theme/themeCookie";
-import { createTelegramBridge, versionAtLeast } from "./bridge";
+import { createTelegramBridge, parentOrigin, TELEGRAM_WEB_ORIGIN, versionAtLeast } from "./bridge";
 import { backButtonWanted, pressBack, TELEGRAM_BACK_LAYERS } from "./backButton";
 import {
   captureTelegramLaunch,
@@ -202,28 +202,42 @@ describe("bridge", () => {
     const parentPost = vi.fn();
     const fakeParent = { postMessage: parentPost } as unknown as Window;
     vi.spyOn(window, "parent", "get").mockReturnValue(fakeParent);
+    vi.spyOn(document, "referrer", "get").mockReturnValue("http://127.0.0.1:19890/chat");
     const bridge = createTelegramBridge(window);
     dispose = () => bridge.dispose();
     expect(JSON.parse(parentPost.mock.calls[0]?.[0] as string)).toEqual({
       eventType: "iframe_ready",
       eventData: { reload_supported: true },
     });
+    expect(parentPost.mock.calls[0]?.[1]).toBe("http://127.0.0.1:19890");
     bridge.post("web_app_expand");
     expect(JSON.parse(parentPost.mock.calls[1]?.[0] as string)).toEqual({ eventType: "web_app_expand", eventData: "" });
-    expect(parentPost.mock.calls[1]?.[1]).toBe("*");
+    expect(parentPost.mock.calls[1]?.[1]).toBe("http://127.0.0.1:19890");
 
     const seen: unknown[] = [];
     bridge.on("theme_changed", (d) => seen.push(d));
     const msg = JSON.stringify({ eventType: "theme_changed", eventData: { theme_params: { bg_color: "#ffffff" } } });
-    window.dispatchEvent(new MessageEvent("message", { data: msg, source: fakeParent }));
-    window.dispatchEvent(new MessageEvent("message", { data: msg, source: window }));
+    window.dispatchEvent(new MessageEvent("message", { data: msg, source: fakeParent, origin: "http://127.0.0.1:19890" }));
+    window.dispatchEvent(new MessageEvent("message", { data: msg, source: window, origin: "http://127.0.0.1:19890" }));
+    window.dispatchEvent(new MessageEvent("message", { data: msg, source: fakeParent, origin: "https://elsewhere.example" }));
     window.dispatchEvent(
       new MessageEvent("message", {
         data: JSON.stringify({ eventType: "set_custom_style", eventData: "body{display:none}" }),
         source: fakeParent,
+        origin: "http://127.0.0.1:19890",
       }),
     );
     expect(seen).toEqual([{ theme_params: { bg_color: "#ffffff" } }]);
+  });
+
+  test("the parent's origin is the browser's record of it, else the page the frame came from, else Telegram Web", () => {
+    const framedBy = (ancestors: string[] | undefined, referrer: string) =>
+      ({ location: { ancestorOrigins: ancestors }, document: { referrer } }) as unknown as Window;
+    expect(parentOrigin(framedBy(["https://web.telegram.org"], "http://127.0.0.1:19890/"))).toBe("https://web.telegram.org");
+    expect(parentOrigin(framedBy(undefined, "http://127.0.0.1:19890/chat?x=1"))).toBe("http://127.0.0.1:19890");
+    expect(parentOrigin(framedBy([], ""))).toBe(TELEGRAM_WEB_ORIGIN);
+    expect(parentOrigin(framedBy(["null"], "not an address"))).toBe(TELEGRAM_WEB_ORIGIN);
+    expect(TELEGRAM_WEB_ORIGIN).toBe("https://web.telegram.org");
   });
 
   test("versions compare part by part, and an unknown one is the oldest", () => {

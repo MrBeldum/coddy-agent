@@ -26,7 +26,8 @@ func TestWebUITelegramMiniAppFeature(t *testing.T) {
 		`^events go out through the client's proxy and come back through receiveEvent$`: {
 			"bridge the native apps' proxy carries events out and receiveEvent brings them in"},
 		`^in a web client's frame events go to the parent and only the parent is heard$`: {
-			"bridge in a web client's iframe events go to the parent, and only the parent is heard"},
+			"bridge in a web client's iframe events go to the parent, and only the parent is heard",
+			"bridge the parent's origin is the browser's record of it, else the page the frame came from, else Telegram Web"},
 		`^the window is expanded, swipes are off, the header takes the theme's colours and ready goes last$`: {
 			"the Mini App window the start sequence: requests, expand, swipes off, colours, back button, ready last",
 			"the Mini App window the header takes the theme's colours, again when the theme changes"},
