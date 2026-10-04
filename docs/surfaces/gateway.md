@@ -422,6 +422,7 @@ gateways:
   telegram:
     enable: true
     token: "123456:fake"            # any token; the fake accepts all of them
+    admins: [4242]                  # the page's user: /resume, approvals and settings are an admin's
 logger:
   levels:
     - component: gateway.telegram

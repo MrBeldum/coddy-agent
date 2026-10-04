@@ -398,7 +398,7 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	leading := leadingCommand(stripMention(text, b.botName), b.botName)
 	textChangesSettings := changesSettings(msg) || commandChangesSettings(leading)
 	if ((isGroupChat(msg.Chat) && textChangesSettings) || isCommand(msg, "resume") || leading == "resume") && !b.cfg.IsAdmin(userID) {
-		b.log.Debug("telegram: update refused", "reason", "settings are admin-only in a group", "user", userID, "chat", chatID)
+		b.log.Debug("telegram: update refused", "reason", "admin-only command", "user", userID, "chat", chatID)
 		b.reply(bot, chatID, msg.MessageID, adminOnlyNote)
 		return
 	}
