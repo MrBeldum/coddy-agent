@@ -301,6 +301,14 @@ func UISchemaMap() map[string]interface{} {
 			"items": objectSchema("", "", telegramChatProps,
 				[]string{"chat_id", "isolation", "access"}, []string{"chat_id"}),
 		},
+		"mini_app": objectSchema("Mini App",
+			"Open this web UI as the bot's Telegram Mini App: the menu button and /app open it on the chat's own conversation. Telegram opens Mini Apps over https only: publish the web UI behind a TLS proxy and keep sign-in on.",
+			map[string]interface{}{
+				"url": strProp("Web UI address",
+					"The public https address the web UI is served at, for example https://coddy.example.com/. No fragment. Empty: the bot offers no Mini App and leaves a menu button set in @BotFather alone."),
+				"menu_button": boolProp("Menu button",
+					"Make the bot's menu button open the web UI. Turned off or with the address emptied, the bot puts back the menu button it set itself."),
+			}, []string{"url", "menu_button"}, nil),
 	}
 
 	props := map[string]interface{}{
@@ -683,7 +691,7 @@ func UISchemaMap() map[string]interface{} {
 		"gateways": objectSchema("Messenger gateways", "Telegram bot gateway (requires the gateway or gateway.telegram build tag).",
 			map[string]interface{}{
 				"telegram": objectSchema("Telegram", "Telegram bot adapter settings.", telegramProps,
-					[]string{"enable", "token", "rich_messages", "proxy", "admins", "default_access", "default_isolation", "user_groups", "chats"},
+					[]string{"enable", "token", "rich_messages", "proxy", "admins", "default_access", "default_isolation", "user_groups", "chats", "mini_app"},
 					nil),
 			},
 			[]string{"telegram"},

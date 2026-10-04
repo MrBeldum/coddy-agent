@@ -43,6 +43,9 @@ gateways:
       - chat_id: -100123
         isolation: "individual"
         access: "all"
+    mini_app:
+      url: "https://coddy.example.com/"
+      menu_button: false
 `
 	p := filepath.Join(home, "config.yaml")
 	if err := os.WriteFile(p, []byte(yml), 0o644); err != nil {
@@ -94,6 +97,10 @@ gateways:
 		t.Fatalf("chats: got %+v", tg.Chats)
 	}
 
+	if tg.MiniApp.URL != "https://coddy.example.com/" || tg.MiniApp.MenuButton == nil || *tg.MiniApp.MenuButton {
+		t.Fatalf("mini_app: got %+v", tg.MiniApp)
+	}
+
 	// And the YAML that gets written to disk must still contain the secret + flag.
 	yb, err := config.MarshalConfigYAML(cfg2)
 	if err != nil {
@@ -126,7 +133,7 @@ func TestUISchema_HasTelegramGatewayFields(t *testing.T) {
 	if !ok {
 		t.Fatal("telegram has no properties")
 	}
-	for _, key := range []string{"enable", "token", "rich_messages", "admins", "default_access", "default_isolation", "user_groups", "chats"} {
+	for _, key := range []string{"enable", "token", "rich_messages", "admins", "default_access", "default_isolation", "user_groups", "chats", "mini_app"} {
 		if _, ok := tgProps[key].(map[string]interface{}); !ok {
 			t.Fatalf("telegram schema missing property %q", key)
 		}

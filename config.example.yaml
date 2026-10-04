@@ -554,6 +554,13 @@ tools:
 #       - chat_id: -1009876543210
 #         isolation: "admin"      # only respond to admin users
 #         access: "admins"
+#     mini_app:
+#       # The web UI as the bot's Mini App: the menu button opens it and /app
+#       # opens the chat's own conversation there. Telegram opens https only, so
+#       # publish the web UI behind a TLS proxy with sign-in on
+#       # (`coddy serve set-password`): the bot does not advertise an open one.
+#       url: "https://coddy.example.com/"
+#       menu_button: true             # default; false leaves the menu button to @BotFather
 
 logger:
   level: "info"

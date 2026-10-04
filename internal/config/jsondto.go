@@ -53,6 +53,13 @@ type TelegramGatewayJSON struct {
 	DefaultIsolation string                  `json:"default_isolation,omitempty"`
 	UserGroups       []TelegramUserGroupJSON `json:"user_groups,omitempty"`
 	Chats            []TelegramChatJSON      `json:"chats,omitempty"`
+	MiniApp          TelegramMiniAppJSON     `json:"mini_app"`
+}
+
+// TelegramMiniAppJSON mirrors TelegramMiniAppConfig.
+type TelegramMiniAppJSON struct {
+	URL        string `json:"url,omitempty"`
+	MenuButton *bool  `json:"menu_button,omitempty"`
 }
 
 // TelegramUserGroupJSON mirrors TelegramUserGroup.
@@ -637,6 +644,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 		Admins:           append([]int64(nil), tg.Admins...),
 		DefaultAccess:    string(tg.DefaultAccess),
 		DefaultIsolation: string(tg.DefaultIsolation),
+		MiniApp:          TelegramMiniAppJSON{URL: tg.MiniApp.URL, MenuButton: cloneBoolPtr(tg.MiniApp.MenuButton)},
 	}
 	for _, g := range tg.UserGroups {
 		tgJSON.UserGroups = append(tgJSON.UserGroups, TelegramUserGroupJSON{
@@ -850,6 +858,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		Admins:           append([]int64(nil), jt.Admins...),
 		DefaultAccess:    AccessLevel(jt.DefaultAccess),
 		DefaultIsolation: IsolationMode(jt.DefaultIsolation),
+		MiniApp:          TelegramMiniAppConfig{URL: jt.MiniApp.URL, MenuButton: cloneBoolPtr(jt.MiniApp.MenuButton)},
 	}
 	for _, g := range jt.UserGroups {
 		tg.UserGroups = append(tg.UserGroups, TelegramUserGroup{
