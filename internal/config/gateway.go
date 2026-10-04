@@ -1,7 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -104,6 +107,61 @@ type TelegramGatewayConfig struct {
 
 	// Chats holds per-chat overrides for isolation and access.
 	Chats []TelegramChatConfig `yaml:"chats"`
+
+	// MiniApp makes the web UI of this coddy serve the bot's Mini App.
+	MiniApp TelegramMiniAppConfig `yaml:"mini_app"`
+}
+
+// TelegramMiniAppConfig makes the web UI the bot's Mini App: Telegram opens it
+// from the bot's menu button and from the button /app answers with, on the
+// conversation of that chat. The SPA adapts to Telegram by itself; these keys
+// only tell the bot where the web UI is.
+type TelegramMiniAppConfig struct {
+	// URL is the public https address the web UI is served at, behind a TLS
+	// proxy; plain http only on a loopback host, for the offline stand.
+	// Empty: the bot offers no Mini App and leaves the menu button alone.
+	URL string `yaml:"url"`
+	// MenuButton makes the bot's menu button open URL. Nil means true.
+	MenuButton *bool `yaml:"menu_button"`
+}
+
+// MenuButtonEnabled reports whether the bot's menu button should open the
+// Mini App: a URL is set and menu_button is not false.
+func (m TelegramMiniAppConfig) MenuButtonEnabled() bool {
+	return strings.TrimSpace(m.URL) != "" && (m.MenuButton == nil || *m.MenuButton)
+}
+
+// validateMiniAppURL checks the address Telegram is to open as a Mini App:
+// absolute https (Telegram opens nothing else), plain http only on a loopback
+// host, no user info, and no fragment - Telegram puts its launch parameters
+// there. Empty is fine: no Mini App.
+func validateMiniAppURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return fmt.Errorf("%q is not an absolute https address", raw)
+	}
+	if u.Scheme == "http" && !isLoopbackHostname(u.Hostname()) {
+		return fmt.Errorf("%q: Telegram opens a Mini App over https only (plain http is accepted for a loopback host, for the offline stand)", raw)
+	}
+	if u.User != nil {
+		return errors.New("the address must not carry a user name or password")
+	}
+	if u.Fragment != "" || strings.Contains(raw, "#") {
+		return errors.New("the address must not have a fragment: Telegram puts its launch parameters there")
+	}
+	return nil
+}
+
+// isLoopbackHostname reports whether host is localhost or a loopback address.
+func isLoopbackHostname(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // GatewayUserGroup is a named set of messenger user IDs, the same shape in
@@ -132,6 +190,7 @@ func (t *TelegramGatewayConfig) Normalize() {
 	t.Proxy = normalizeProxySetting(t.Proxy)
 	t.DefaultAccess = AccessLevel(strings.TrimSpace(string(t.DefaultAccess)))
 	t.DefaultIsolation = IsolationMode(strings.TrimSpace(string(t.DefaultIsolation)))
+	t.MiniApp.URL = strings.TrimSpace(t.MiniApp.URL)
 }
 
 // ApplyDefaults fills zero values with safe defaults.
@@ -164,6 +223,9 @@ func (t *TelegramGatewayConfig) Validate() error {
 	}
 	if err := validateProxySetting(t.Proxy); err != nil {
 		return fmt.Errorf("gateways.telegram.%w", err)
+	}
+	if err := validateMiniAppURL(strings.TrimSpace(t.MiniApp.URL)); err != nil {
+		return fmt.Errorf("gateways.telegram.mini_app.url: %w", err)
 	}
 	return nil
 }

@@ -192,6 +192,47 @@ func (r *runner) pachcaProbes() []probe {
 	}}
 }
 
+// miniApp says when the bot will not advertise the web UI it is told to offer
+// as its Mini App: the web UI of this process asks for no sign-in.
+func (r *runner) miniApp() {
+	tg := &r.req.Cfg.Gateways.Telegram
+	if !tg.Enabled || strings.TrimSpace(tg.MiniApp.URL) == "" || !r.req.WebUIOpen {
+		return
+	}
+	const path = "gateways.telegram.mini_app"
+	r.rep.add(r.check(StatusWarning, path, path+".url",
+		"the bot will not advertise the web UI as its Mini App: the web UI asks for no sign-in, and its menu button is shown to everybody who opens the bot",
+		"run `coddy serve set-password` (or set "+httpserver.LoginUserEnvVar+" / "+httpserver.LoginPasswordEnvVar+", or a token), or set httpserver.allow_insecure: true to publish it open"))
+}
+
+// miniAppProbes asks the address the bot gives Telegram for the web UI. It is
+// the operator's public address, often behind a TLS proxy this machine cannot
+// always reach itself, so an answer that is not the web UI is a warning.
+func (r *runner) miniAppProbes() []probe {
+	tg := &r.req.Cfg.Gateways.Telegram
+	target := strings.TrimSpace(tg.MiniApp.URL)
+	if !tg.Enabled || target == "" {
+		return nil
+	}
+	return []probe{func(ctx context.Context) []Check {
+		const path = "gateways.telegram.mini_app.url"
+		status, body, err := r.get(ctx, &http.Client{}, target, map[string]string{"Accept": "text/html"}, "")
+		switch {
+		case err != nil:
+			return []Check{r.check(StatusWarning, path, path, fmt.Sprintf("cannot reach %s from this machine: %s", target, shortErr(err)),
+				"Telegram opens it from the person's phone: check the address, its TLS certificate and the proxy in front of coddy serve")}
+		case status != http.StatusOK:
+			return []Check{r.check(StatusWarning, path, path, fmt.Sprintf("%s answered HTTP %d", target, status),
+				"the address should serve the web UI of coddy serve")}
+		case !strings.Contains(string(body), `id="root"`):
+			return []Check{r.check(StatusWarning, path, path, fmt.Sprintf("%s answered, but not with the web UI", target),
+				"the address should serve the web UI of coddy serve (built with the ui tag)")}
+		default:
+			return []Check{r.check(StatusOK, path, path, "the web UI answers at "+target, "")}
+		}
+	}}
+}
+
 // mcpRemoteProbes asks every remote MCP server of <home>/mcp.json for any
 // HTTP answer. Project-local .coddy/mcp.json declarations are not contacted:
 // they sit behind the workspace trust gate, and a dry run must not be the

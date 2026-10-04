@@ -238,6 +238,9 @@ func UISchemaMap() map[string]interface{} {
 		},
 		"reasoning_default": strProp("Default reasoning level",
 			"Reasoning level pre-selected for new chats with this model. Must be one of the resolved reasoning levels; ignored otherwise."),
+		"allow_reasoning_off": boolPropDefault("Allow disabling reasoning",
+			"Expose Off in the reasoning selector for this model. Enable it only when this provider/model deployment honours Coddy's provider-specific request that disables reasoning; Coddy cannot verify that capability automatically.",
+			false),
 		// The only boolean here that defaults to true when the key is absent, so the
 		// schema has to say so: the form seeds new entries from schema defaults and
 		// renders an unset switch from them.
@@ -301,6 +304,14 @@ func UISchemaMap() map[string]interface{} {
 			"items": objectSchema("", "", telegramChatProps,
 				[]string{"chat_id", "isolation", "access"}, []string{"chat_id"}),
 		},
+		"mini_app": objectSchema("Mini App",
+			"Open this web UI as the bot's Telegram Mini App: the menu button and /app open it on the chat's own conversation. Telegram opens Mini Apps over https only: publish the web UI behind a TLS proxy and keep sign-in on.",
+			map[string]interface{}{
+				"url": strProp("Web UI address",
+					"The public https address the web UI is served at, for example https://coddy.example.com/. No fragment. Empty: the bot offers no Mini App and leaves a menu button set in @BotFather alone."),
+				"menu_button": boolProp("Menu button",
+					"Make the bot's menu button open the web UI. Turned off, with the address emptied or while the web UI asks for no sign-in, the bot puts back the button it replaced, as long as that button still opens the address the bot set."),
+			}, []string{"url", "menu_button"}, nil),
 	}
 
 	pachcaUserGroupProps := map[string]interface{}{
@@ -372,7 +383,7 @@ func UISchemaMap() map[string]interface{} {
 			"title":       "Logical models",
 			"description": "Named model entries the agent and UI can select; ids reference provider prefixes.",
 			"items": objectSchema("", "", modelProps,
-				[]string{"model", "max_tokens", "temperature", "max_context_tokens", "multimodal", "stream", "reasoning_levels", "reasoning_default"},
+				[]string{"model", "max_tokens", "temperature", "max_context_tokens", "multimodal", "stream", "reasoning_levels", "reasoning_default", "allow_reasoning_off"},
 				[]string{"model"}),
 		},
 		"agent": objectSchema("ReAct loop", "Defaults for the main agent loop (model id and safety caps).",
@@ -738,7 +749,7 @@ func UISchemaMap() map[string]interface{} {
 		"gateways": objectSchema("Messenger gateways", "Telegram and Pachca bots (require the gateway build tag, or gateway.telegram / gateway.pachca for one of them).",
 			map[string]interface{}{
 				"telegram": objectSchema("Telegram", "Telegram bot adapter settings.", telegramProps,
-					[]string{"enable", "token", "rich_messages", "proxy", "admins", "default_access", "default_isolation", "user_groups", "chats"},
+					[]string{"enable", "token", "rich_messages", "proxy", "admins", "default_access", "default_isolation", "user_groups", "chats", "mini_app"},
 					nil),
 				"pachca": objectSchema("Pachca", "Pachca integration bot settings.", pachcaProps,
 					[]string{"enable", "token", "proxy", "poll_interval_seconds", "admins", "default_access", "default_isolation", "user_groups", "chats"},

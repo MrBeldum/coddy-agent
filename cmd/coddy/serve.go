@@ -183,7 +183,8 @@ func runServe(args []string) error {
 	// A dry run resolves the subsystems and their addresses as a start would,
 	// probes them together with everything the file names, and leaves.
 	if *dryRun {
-		return runServeDryRun(cli, *testConfig, applyProcessOverrides, httpListenAddr, swarmListenAddr)
+		return runServeDryRun(cli, *testConfig, applyProcessOverrides, httpListenAddr, swarmListenAddr,
+			len(outOfBandTokens(*authToken, httpserver.TokenEnvVar)) > 0)
 	}
 	paths, err := config.Resolve(cli)
 	if err != nil {
@@ -401,16 +402,41 @@ func applySubsystemFlags(fs *flag.FlagSet, cfg *config.Config, f subsystemFlags)
 	})
 }
 
+// httpAuth says which credentials the API will accept: a bearer token (from
+// the file, --auth-token or the environment) and the web sign-in (an account
+// in the file or the environment, unless the file turns it off).
+func httpAuth(cfg *config.Config, extraAuth, extraLogin bool) (token, login bool) {
+	token = extraAuth || len(cfg.HTTPServer.EffectiveAuthTokens()) > 0
+	// An `enable: true` with no account behind it is not a sign-in: the server
+	// refuses to start on it, and announcing one here would be the last thing
+	// the operator read before that error.
+	login = !cfg.HTTPServer.Login.IsExplicitlyDisabled() &&
+		(extraLogin || cfg.HTTPServer.Login.HasAccount())
+	return token, login
+}
+
+// webUIAccess is what the web UI of this process asks of a visitor, the
+// question the Telegram bot asks before it hands out the address of the web
+// UI (gateways.telegram.mini_app): its menu button is shown to everybody who
+// opens the bot.
+func webUIAccess(cfg *config.Config, extraAuth, extraLogin bool) gateway.WebUIAccess {
+	if !httpserver.Available || !cfg.HTTPServer.IsEnabled() {
+		return gateway.WebUIElsewhere
+	}
+	if token, login := httpAuth(cfg, extraAuth, extraLogin); token || login {
+		return gateway.WebUIGated
+	}
+	if cfg.HTTPServer.AllowInsecure {
+		return gateway.WebUIOpenByChoice
+	}
+	return gateway.WebUIOpen
+}
+
 // httpAuthSummary names the credentials the API will accept, because "no auth"
 // next to an address on a network is the line an operator needs to read, and a
 // server closed with only one of the two is a thing worth being able to see.
 func httpAuthSummary(cfg *config.Config, extraAuth, extraLogin bool) string {
-	token := extraAuth || len(cfg.HTTPServer.EffectiveAuthTokens()) > 0
-	// An `enable: true` with no account behind it is not a sign-in: the server
-	// refuses to start on it, and announcing one here would be the last thing
-	// the operator read before that error.
-	login := !cfg.HTTPServer.Login.IsExplicitlyDisabled() &&
-		(extraLogin || cfg.HTTPServer.Login.HasAccount())
+	token, login := httpAuth(cfg, extraAuth, extraLogin)
 	switch {
 	case token && login:
 		return "bearer auth, web sign-in"
@@ -495,11 +521,14 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			// A bot is a client of somebody else's server, so it can be rebuilt
 			// in place: that is how a token rotated from the settings screen
 			// takes effect without anyone reaching the machine.
-			Fingerprint: gatewayFingerprint,
+			Fingerprint: gateway.Fingerprint,
 			Run: func(ctx context.Context, cfg *config.Config) error {
 				return gateway.ServeTelegram(ctx, gateway.Options{
 					Cfg: cfg, Mgr: rt.Mgr, Log: rt.Log,
 					DefaultCWD: rt.Paths.CWD, Mirror: rt, Prompts: rt, Wakes: rt,
+					WebUI: func(c *config.Config) gateway.WebUIAccess {
+						return webUIAccess(c, len(deps.httpAuthTokens) > 0, deps.httpLogin.IsSet())
+					},
 				})
 			},
 		},
@@ -512,7 +541,7 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			Available:     gateway.PachcaAvailable,
 			NeedsSessions: true,
 			Enabled:       func(c *config.Config) bool { return c.Gateways.Pachca.Enabled },
-			Fingerprint:   pachcaFingerprint,
+			Fingerprint:   gateway.PachcaFingerprint,
 			Run: func(ctx context.Context, cfg *config.Config) error {
 				return gateway.ServePachca(ctx, gateway.Options{
 					Cfg: cfg, Mgr: rt.Mgr, Log: rt.Log,
@@ -586,44 +615,6 @@ func swarmFingerprint(c *config.Config) string {
 		return ""
 	}
 	return string(raw)
-}
-
-// gatewayFingerprint is everything a rebuilt bot would read differently.
-func gatewayFingerprint(c *config.Config) string {
-	if c == nil {
-		return ""
-	}
-	tg := c.Gateways.Telegram
-	return strings.Join([]string{
-		strconv.FormatBool(tg.Enabled),
-		tg.EffectiveToken(),
-		tg.Proxy,
-		strconv.FormatBool(tg.RichMessages),
-		string(tg.DefaultAccess),
-		string(tg.DefaultIsolation),
-		fmt.Sprint(tg.Admins),
-		fmt.Sprint(tg.UserGroups),
-		fmt.Sprint(tg.Chats),
-	}, "\x00")
-}
-
-// pachcaFingerprint is everything a rebuilt Pachca bot would read differently.
-func pachcaFingerprint(c *config.Config) string {
-	if c == nil {
-		return ""
-	}
-	pc := c.Gateways.Pachca
-	return strings.Join([]string{
-		strconv.FormatBool(pc.Enabled),
-		pc.EffectiveToken(),
-		pc.Proxy,
-		strconv.Itoa(pc.PollIntervalSeconds),
-		string(pc.DefaultAccess),
-		string(pc.DefaultIsolation),
-		fmt.Sprint(pc.Admins),
-		fmt.Sprint(pc.UserGroups),
-		fmt.Sprint(pc.Chats),
-	}, "\x00")
 }
 
 // schedulerFingerprint is everything a rebuilt daemon would read differently.

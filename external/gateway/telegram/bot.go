@@ -87,6 +87,10 @@ type Bot struct {
 	// wakeSurfaces is where the bot offers to run the woken turns of its
 	// chats' sessions (wake.go).
 	wakeSurfaces agent.WakeSurfaces
+
+	// webUIGate decides whether the bot may hand out the web UI's address
+	// (miniapp.go); nil allows it.
+	webUIGate func() (allowed bool, note string)
 }
 
 // New creates a Bot. cwd is the default working directory for agent sessions.
@@ -155,20 +159,10 @@ func (b *Bot) Start(ctx context.Context) error {
 		defer withdraw()
 	}
 
-	if _, err := bot.Request(tgbotapi.NewSetMyCommands(
-		tgbotapi.BotCommand{Command: "start", Description: "Greeting and quick intro"},
-		tgbotapi.BotCommand{Command: "help", Description: "Show available commands"},
-		tgbotapi.BotCommand{Command: "model", Description: "Switch LLM model"},
-		tgbotapi.BotCommand{Command: "mcp", Description: "List and toggle MCP servers"},
-		tgbotapi.BotCommand{Command: "agent", Description: "Agent mode: every tool (add --once for one message)"},
-		tgbotapi.BotCommand{Command: "plan", Description: "Plan mode: read-only, plans the work"},
-		tgbotapi.BotCommand{Command: "ask", Description: "Ask mode: read-only answers"},
-		tgbotapi.BotCommand{Command: "context", Description: "Show context window usage"},
-		tgbotapi.BotCommand{Command: "resume", Description: "Continue another session (pick from the list or name it)"},
-		tgbotapi.BotCommand{Command: "clear", Description: "Start a new session (forget context)"},
-	)); err != nil {
+	if _, err := bot.Request(tgbotapi.NewSetMyCommands(botCommands(b.cfg)...)); err != nil {
 		b.log.Warn("telegram: set commands", "err", err)
 	}
+	b.syncMenuButton(bot)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 30
@@ -204,6 +198,49 @@ func (b *Bot) Start(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// botCommands is the command list setMyCommands registers: /app only while
+// the web UI is the bot's Mini App.
+func botCommands(cfg *config.TelegramGatewayConfig) []tgbotapi.BotCommand {
+	cmds := []tgbotapi.BotCommand{
+		{Command: "start", Description: "Greeting and quick intro"},
+		{Command: "help", Description: "Show available commands"},
+		{Command: "model", Description: "Switch LLM model"},
+		{Command: "mcp", Description: "List and toggle MCP servers"},
+		{Command: "agent", Description: "Agent mode: every tool (add --once for one message)"},
+		{Command: "plan", Description: "Plan mode: read-only, plans the work"},
+		{Command: "ask", Description: "Ask mode: read-only answers"},
+		{Command: "context", Description: "Show context window usage"},
+		{Command: "resume", Description: "Continue another session (pick from the list or name it)"},
+	}
+	if cfg.MiniApp.URL != "" {
+		cmds = append(cmds, tgbotapi.BotCommand{Command: "app", Description: "Open this conversation in the web UI"})
+	}
+	return append(cmds, tgbotapi.BotCommand{Command: "clear", Description: "Start a new session (forget context)"})
+}
+
+// helpText is the answer to /help; /app is listed only while the web UI is
+// the bot's Mini App.
+func helpText(cfg *config.TelegramGatewayConfig, botName string) string {
+	app := ""
+	if cfg.MiniApp.URL != "" {
+		app = "/app — open this conversation in the web UI\n"
+	}
+	return "*Available commands:*\n\n" +
+		"/start — greeting and quick intro\n" +
+		"/model — switch LLM model (/model <id> sets it directly)\n" +
+		"/mcp — list and toggle approved MCP servers\n" +
+		"/agent, /plan, /ask — switch the session mode\n" +
+		"/think, /nothink, /reasoning <level> — thinking and reasoning level\n" +
+		"Add --once or --count=N to change a setting for the next messages only, and write the message after it.\n" +
+		"/context — show context window usage\n" +
+		"/resume [id or title] — continue another session\n" +
+		app +
+		"/clear — start a new session (forgets previous context)\n" +
+		"/help — show this message\n\n" +
+		"Reply to a message to ask about it.\n" +
+		"In group chats mention me (@" + botName + ") or reply to my message to talk to me; commands there need the mention too (/clear@" + botName + ")."
 }
 
 // apiEndpointSuffix is the path template the Bot API library formats the
@@ -365,20 +402,7 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 		return
 	}
 	if isCommand(msg, "help") {
-		b.reply(bot, chatID, msg.MessageID,
-			"*Available commands:*\n\n"+
-				"/start — greeting and quick intro\n"+
-				"/model — switch LLM model (/model <id> sets it directly)\n"+
-				"/mcp — list and toggle approved MCP servers\n"+
-				"/agent, /plan, /ask — switch the session mode\n"+
-				"/think, /nothink, /reasoning <level> — thinking and reasoning level\n"+
-				"Add --once or --count=N to change a setting for the next messages only, and write the message after it.\n"+
-				"/context — show context window usage\n"+
-				"/resume [id or title] — continue another session\n"+
-				"/clear — start a new session (forgets previous context)\n"+
-				"/help — show this message\n\n"+
-				"Reply to a message to ask about it.\n"+
-				"In group chats mention me (@"+b.botName+") or reply to my message to talk to me; commands there need the mention too (/clear@"+b.botName+").")
+		b.reply(bot, chatID, msg.MessageID, helpText(b.cfg, b.botName))
 		return
 	}
 	if isCommand(msg, "model") && strings.TrimSpace(msg.CommandArguments()) == "" {
@@ -395,6 +419,10 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	}
 	if isCommand(msg, "resume") {
 		b.handleResumeCommand(ctx, bot, msg, key)
+		return
+	}
+	if isCommand(msg, "app") {
+		b.handleAppCommand(bot, msg, key)
 		return
 	}
 

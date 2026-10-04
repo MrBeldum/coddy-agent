@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 
+	"github.com/EvilFreelancer/coddy-agent/external/gateway"
+	"github.com/EvilFreelancer/coddy-agent/external/httpserver"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 	"github.com/EvilFreelancer/coddy-agent/internal/serve"
 )
@@ -88,25 +90,25 @@ func TestGatewayFingerprintsAreIndependent(t *testing.T) {
 		c.Gateways.Pachca = config.PachcaGatewayConfig{Enabled: true, Token: "pc"}
 		return c
 	}
-	tg, pc := gatewayFingerprint(base()), pachcaFingerprint(base())
+	tg, pc := gateway.Fingerprint(base()), gateway.PachcaFingerprint(base())
 
 	moved := base()
 	moved.Gateways.Pachca.Token = "pc2"
 	moved.Gateways.Pachca.PollIntervalSeconds = 5
 	moved.Gateways.Pachca.Chats = []config.GatewayChatConfig{{ChatID: 1, Access: config.AccessAdmins}}
-	if gatewayFingerprint(moved) != tg {
+	if gateway.Fingerprint(moved) != tg {
 		t.Fatal("a Pachca change moved the Telegram fingerprint")
 	}
-	if pachcaFingerprint(moved) == pc {
+	if gateway.PachcaFingerprint(moved) == pc {
 		t.Fatal("a Pachca change did not move the Pachca fingerprint")
 	}
 
 	moved = base()
 	moved.Gateways.Telegram.Token = "tg2"
-	if pachcaFingerprint(moved) != pc {
+	if gateway.PachcaFingerprint(moved) != pc {
 		t.Fatal("a Telegram change moved the Pachca fingerprint")
 	}
-	if pachcaFingerprint(nil) != "" {
+	if gateway.PachcaFingerprint(nil) != "" {
 		t.Fatal("a nil config has a fingerprint")
 	}
 }
@@ -134,5 +136,36 @@ func TestServeRunsThePachcaBotAsASubsystemOfItsOwn(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no pachca subsystem")
+	}
+}
+
+// The Telegram bot hands out the web UI's address only behind a credential, or
+// when the operator said so; a web UI this process does not serve is not its
+// to judge.
+func TestWebUIAccessDecidesWhatTheBotMayAdvertise(t *testing.T) {
+	off := false
+	open := &config.Config{}
+	if httpserver.Available {
+		if got := webUIAccess(open, false, false); got != gateway.WebUIOpen {
+			t.Fatalf("no credentials: %v, want WebUIOpen", got)
+		}
+		if got := webUIAccess(open, true, false); got != gateway.WebUIGated {
+			t.Fatalf("--auth-token: %v", got)
+		}
+		if got := webUIAccess(open, false, true); got != gateway.WebUIGated {
+			t.Fatalf("an account from the environment: %v", got)
+		}
+		withAccount := &config.Config{HTTPServer: config.HTTPServerConfig{Login: config.HTTPLoginConfig{User: "op", PasswordHash: "$argon2id$x"}}}
+		if got := webUIAccess(withAccount, false, false); got != gateway.WebUIGated {
+			t.Fatalf("an account in the file: %v", got)
+		}
+		insecure := &config.Config{HTTPServer: config.HTTPServerConfig{AllowInsecure: true}}
+		if got := webUIAccess(insecure, false, false); got != gateway.WebUIOpenByChoice {
+			t.Fatalf("allow_insecure: %v", got)
+		}
+	}
+	elsewhere := &config.Config{HTTPServer: config.HTTPServerConfig{Enabled: &off}}
+	if got := webUIAccess(elsewhere, false, false); got != gateway.WebUIElsewhere {
+		t.Fatalf("httpserver.enable: false: %v", got)
 	}
 }

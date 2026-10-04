@@ -1586,6 +1586,11 @@ test("the logical model form groups its fields: model, generation, reasoning", a
               type: "string",
               title: "Default reasoning level",
             },
+            allow_reasoning_off: {
+              type: "boolean",
+              title: "Allow disabling reasoning",
+              default: false,
+            },
           },
           "x-coddy-property-order": [
             "model",
@@ -1596,6 +1601,7 @@ test("the logical model form groups its fields: model, generation, reasoning", a
             "stream",
             "reasoning_levels",
             "reasoning_default",
+            "allow_reasoning_off",
           ],
         },
       },
@@ -1626,6 +1632,7 @@ test("the logical model form groups its fields: model, generation, reasoning", a
   const reasoning = screen.getByTestId("settings-group-reasoning");
   expect(reasoning.textContent).toContain("Reasoning levels");
   expect(reasoning.textContent).toContain("Default reasoning level");
+  expect(reasoning.textContent).toContain("Allow disabling reasoning");
 });
 
 // The queue mode answers what Enter does with a message written during a

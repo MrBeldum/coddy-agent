@@ -31,6 +31,9 @@ export const messagesEn: Record<string, string> = {
     "Sign-in is switched on but no account is configured. Run `coddy serve set-password` on the server.",
   "auth.signIn.crossSite": "That request did not come from this page.",
   "auth.signIn.failed": "Sign-in failed ({status}).",
+  "auth.signIn.notKept":
+    "The server accepted the sign-in, but this browser did not keep it in this frame, because the page is embedded in another site such as Telegram Web.",
+  "auth.signIn.openInTab": "Open Coddy in a tab of its own",
   "auth.signOut.action": "Sign out",
   "auth.signOut.tooltipUser": "Sign out ({user})",
 
@@ -384,6 +387,10 @@ export const messagesEn: Record<string, string> = {
     "Reasoning level pre-selected for new chats with this model. Must be one of the resolved reasoning levels; ignored otherwise.",
   "settings.schema.models.reasoning_default.ph":
     "medium when offered, else the first level",
+  "settings.schema.models.allow_reasoning_off.label":
+    "Allow disabling reasoning",
+  "settings.schema.models.allow_reasoning_off.desc":
+    "Show Off in this model's reasoning selector. Enable it only when this provider/model deployment honours Coddy's provider-specific request that disables reasoning; Coddy cannot verify that capability automatically.",
   "settings.schema.models.stream.label": "Stream responses",
   "settings.schema.models.stream.desc":
     "Leave on to receive the answer token by token over SSE. Turn off to send one blocking request and wait for the whole answer, for servers or proxies that handle event streams badly; the transcript then fills in at once instead of typing out. Not available for codex models, whose backend is streaming-only.",
