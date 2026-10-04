@@ -37,14 +37,23 @@ def list_rule(directory: Path) -> Path:
     return path
 
 
-def run_pretool(module, rules_dir: Path, state_dir: Path, tool_input: dict) -> str:
+def always_rule(directory: Path) -> Path:
+    path = directory / "always.mdc"
+    path.write_text(
+        "---\n"
+        "description: Always-on rule\n"
+        "alwaysApply: true\n"
+        "---\n\n"
+        "Always follow the repository workflow.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def run_hook(module, rules_dir: Path, state_dir: Path, payload: dict) -> str:
     module.RULES_DIR = rules_dir
     module.STATE_DIR = state_dir
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "session_id": "provider-proxy-case",
-        "tool_input": tool_input,
-    }
+    payload.setdefault("session_id", "provider-proxy-case")
     old_stdin = sys.stdin
     output = io.StringIO()
     try:
@@ -55,6 +64,15 @@ def run_pretool(module, rules_dir: Path, state_dir: Path, tool_input: dict) -> s
         sys.stdin = old_stdin
     rendered = json.loads(output.getvalue())
     return rendered["hookSpecificOutput"]["additionalContext"]
+
+
+def run_pretool(module, rules_dir: Path, state_dir: Path, tool_input: dict) -> str:
+    return run_hook(
+        module,
+        rules_dir,
+        state_dir,
+        {"hook_event_name": "PreToolUse", "tool_input": tool_input},
+    )
 
 
 class AdapterContractTest(unittest.TestCase):
@@ -84,6 +102,24 @@ class AdapterContractTest(unittest.TestCase):
                 )
                 self.assertIn("Every provider request follows its proxy.", context)
 
+    def test_session_start_preamble_is_grammatical(self):
+        codex = load_module("codex_preamble", CODEX)
+        zcode = load_module("zcode_preamble", ZCODE)
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            root = Path(tmp)
+            rules_dir = root / "rules"
+            rules_dir.mkdir()
+            always_rule(rules_dir)
+            for name, module in (("Codex", codex), ("ZCode", zcode)):
+                context = run_hook(
+                    module,
+                    rules_dir,
+                    root / f"state-{name.lower()}",
+                    {"hook_event_name": "SessionStart", "source": "startup"},
+                )
+                self.assertNotIn("They are The", context)
+                self.assertIn(f"The {name} project hook attached them", context)
+
     def test_codex_extracts_structured_edit_paths(self):
         codex = load_module("codex_paths", CODEX)
         payload = {
@@ -99,6 +135,20 @@ class AdapterContractTest(unittest.TestCase):
             ],
             codex.patched_paths(payload),
         )
+
+    def test_python_adapters_reject_paths_outside_repository(self):
+        codex = load_module("codex_containment", CODEX)
+        zcode = load_module("zcode_containment", ZCODE)
+        inside = str(ROOT / "internal" / "llm" / "openai.go")
+        escaped = str(ROOT / ".." / "outside.go")
+        payload = {
+            "file_path": inside,
+            "destination": escaped,
+            "source": "internal/llm/\x00bad.go",
+        }
+        expected = ["internal/llm/openai.go"]
+        self.assertEqual(expected, codex.patched_paths(payload))
+        self.assertEqual(expected, zcode.collect_target_paths(payload))
 
     def test_adapters_do_not_claim_vendor_policy_ownership(self):
         for path in (CODEX, ZCODE):

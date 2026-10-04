@@ -198,15 +198,21 @@ def collect_target_paths(tool_input: object) -> list[str]:
 
     walk(tool_input)
 
+    root = REPO_ROOT.resolve()
     rel: list[str] = []
     for raw in found:
+        raw = raw.strip()
+        if not raw or "\x00" in raw:
+            continue
         path = Path(raw)
-        if path.is_absolute():
-            try:
-                path = path.relative_to(REPO_ROOT)
-            except ValueError:
-                continue
-        rel.append(path.as_posix())
+        candidate = path if path.is_absolute() else root / path
+        try:
+            relative = candidate.resolve(strict=False).relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        normalized = relative.as_posix()
+        if relative.parts and normalized not in rel:
+            rel.append(normalized)
     return rel
 
 
@@ -251,7 +257,7 @@ def main() -> int:
             event,
             render(
                 always,
-                "Project rules for this repository, always in force. They are"
+                "Project rules for this repository, always in force."
                 " The ZCode project hook attached them from `.cursor/rules/`;"
                 " no separate ZCode copy is maintained. More rules are attached"
                 " automatically when you edit files they cover.",

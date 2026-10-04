@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -54,14 +55,7 @@ func TestRepositoryRuleMirrors(t *testing.T) {
 
 func TestRepositoryInstructionCompatibilityFiles(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
-	info, err := os.Lstat(filepath.Join(root, "CLAUDE.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("CLAUDE.md must remain a symlink")
-	}
-	target, err := os.Readlink(filepath.Join(root, "CLAUDE.md"))
+	target, err := instructionCompatibilityTarget(filepath.Join(root, "CLAUDE.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +64,38 @@ func TestRepositoryInstructionCompatibilityFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".codex", "rules.md")); !os.IsNotExist(err) {
 		t.Fatalf(".codex/rules.md must not exist, err=%v", err)
+	}
+}
+
+func instructionCompatibilityTarget(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return os.Readlink(path)
+	}
+	if info.Mode().IsRegular() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	return "", fmt.Errorf("%s is neither a symlink nor a regular compatibility file", path)
+}
+
+func TestInstructionCompatibilityTargetAllowsMaterializedSymlink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CLAUDE.md")
+	if err := os.WriteFile(path, []byte("AGENTS.md\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target, err := instructionCompatibilityTarget(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "AGENTS.md" {
+		t.Fatalf("materialized CLAUDE.md -> %q, want AGENTS.md", target)
 	}
 }
 

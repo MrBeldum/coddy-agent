@@ -192,17 +192,19 @@ def patched_paths(tool_input: object) -> list[str]:
                 walk(item, child_key)
 
     def repo_relative(raw: str) -> str | None:
+        raw = raw.strip()
+        if not raw or "\x00" in raw:
+            return None
+        root = REPO_ROOT.resolve()
         path = Path(raw)
-        if path.is_absolute():
-            try:
-                path = path.relative_to(REPO_ROOT)
-            except ValueError:
-                return None
-        else:
-            path = Path(os.path.normpath(path))
-            if path.parts and path.parts[0] == "..":
-                return None
-        return path.as_posix()
+        candidate = path if path.is_absolute() else root / path
+        try:
+            relative = candidate.resolve(strict=False).relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if not relative.parts:
+            return None
+        return relative.as_posix()
 
     walk(tool_input)
 
@@ -260,7 +262,7 @@ def main() -> int:
             event,
             render(
                 always,
-                "Project rules for this repository, always in force. They are"
+                "Project rules for this repository, always in force."
                 " The Codex project hook attached them from `.cursor/rules/`;"
                 " no separate Codex copy is maintained. More rules are attached"
                 " automatically when you edit files they cover.",
