@@ -13,10 +13,13 @@ const mermaid = vi.hoisted(() => ({
   })),
 }));
 const katex = vi.hoisted(() => ({
-  renderToString: vi.fn(
-    (source: string, opts: { displayMode?: boolean }) =>
-      `<span class="katex${opts.displayMode ? " katex-display" : ""}">${source}</span>`,
-  ),
+  // KaTeX builds the formula's nodes into the element it is given.
+  render: vi.fn((source: string, el: HTMLElement, opts: { displayMode?: boolean }) => {
+    const node = document.createElement("span");
+    node.className = opts.displayMode ? "katex katex-display" : "katex";
+    node.textContent = source;
+    el.replaceChildren(node);
+  }),
 }));
 const loaders = vi.hoisted(() => ({
   mermaidFails: false,
@@ -67,7 +70,7 @@ beforeEach(() => {
   mermaid.initialize.mockClear();
   mermaid.parse.mockClear();
   mermaid.render.mockClear();
-  katex.renderToString.mockClear();
+  katex.render.mockClear();
   writeText = vi.fn(() => Promise.resolve());
   Object.assign(navigator, { clipboard: { writeText } });
   blobs = [];
@@ -340,8 +343,9 @@ describe("formulas", () => {
   test("typesets inline dollars in place", async () => {
     render(<Markdown text={"Energy $E = mc^2$ here"} />);
     await waitFor(() => expect(document.querySelector(".md-math-inline .katex")).toBeTruthy());
-    expect(katex.renderToString).toHaveBeenCalledWith(
+    expect(katex.render).toHaveBeenCalledWith(
       "E = mc^2",
+      expect.any(HTMLElement),
       expect.objectContaining({ displayMode: false, trust: false, throwOnError: false }),
     );
   });
@@ -431,6 +435,27 @@ describe("formulas", () => {
     expect(container.querySelector(".md-inline-code")!.textContent).toBe("echo $HOME$PATH");
   });
 
+  test("a formula KaTeX cannot render shows its source, and the next formula still typesets", async () => {
+    katex.render.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    render(<Markdown text={"First $a+b$ then $c+d$."} />);
+    await waitFor(() => expect(document.querySelectorAll(".md-math-inline .katex")).toHaveLength(1));
+    const nodes = screen.getAllByTestId("md-math-inline");
+    expect(nodes[0]!.tagName).toBe("CODE");
+    expect(nodes[0]!.textContent).toBe("$a+b$");
+  });
+
+  test("a display formula switched to its source and back is typeset again", async () => {
+    render(<Markdown text={"$$\nx^2\n$$"} />);
+    await waitFor(() => expect(document.querySelector(".md-math-display .katex")).toBeTruthy());
+    const block = screen.getByTestId("md-math-block");
+    fireEvent.click(block.querySelector('[data-testid="md-figure-show-code"]')!);
+    expect(block.querySelector(".md-math-display")).toBeNull();
+    fireEvent.click(block.querySelector('[data-testid="md-figure-show-picture"]')!);
+    expect(block.querySelector(".md-math-display .katex")?.textContent).toBe("x^2");
+  });
+
   test("until KaTeX arrives the source is shown, and a failed load keeps it", async () => {
     loaders.katexFails = true;
     render(<Markdown text={"Energy $E = mc^2$ and\n\n$$\nx\n$$"} />);
@@ -455,7 +480,7 @@ test("the documentation renders no formula by accident", () => {
   }
 }, 120_000);
 
-test("KaTeX with these options writes no link, no image and no raw HTML", async () => {
+test("KaTeX with these options builds no link, no image and no raw HTML", async () => {
   const real = (await vi.importActual<typeof import("katex")>("katex")).default;
   const { KATEX_OPTIONS } = await import("./MathFormula");
   for (const tex of [
@@ -466,7 +491,7 @@ test("KaTeX with these options writes no link, no image and no raw HTML", async 
     "\\htmlData{onclick=alert(1)}{x}",
   ]) {
     const box = document.createElement("div");
-    box.innerHTML = real.renderToString(tex, { ...KATEX_OPTIONS, displayMode: false });
+    real.render(tex, box, { ...KATEX_OPTIONS, displayMode: false });
     expect(box.querySelector("a, img, [href], [src], [onclick], .evil"), tex).toBeNull();
     // KaTeX shows the refused command as red source text instead.
     expect(box.querySelector(".katex-html")!.textContent, tex).toMatch(/^\\/);

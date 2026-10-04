@@ -1,5 +1,13 @@
 import "katex/dist/katex.min.css";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type KeyboardEvent,
+} from "react";
 import { useT } from "../i18n/I18nProvider";
 import { CodeBlockCopyButton } from "../messages/CodeBlockCopyButton";
 import { FigureViewToggle } from "./DiagramBlock";
@@ -18,29 +26,15 @@ export const KATEX_OPTIONS = {
   maxExpand: 1000,
 };
 
-/** Formulas already typeset, by mode and source: a row scrolled back into view is not typeset again. */
-const CACHE_LIMIT = 500;
-const cache = new Map<string, string>();
 let katex: KatexApi | undefined;
 
-function typeset(api: KatexApi, source: string, display: boolean): string {
-  const key = `${display ? "D" : "I"}\u0000${source}`;
-  const hit = cache.get(key);
-  if (hit !== undefined) return hit;
-  const html = api.renderToString(source, { ...KATEX_OPTIONS, displayMode: display });
-  cache.set(key, html);
-  while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
-  return html;
-}
-
-/** For tests: forget the loaded KaTeX and every typeset formula. */
+/** For tests: forget the loaded KaTeX. */
 export function resetMathForTests() {
   katex = undefined;
-  cache.clear();
 }
 
-/** The typeset HTML of a formula, or null while KaTeX is still loading (or failed to). */
-function useTypeset(source: string, display: boolean): string | null {
+/** KaTeX once its chunk has loaded, or undefined while it loads (or failed to). */
+function useKatex(): KatexApi | undefined {
   const [api, setApi] = useState<KatexApi | undefined>(katex);
   useEffect(() => {
     if (api) return;
@@ -58,12 +52,38 @@ function useTypeset(source: string, display: boolean): string | null {
       live = false;
     };
   }, [api]);
-  if (!api) return null;
-  try {
-    return typeset(api, source, display);
-  } catch {
-    return null;
-  }
+  return api;
+}
+
+/**
+ * The element a formula is typeset into. KaTeX builds the formula's nodes
+ * itself (katex.render, DOM calls, no HTML string), so nothing of a model's
+ * answer is ever parsed as markup; React owns the element and leaves its
+ * children to KaTeX. A formula KaTeX cannot render calls onFail and the caller
+ * shows the source instead.
+ */
+function Typeset(
+  props: {
+    api: KatexApi;
+    source: string;
+    display: boolean;
+    onFail: () => void;
+    as: "span" | "div";
+  } & Omit<HTMLAttributes<HTMLElement>, "children">,
+) {
+  const { api, source, display, onFail, as: Tag, ...rest } = props;
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    try {
+      api.render(source, el, { ...KATEX_OPTIONS, displayMode: display });
+    } catch {
+      el.textContent = "";
+      onFail();
+    }
+  }, [api, source, display, onFail]);
+  return <Tag ref={ref as never} {...rest} />;
 }
 
 function copyText(text: string): Promise<void> {
@@ -73,7 +93,9 @@ function copyText(text: string): Promise<void> {
 /** `$...$` in a sentence: typeset in place; the source is its tooltip and a click copies it. */
 export function MathInline(props: { source: string }) {
   const { t } = useT();
-  const html = useTypeset(props.source, false);
+  const api = useKatex();
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const onFail = useCallback(() => setFailedSource(props.source), [props.source]);
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -101,7 +123,7 @@ export function MathInline(props: { source: string }) {
   );
 
   const title = copied ? t("messages.copied") : t("markdown.math.inlineTitle", { source: delimited });
-  if (html === null) {
+  if (!api || failedSource === props.source) {
     return (
       <code className="md-math-inline md-math-pending" data-testid="md-math-inline" title={title}>
         {delimited}
@@ -109,7 +131,12 @@ export function MathInline(props: { source: string }) {
     );
   }
   return (
-    <span
+    <Typeset
+      as="span"
+      api={api}
+      source={props.source}
+      display={false}
+      onFail={onFail}
       className={copied ? "md-math-inline is-copied" : "md-math-inline"}
       role="button"
       tabIndex={0}
@@ -119,7 +146,6 @@ export function MathInline(props: { source: string }) {
       data-source={props.source}
       onClick={onCopy}
       onKeyDown={onKeyDown}
-      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }
@@ -127,9 +153,12 @@ export function MathInline(props: { source: string }) {
 /** `$$...$$` or a ```math fence: a typeset block with a switch to its source and a copy button. */
 export function MathBlock(props: { source: string }) {
   const { t } = useT();
-  const html = useTypeset(props.source, true);
+  const api = useKatex();
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const onFail = useCallback(() => setFailedSource(props.source), [props.source]);
   const [view, setView] = useState<"picture" | "code">("picture");
-  const showing = html === null ? "code" : view;
+  const unavailable = !api || failedSource === props.source;
+  const showing = unavailable ? "code" : view;
   return (
     <figure className="md-figure md-figure--math" data-testid="md-math-block" data-view={showing}>
       <div className="md-figure-head">
@@ -138,14 +167,14 @@ export function MathBlock(props: { source: string }) {
           <FigureViewToggle
             showing={showing}
             pictureLabel={t("markdown.math.showFormula")}
-            pictureDisabled={html === null}
+            pictureDisabled={unavailable}
             onChange={setView}
           />
           <CodeBlockCopyButton textToCopy={props.source} dataTestId="md-math-copy" />
         </div>
       </div>
-      {showing === "picture" && html !== null ? (
-        <div className="md-math-display" dangerouslySetInnerHTML={{ __html: html }} />
+      {showing === "picture" && api ? (
+        <Typeset as="div" api={api} source={props.source} display onFail={onFail} className="md-math-display" />
       ) : (
         <pre className="md-figure-code">
           <code>{props.source}</code>
