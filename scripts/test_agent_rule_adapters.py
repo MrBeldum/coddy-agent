@@ -2,6 +2,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -52,6 +54,20 @@ def always_rule(directory: Path) -> Path:
     return path
 
 
+def flow_rule(directory: Path) -> Path:
+    path = directory / "flow.mdc"
+    path.write_text(
+        "---\n"
+        "description: \"Flow rule\" # display text\n"
+        "globs: [\"fixtures/foo,bar.go\", \"internal/**/*.go\"] # scoped paths\n"
+        "alwaysApply: true # required\n"
+        "---\n\n"
+        "Flow rule body.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def run_hook_optional(module, rules_dir: Path, state_dir: Path, payload: dict) -> str | None:
     module.RULES_DIR = rules_dir
     module.STATE_DIR = state_dir
@@ -87,6 +103,47 @@ def run_pretool(module, rules_dir: Path, state_dir: Path, tool_input: dict) -> s
     )
 
 
+def run_concurrent_claims(source: Path, host_dir: str) -> list[list[str]]:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        script = root / host_dir / "hooks" / "attach_rules.py"
+        script.parent.mkdir(parents=True)
+        shutil.copy2(source, script)
+        start = root / "start"
+        code = (
+            "import importlib.util,json,time\n"
+            "from pathlib import Path\n"
+            f"spec=importlib.util.spec_from_file_location('adapter', {str(script)!r})\n"
+            "module=importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            f"start=Path({str(start)!r})\n"
+            "while not start.exists(): time.sleep(0.001)\n"
+            "print(json.dumps(sorted(module.claim_rule_ids('shared-session', {'provider-proxy.mdc'}))))\n"
+        )
+        processes = [
+            subprocess.Popen(
+                [sys.executable, "-c", code],
+                cwd=root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(12)
+        ]
+        start.touch()
+        results = []
+        errors = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=15)
+            if process.returncode != 0:
+                errors.append(stderr)
+                continue
+            results.append(json.loads(stdout))
+        if errors:
+            raise AssertionError("\n".join(errors))
+        return results
+
+
 class AdapterContractTest(unittest.TestCase):
     def test_python_adapters_parse_yaml_list_globs(self):
         codex = load_module("codex_rules", CODEX)
@@ -96,6 +153,23 @@ class AdapterContractTest(unittest.TestCase):
             expected = ["internal/llm/**/*.go", "cmd/coddy/providers.go"]
             self.assertEqual(expected, codex.parse_rule(path).globs)
             self.assertEqual(expected, zcode.parse_rule(path).globs)
+
+    def test_python_adapters_parse_flow_yaml_scalars(self):
+        codex = load_module("codex_flow", CODEX)
+        zcode = load_module("zcode_flow", ZCODE)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = flow_rule(Path(tmp))
+            for module in (codex, zcode):
+                rule = module.parse_rule(path)
+                self.assertEqual("Flow rule", rule.description)
+                self.assertEqual(["fixtures/foo,bar.go", "internal/**/*.go"], rule.globs)
+                self.assertTrue(rule.always)
+
+    def test_python_adapter_claims_are_interprocess_safe(self):
+        for source, host_dir in ((CODEX, ".codex"), (ZCODE, ".zcode")):
+            results = run_concurrent_claims(source, host_dir)
+            claimed = [result for result in results if result]
+            self.assertEqual([["provider-proxy.mdc"]], claimed)
 
     def test_provider_proxy_rule_is_emitted_by_python_adapters(self):
         codex = load_module("codex_emit", CODEX)

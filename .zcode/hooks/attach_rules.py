@@ -26,6 +26,7 @@ fields. The Codex sibling accepts the same fields and also parses patch headers.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -33,6 +34,11 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 # The repository root is two levels up from this script:
 # .zcode/hooks/attach_rules.py -> repo root.
@@ -136,6 +142,48 @@ def unquote(value: str) -> str:
     return value
 
 
+def split_globs(value: str) -> list[str]:
+    value = strip_yaml_comment(value)
+    value = value.removeprefix("[").removesuffix("]")
+    out: list[str] = []
+    current: list[str] = []
+    quote = ""
+    escaped = False
+    brace_depth = 0
+
+    def flush() -> None:
+        item = unquote("".join(current))
+        if item:
+            out.append(item)
+        current.clear()
+
+    for char in value:
+        if quote:
+            current.append(char)
+            if char == "\\" and quote == '"' and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if char in ("'", '"'):
+            quote = char
+            current.append(char)
+        elif char == "{":
+            brace_depth += 1
+            current.append(char)
+        elif char == "}":
+            brace_depth = max(0, brace_depth - 1)
+            current.append(char)
+        elif char == "," and brace_depth == 0:
+            flush()
+        else:
+            current.append(char)
+    flush()
+    return out
+
+
 def parse_rule(path: Path) -> Rule | None:
     """Read one `.mdc` file. Frontmatter is flat, so no YAML dependency."""
     text = path.read_text(encoding="utf-8")
@@ -158,12 +206,10 @@ def parse_rule(path: Path) -> Rule | None:
             continue
         key, value = key.strip(), value.strip()
         if key == "description":
-            description = value
+            description = unquote(strip_yaml_comment(value))
         elif key == "globs":
             if value:
-                value = strip_yaml_comment(value)
-                value = value.removeprefix("[").removesuffix("]")
-                globs = [unquote(strip_yaml_comment(g)) for g in value.split(",") if strip_yaml_comment(g)]
+                globs = split_globs(value)
             else:
                 index += 1
                 while index < len(lines):
@@ -179,7 +225,7 @@ def parse_rule(path: Path) -> Rule | None:
                         globs.append(pattern)
                     index += 1
         elif key == "alwaysApply":
-            always = value.lower() == "true"
+            always = unquote(strip_yaml_comment(value)).lower() == "true"
         index += 1
     return Rule(path, description, globs, always, body)
 
@@ -205,12 +251,65 @@ def load_sent(session_id: str) -> set[str]:
         return set()
 
 
-def save_sent(session_id: str, sent: set[str]) -> None:
+def save_sent(session_id: str, sent: set[str]) -> bool:
     try:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        state_file(session_id).write_text(json.dumps(sorted(sent)), encoding="utf-8")
+        destination = state_file(session_id)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=STATE_DIR,
+            prefix=destination.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            json.dump(sorted(sent), handle)
+            temporary = Path(handle.name)
+        os.replace(temporary, destination)
+        return True
     except Exception:
-        pass
+        return False
+
+
+@contextmanager
+def session_lock(session_id: str):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = state_file(session_id).with_suffix(".lock")
+    with lock_path.open("a+b") as handle:
+        if os.name == "nt":
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def claim_rule_ids(session_id: str, rule_ids: set[str]) -> set[str]:
+    with session_lock(session_id):
+        sent = load_sent(session_id)
+        claimed = rule_ids - sent
+        if not claimed:
+            return set()
+        if not save_sent(session_id, sent | claimed):
+            return set()
+        return claimed
+
+
+def update_session_state(session_id: str, source: str, always: set[str]) -> None:
+    with session_lock(session_id):
+        sent = load_sent(session_id) if source == "resume" else set()
+        save_sent(session_id, sent | always)
 
 
 def collect_target_paths(tool_input: object) -> list[str]:
@@ -286,9 +385,8 @@ def main() -> int:
 
     if event == "SessionStart":
         source = payload.get("source", "")
-        sent = load_sent(session_id) if source == "resume" else set()
         always = [r for r in rules if r.always]
-        save_sent(session_id, sent | {r.rel for r in always})
+        update_session_state(session_id, source, {r.rel for r in always})
         if not always:
             return 0
         emit(
@@ -310,19 +408,19 @@ def main() -> int:
     if not paths:
         return 0
 
-    sent = load_sent(session_id)
-    matched: list[Rule] = []
+    candidates: list[Rule] = []
     for rule in rules:
-        if rule.always or rule.rel in sent or not rule.globs:
+        if rule.always or not rule.globs:
             continue
         patterns = [glob_to_regex(g) for g in rule.globs]
         if any(p.match(path) for path in paths for p in patterns):
-            matched.append(rule)
+            candidates.append(rule)
 
-    if not matched:
+    claimed = claim_rule_ids(session_id, {rule.rel for rule in candidates})
+    if not claimed:
         return 0
 
-    save_sent(session_id, sent | {r.rel for r in matched})
+    matched = [rule for rule in candidates if rule.rel in claimed]
     touched = ", ".join(sorted(set(paths))[:8])
     emit(
         event,

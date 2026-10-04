@@ -26,11 +26,11 @@ For this repository, `russian-wording` arrives at session start. The Go, HTTP, g
 
 ## How it works
 
-The project adapter parses `.mdc` frontmatter itself (`description`, scalar or list `globs`, and `alwaysApply`). It reads `.cursor/rules/` as its input and keeps no separate ZCode copy of a rule body. A new Cursor rule file needs no adapter wiring. Points worth knowing:
+The project adapter parses `.mdc` frontmatter itself (`description`, scalar or list `globs`, and `alwaysApply`). Quoted commas and YAML comments in valid scalar, flow-list and block-list forms are preserved or stripped as appropriate. It reads `.cursor/rules/` as its input and keeps no separate ZCode copy of a rule body. A new Cursor rule file needs no adapter wiring. Points worth knowing:
 
 - **Glob matching is hand-rolled.** `fnmatch` is unusable because its `*` also crosses `/`, which makes `external/httpserver/**/*.go` miss `external/httpserver/server.go`. The script translates globs to a regex where `**/` becomes "zero or more directories", `*` stays inside one segment, and a bare `**` spans anything.
 - **Paths come from structured tool fields.** ZCode hands the hook a JSON object, so the script walks `tool_input` and keeps string values under known path-carrying keys (`file_path`, `path`, `notebook_path`, `source`, `destination`, `new_path`, `old_path`, ...). The Codex sibling accepts those fields too and additionally parses `apply_patch` headers. Nested and absolute paths are normalised before matching.
-- **Each scoped rule is injected at most once per active session context.** State is a JSON file under `<tempdir>/zcode-attach-rules-<repository-hash>/<session_id>.json`, keyed by repository and session id, so clones cannot suppress one another. `resume` preserves scoped dedupe; `startup`, `compact` and `clear` reset state to the always-on set.
+- **Each scoped rule is injected at most once per active session context.** State is a JSON file under `<tempdir>/zcode-attach-rules-<repository-hash>/<session_id>.json`, keyed by repository and session id, so clones cannot suppress one another. `resume` preserves scoped dedupe; `startup`, `compact` and `clear` reset state to the always-on set. Concurrent processes serialize claims with a per-session lock, and state updates use atomic replacement.
 - **It fails open.** Malformed JSON on stdin, an unparsable rule file, or an unwritable state directory all exit 0 with no output. A broken rule can never block an edit.
 
 ## Enabling

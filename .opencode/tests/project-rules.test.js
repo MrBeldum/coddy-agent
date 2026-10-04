@@ -7,6 +7,7 @@ import test from "node:test"
 import {
   createProjectRulesHooks,
   globToRegExp,
+  parseRule,
 } from "../lib/project-rules.js"
 import { ProjectRulesPlugin } from "../plugins/project-rules.js"
 
@@ -71,6 +72,25 @@ test("Cursor globs match files directly below a recursive directory", () => {
   assert.equal(pattern.test("external/httpserver/server.go"), true)
   assert.equal(pattern.test("external/httpserver/routes/models.go"), true)
   assert.equal(pattern.test("external/ui/src/App.tsx"), false)
+})
+
+test("flow-style YAML scalars preserve quoted commas and comments", () => {
+  const rule = parseRule(
+    "/repo/.cursor/rules/flow.mdc",
+    [
+      "---",
+      'description: "Flow rule" # display text',
+      'globs: ["fixtures/foo,bar.go", "internal/**/*.go"] # scoped paths',
+      "alwaysApply: true # required",
+      "---",
+      "Flow rule body.",
+    ].join("\n"),
+    "/repo",
+  )
+
+  assert.equal(rule.description, "Flow rule")
+  assert.deepEqual(rule.globs, ["fixtures/foo,bar.go", "internal/**/*.go"])
+  assert.equal(rule.always, true)
 })
 
 test("alwaysApply rules enter every OpenCode system prompt", async (t) => {

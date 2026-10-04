@@ -98,10 +98,46 @@ function parseGlobs(value) {
   const trimmed = stripYamlComment(value)
     .replace(/^\[/, "")
     .replace(/\]$/, "")
-  return trimmed
-    .split(",")
-    .map((item) => unquote(stripYamlComment(item)))
-    .filter(Boolean)
+  const values = []
+  let current = ""
+  let quote = ""
+  let escaped = false
+  let braceDepth = 0
+
+  const flush = () => {
+    const item = unquote(current)
+    if (item) values.push(item)
+    current = ""
+  }
+
+  for (const character of trimmed) {
+    if (quote) {
+      current += character
+      if (character === "\\" && quote === '"' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (character === quote && !escaped) quote = ""
+      escaped = false
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      current += character
+    } else if (character === "{") {
+      braceDepth += 1
+      current += character
+    } else if (character === "}") {
+      braceDepth = Math.max(0, braceDepth - 1)
+      current += character
+    } else if (character === "," && braceDepth === 0) {
+      flush()
+    } else {
+      current += character
+    }
+  }
+  flush()
+  return values
 }
 
 export function parseRule(filePath, text, repoRoot) {
@@ -120,7 +156,7 @@ export function parseRule(filePath, text, repoRoot) {
     if (separator < 0) continue
     const key = line.slice(0, separator).trim()
     const value = line.slice(separator + 1).trim()
-    if (key === "description") description = unquote(value)
+    if (key === "description") description = unquote(stripYamlComment(value))
     if (key === "globs") {
       if (value) {
         globs = parseGlobs(value)
@@ -138,7 +174,9 @@ export function parseRule(filePath, text, repoRoot) {
         }
       }
     }
-    if (key === "alwaysApply") always = value.toLowerCase() === "true"
+    if (key === "alwaysApply") {
+      always = unquote(stripYamlComment(value)).toLowerCase() === "true"
+    }
   }
 
   const body = frontmatter[2].trim()
