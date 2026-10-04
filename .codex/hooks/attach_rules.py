@@ -127,13 +127,63 @@ def strip_yaml_comment(value: str) -> str:
     return value.strip()
 
 
+YAML_DOUBLE_ESCAPES = {
+    "0": "\0",
+    "a": "\x07",
+    "b": "\x08",
+    "t": "\t",
+    "n": "\n",
+    "v": "\x0b",
+    "f": "\x0c",
+    "r": "\r",
+    "e": "\x1b",
+    " ": " ",
+    '"': '"',
+    "/": "/",
+    "\\": "\\",
+    "N": "\x85",
+    "_": "\xa0",
+    "L": "\u2028",
+    "P": "\u2029",
+}
+
+
+def decode_yaml_double_quoted(value: str) -> str:
+    out: list[str] = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char != "\\":
+            out.append(char)
+            index += 1
+            continue
+        if index + 1 >= len(value):
+            out.append("\\")
+            break
+        escape = value[index + 1]
+        if escape in YAML_DOUBLE_ESCAPES:
+            out.append(YAML_DOUBLE_ESCAPES[escape])
+            index += 2
+            continue
+        width = {"x": 2, "u": 4, "U": 8}.get(escape)
+        if width is not None:
+            digits = value[index + 2 : index + 2 + width]
+            if len(digits) == width:
+                try:
+                    out.append(chr(int(digits, 16)))
+                    index += 2 + width
+                    continue
+                except (ValueError, OverflowError):
+                    pass
+        out.extend(("\\", escape))
+        index += 2
+    return "".join(out)
+
+
 def unquote(value: str) -> str:
     value = value.strip()
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            return value[1:-1]
+        return decode_yaml_double_quoted(value[1:-1])
     if len(value) >= 2 and value[0] == "'" and value[-1] == "'":
         return value[1:-1].replace("''", "'")
     return value
@@ -325,20 +375,6 @@ def session_lock(session_id: str):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def claim_rule_ids(session_id: str, rule_ids: set[str]) -> set[str]:
-    try:
-        with session_lock(session_id):
-            sent = load_sent(session_id)
-            claimed = rule_ids - sent
-            if not claimed:
-                return set()
-            if not save_sent(session_id, sent | claimed):
-                return claimed
-            return claimed
-    except Exception:
-        return set(rule_ids)
-
-
 def deliver_rule_context(session_id: str, candidates: list[Rule], deliver) -> bool:
     lock = session_lock(session_id)
     try:
@@ -361,13 +397,24 @@ def deliver_rule_context(session_id: str, candidates: list[Rule], deliver) -> bo
         lock.__exit__(*sys.exc_info())
 
 
-def update_session_state(session_id: str, source: str, always: set[str]) -> None:
+def deliver_session_start(session_id: str, source: str, always: list[Rule], deliver) -> bool:
+    lock = session_lock(session_id)
     try:
-        with session_lock(session_id):
-            sent = load_sent(session_id) if source == "resume" else set()
-            save_sent(session_id, sent | always)
+        lock.__enter__()
     except Exception:
-        pass
+        if not always:
+            return False
+        deliver(always)
+        return True
+
+    try:
+        sent = load_sent(session_id) if source == "resume" else set()
+        if always:
+            deliver(always)
+        save_sent(session_id, sent | {rule.rel for rule in always})
+        return bool(always)
+    finally:
+        lock.__exit__(*sys.exc_info())
 
 
 def patched_paths(tool_input: object) -> list[str]:
@@ -450,19 +497,20 @@ def main() -> int:
     if event == "SessionStart":
         source = payload.get("source", "")
         always = [r for r in rules if r.always]
-        update_session_state(session_id, source, {r.rel for r in always})
-        if not always:
-            return 0
-        emit(
-            event,
-            render(
-                always,
-                "Project rules for this repository, always in force."
-                " The Codex project hook attached them from `.cursor/rules/`;"
-                " no separate Codex copy is maintained. More rules are attached"
-                " automatically when you edit files they cover.",
-            ),
-        )
+
+        def deliver(selected: list[Rule]) -> None:
+            emit(
+                event,
+                render(
+                    selected,
+                    "Project rules for this repository, always in force."
+                    " The Codex project hook attached them from `.cursor/rules/`;"
+                    " no separate Codex copy is maintained. More rules are attached"
+                    " automatically when you edit files they cover.",
+                ),
+            )
+
+        deliver_session_start(session_id, source, always, deliver)
         return 0
 
     if event != "PreToolUse":

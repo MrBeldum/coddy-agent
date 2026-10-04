@@ -80,8 +80,8 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
     "/repo/.cursor/rules/flow.mdc",
     [
       "---",
-      'description: "Flow rule" # display text',
-      "globs: [\"fixtures/foo,bar.go\", 'fixtures/it''s.go', \"\\u0069nternal/**/*.go\"] # scoped paths",
+      'description: "Flow \\N\\_ rule" # display text',
+      "globs: [\"fixtures/foo,bar.go\", 'fixtures/it''s.go', \"\\x69nternal/**/*.go\", \"fixtures/\\_.go\"] # scoped paths",
       "alwaysApply: true # required",
       "---",
       "Flow rule body.",
@@ -89,11 +89,12 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
     "/repo",
   )
 
-  assert.equal(rule.description, "Flow rule")
+  assert.equal(rule.description, "Flow \u0085\u00a0 rule")
   assert.deepEqual(rule.globs, [
     "fixtures/foo,bar.go",
     "fixtures/it's.go",
     "internal/**/*.go",
+    "fixtures/\u00a0.go",
   ])
   assert.equal(rule.always, true)
 

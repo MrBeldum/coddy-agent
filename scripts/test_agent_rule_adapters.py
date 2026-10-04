@@ -59,8 +59,8 @@ def flow_rule(directory: Path) -> Path:
     path = directory / "flow.mdc"
     path.write_text(
         "---\n"
-        "description: \"Flow rule\" # display text\n"
-        "globs: [\"fixtures/foo,bar.go\", 'fixtures/it''s.go', \"\\u0069nternal/**/*.go\"] # scoped paths\n"
+        "description: \"Flow \\N\\_ rule\" # display text\n"
+        "globs: [\"fixtures/foo,bar.go\", 'fixtures/it''s.go', \"\\x69nternal/**/*.go\", \"fixtures/\\_.go\"] # scoped paths\n"
         "alwaysApply: true # required\n"
         "---\n\n"
         "Flow rule body.\n",
@@ -121,45 +121,52 @@ def run_pretool(module, rules_dir: Path, state_dir: Path, tool_input: dict) -> s
     )
 
 
-def run_concurrent_claims(source: Path, host_dir: str) -> list[list[str]]:
+def run_concurrent_deliveries(source: Path, host_dir: str) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         script = root / host_dir / "hooks" / "attach_rules.py"
         script.parent.mkdir(parents=True)
         shutil.copy2(source, script)
-        start = root / "start"
-        code = (
-            "import importlib.util,json,time\n"
-            "from pathlib import Path\n"
-            f"spec=importlib.util.spec_from_file_location('adapter', {str(script)!r})\n"
-            "module=importlib.util.module_from_spec(spec)\n"
-            "spec.loader.exec_module(module)\n"
-            f"start=Path({str(start)!r})\n"
-            "while not start.exists(): time.sleep(0.001)\n"
-            "print(json.dumps(sorted(module.claim_rule_ids('shared-session', {'provider-proxy.mdc'}))))\n"
+        rules_dir = root / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True)
+        list_rule(rules_dir)
+        payload = json.dumps(
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": "shared-session",
+                "tool_input": {"file_path": "internal/llm/openai.go"},
+            }
         )
         processes = [
             subprocess.Popen(
-                [sys.executable, "-c", code],
+                [sys.executable, str(script)],
                 cwd=root,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
             for _ in range(12)
         ]
-        start.touch()
-        results = []
+        for process in processes:
+            process.stdin.write(payload)
+            process.stdin.close()
+
+        outputs = []
         errors = []
         for process in processes:
-            stdout, stderr = process.communicate(timeout=15)
-            if process.returncode != 0:
+            stdout = process.stdout.read()
+            stderr = process.stderr.read()
+            returncode = process.wait(timeout=15)
+            process.stdout.close()
+            process.stderr.close()
+            if returncode != 0:
                 errors.append(stderr)
-                continue
-            results.append(json.loads(stdout))
+            elif stdout:
+                outputs.append(stdout)
         if errors:
             raise AssertionError("\n".join(errors))
-        return results
+        return outputs
 
 
 class AdapterContractTest(unittest.TestCase):
@@ -183,9 +190,14 @@ class AdapterContractTest(unittest.TestCase):
             path = flow_rule(Path(tmp))
             for module in (codex, zcode):
                 rule = module.parse_rule(path)
-                self.assertEqual("Flow rule", rule.description)
+                self.assertEqual("Flow \u0085\u00a0 rule", rule.description)
                 self.assertEqual(
-                    ["fixtures/foo,bar.go", "fixtures/it's.go", "internal/**/*.go"],
+                    [
+                        "fixtures/foo,bar.go",
+                        "fixtures/it's.go",
+                        "internal/**/*.go",
+                        "fixtures/\u00a0.go",
+                    ],
                     rule.globs,
                 )
                 self.assertTrue(rule.always)
@@ -196,11 +208,11 @@ class AdapterContractTest(unittest.TestCase):
                 )
                 self.assertFalse(multiline.always)
 
-    def test_python_adapter_claims_are_interprocess_safe(self):
+    def test_python_adapter_delivery_is_interprocess_safe(self):
         for source, host_dir in ((CODEX, ".codex"), (ZCODE, ".zcode")):
-            results = run_concurrent_claims(source, host_dir)
-            claimed = [result for result in results if result]
-            self.assertEqual([["provider-proxy.mdc"]], claimed)
+            outputs = run_concurrent_deliveries(source, host_dir)
+            self.assertEqual(1, len(outputs))
+            self.assertIn("Every provider request follows its proxy.", outputs[0])
 
     def test_provider_proxy_rule_is_emitted_by_python_adapters(self):
         codex = load_module("codex_emit", CODEX)
@@ -348,9 +360,40 @@ class AdapterContractTest(unittest.TestCase):
                     ),
                 )
 
-    def test_state_failures_degrade_to_duplicate_delivery(self):
-        rule_ids = {"provider-proxy.mdc"}
+    def test_failed_session_start_emit_does_not_persist(self):
+        def broken_emit(_event, _context):
+            raise BrokenPipeError("host closed stdout")
 
+        for source, name in ((CODEX, "codex_start_failure"), (ZCODE, "zcode_start_failure")):
+            module = load_module(name, source)
+            with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+                root = Path(tmp)
+                rules_dir = root / "rules"
+                rules_dir.mkdir()
+                always_rule(rules_dir)
+                state_dir = root / "state"
+                original_emit = module.emit
+                module.emit = broken_emit
+                with self.assertRaises(BrokenPipeError):
+                    run_hook(
+                        module,
+                        rules_dir,
+                        state_dir,
+                        {"hook_event_name": "SessionStart", "source": "startup"},
+                    )
+                self.assertEqual(set(), module.load_sent("provider-proxy-case"))
+                module.emit = original_emit
+                self.assertIn(
+                    "Always follow the repository workflow",
+                    run_hook(
+                        module,
+                        rules_dir,
+                        state_dir,
+                        {"hook_event_name": "SessionStart", "source": "startup"},
+                    ),
+                )
+
+    def test_state_failures_degrade_to_duplicate_delivery(self):
         @contextlib.contextmanager
         def broken_lock(_session_id):
             raise OSError("state directory unavailable")
@@ -358,13 +401,60 @@ class AdapterContractTest(unittest.TestCase):
 
         for source, name in ((CODEX, "codex_state_failure"), (ZCODE, "zcode_state_failure")):
             save_failure = load_module(name + "_save", source)
+            candidate = save_failure.Rule(
+                save_failure.REPO_ROOT / "provider-proxy.mdc",
+                "Provider proxy",
+                ["internal/llm/**/*.go"],
+                False,
+                "Every provider request follows its proxy.",
+            )
+            delivered = []
             save_failure.save_sent = lambda _session_id, _sent: False
-            self.assertEqual(rule_ids, save_failure.claim_rule_ids("session", rule_ids))
+            self.assertTrue(
+                save_failure.deliver_rule_context(
+                    "session",
+                    [candidate],
+                    lambda rules: delivered.extend(rule.rel for rule in rules),
+                )
+            )
+            self.assertEqual(["provider-proxy.mdc"], delivered)
 
             lock_failure = load_module(name + "_lock", source)
+            candidate = lock_failure.Rule(
+                lock_failure.REPO_ROOT / "provider-proxy.mdc",
+                "Provider proxy",
+                ["internal/llm/**/*.go"],
+                False,
+                "Every provider request follows its proxy.",
+            )
+            delivered = []
             lock_failure.session_lock = broken_lock
-            self.assertEqual(rule_ids, lock_failure.claim_rule_ids("session", rule_ids))
-            lock_failure.update_session_state("session", "startup", {"always.mdc"})
+            self.assertTrue(
+                lock_failure.deliver_rule_context(
+                    "session",
+                    [candidate],
+                    lambda rules: delivered.extend(rule.rel for rule in rules),
+                )
+            )
+            self.assertEqual(["provider-proxy.mdc"], delivered)
+
+            always = lock_failure.Rule(
+                lock_failure.REPO_ROOT / "always.mdc",
+                "Always",
+                [],
+                True,
+                "Always follow the repository workflow.",
+            )
+            delivered = []
+            self.assertTrue(
+                lock_failure.deliver_session_start(
+                    "session",
+                    "startup",
+                    [always],
+                    lambda rules: delivered.extend(rule.rel for rule in rules),
+                )
+            )
+            self.assertEqual(["always.mdc"], delivered)
 
     def test_adapters_do_not_claim_vendor_policy_ownership(self):
         for path in (CODEX, ZCODE):

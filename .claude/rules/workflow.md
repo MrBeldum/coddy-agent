@@ -4,7 +4,20 @@ paths:
   - "**/*.go"
   - "docs/**/*.md"
   - "README.md"
+  - "CONTRIBUTING.md"
+  - "DESIGN.md"
+  - "AGENTS.md"
   - "external/ui/**/*"
+  - "features/**/*.feature"
+  - "Makefile"
+  - "scripts/**"
+  - "packaging/**"
+  - ".github/**"
+  - ".cursor/rules/**"
+  - ".claude/rules/**"
+  - ".codex/**"
+  - ".zcode/**"
+  - ".opencode/**"
 ---
 
 # Workflow (features, bugs, finish)

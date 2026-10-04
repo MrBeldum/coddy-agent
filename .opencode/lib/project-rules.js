@@ -54,14 +54,67 @@ export function globToRegExp(pattern) {
   return new RegExp(`^${chunks.join("")}$`)
 }
 
+const yamlDoubleEscapes = new Map([
+  ["0", "\0"],
+  ["a", "\x07"],
+  ["b", "\x08"],
+  ["t", "\t"],
+  ["n", "\n"],
+  ["v", "\x0b"],
+  ["f", "\x0c"],
+  ["r", "\r"],
+  ["e", "\x1b"],
+  [" ", " "],
+  ['"', '"'],
+  ["/", "/"],
+  ["\\", "\\"],
+  ["N", "\x85"],
+  ["_", "\xa0"],
+  ["L", "\u2028"],
+  ["P", "\u2029"],
+])
+
+function decodeYamlDoubleQuoted(value) {
+  let output = ""
+  for (let index = 0; index < value.length; ) {
+    const character = value[index]
+    if (character !== "\\") {
+      output += character
+      index += 1
+      continue
+    }
+    if (index + 1 >= value.length) {
+      output += "\\"
+      break
+    }
+    const escape = value[index + 1]
+    if (yamlDoubleEscapes.has(escape)) {
+      output += yamlDoubleEscapes.get(escape)
+      index += 2
+      continue
+    }
+    const width = { x: 2, u: 4, U: 8 }[escape]
+    if (width !== undefined) {
+      const digits = value.slice(index + 2, index + 2 + width)
+      if (digits.length === width && /^[0-9a-f]+$/i.test(digits)) {
+        const codePoint = Number.parseInt(digits, 16)
+        if (codePoint <= 0x10ffff) {
+          output += String.fromCodePoint(codePoint)
+          index += 2 + width
+          continue
+        }
+      }
+    }
+    output += `\\${escape}`
+    index += 2
+  }
+  return output
+}
+
 function unquote(value) {
   const trimmed = value.trim()
   if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    try {
-      return JSON.parse(trimmed)
-    } catch {
-      return trimmed.slice(1, -1)
-    }
+    return decodeYamlDoubleQuoted(trimmed.slice(1, -1))
   }
   if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
     return trimmed.slice(1, -1).replaceAll("''", "'")
