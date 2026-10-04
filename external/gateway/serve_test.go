@@ -73,16 +73,40 @@ func setNonZero(t *testing.T, name string, v reflect.Value) {
 // web UI rebuild the bot when they move: a sign-in set up from the settings
 // screen is how a withheld menu button appears.
 func TestFingerprintFollowsTheWebUIAccessKeys(t *testing.T) {
-	base := Fingerprint(&config.Config{})
+	app := config.GatewayConfig{Telegram: config.TelegramGatewayConfig{
+		MiniApp: config.TelegramMiniAppConfig{URL: "https://coddy.example.com/"}}}
+	base := Fingerprint(&config.Config{Gateways: app})
 	off := false
 	for name, c := range map[string]*config.Config{
-		"enable":         {HTTPServer: config.HTTPServerConfig{Enabled: &off}},
-		"auth_token":     {HTTPServer: config.HTTPServerConfig{AuthToken: "t"}},
-		"login":          {HTTPServer: config.HTTPServerConfig{Login: config.HTTPLoginConfig{User: "op", PasswordHash: "h"}}},
-		"allow_insecure": {HTTPServer: config.HTTPServerConfig{AllowInsecure: true}},
+		"enable":         {Gateways: app, HTTPServer: config.HTTPServerConfig{Enabled: &off}},
+		"auth_token":     {Gateways: app, HTTPServer: config.HTTPServerConfig{AuthToken: "t"}},
+		"login":          {Gateways: app, HTTPServer: config.HTTPServerConfig{Login: config.HTTPLoginConfig{User: "op", PasswordHash: "h"}}},
+		"allow_insecure": {Gateways: app, HTTPServer: config.HTTPServerConfig{AllowInsecure: true}},
 	} {
 		if Fingerprint(c) == base {
 			t.Errorf("httpserver.%s does not move the gateway fingerprint", name)
+		}
+	}
+}
+
+// A bot without a Mini App does not care how the web UI is reached, so a new
+// password or token for it does not rebuild the bot, which would cut the
+// turns it is running short.
+func TestFingerprintIgnoresTheWebUIKeysWithoutAMiniApp(t *testing.T) {
+	base := &config.Config{}
+	base.Gateways.Telegram.Enabled = true
+	base.HTTPServer.Login = config.HTTPLoginConfig{User: "op", PasswordHash: "h1"}
+	off := false
+	for name, edit := range map[string]func(c *config.Config){
+		"login":          func(c *config.Config) { c.HTTPServer.Login.PasswordHash = "h2" },
+		"auth_token":     func(c *config.Config) { c.HTTPServer.AuthToken = "rotated" },
+		"enable":         func(c *config.Config) { c.HTTPServer.Enabled = &off },
+		"allow_insecure": func(c *config.Config) { c.HTTPServer.AllowInsecure = true },
+	} {
+		c := *base
+		edit(&c)
+		if Fingerprint(&c) != Fingerprint(base) {
+			t.Errorf("httpserver.%s rebuilds a bot that has no Mini App", name)
 		}
 	}
 }

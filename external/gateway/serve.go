@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
@@ -69,25 +70,33 @@ const (
 )
 
 // Fingerprint is everything a rebuilt bot would read differently: the whole
-// Telegram block and the token it resolves to, and the keys of the HTTP
-// server that decide whether the bot may advertise the web UI (WebUIAccess),
-// hashed, so that a key added to the block later rebuilds the bot on a reload
-// without being listed here and the token never sits in the string the
-// supervisor compares. coddy serve rebuilds the gateway in place when it
-// moves: a sign-in set up from the settings screen is how a withheld menu
-// button appears.
+// Telegram block and the token it resolves to, and, for a bot with a Mini
+// App, the keys of the HTTP server that decide whether it may advertise the
+// web UI (WebUIAccess). It is hashed, so that a key added to the block later
+// rebuilds the bot on a reload without being listed here and the token never
+// sits in the string the supervisor compares. coddy serve rebuilds the
+// gateway in place when it moves: a sign-in set up from the settings screen
+// is how a withheld menu button appears. A bot without a Mini App ignores the
+// HTTP keys, so a new password does not cut its running turns short.
 func Fingerprint(c *config.Config) string {
 	if c == nil {
 		return ""
 	}
 	tg := c.Gateways.Telegram
-	raw, err := json.Marshal(struct {
-		Telegram      config.TelegramGatewayConfig
+	type webUIKeys struct {
 		HTTPEnabled   bool
 		AuthToken     string
 		Login         config.HTTPLoginConfig
 		AllowInsecure bool
-	}{tg, c.HTTPServer.IsEnabled(), c.HTTPServer.AuthToken, c.HTTPServer.Login, c.HTTPServer.AllowInsecure})
+	}
+	var web webUIKeys
+	if strings.TrimSpace(tg.MiniApp.URL) != "" {
+		web = webUIKeys{c.HTTPServer.IsEnabled(), c.HTTPServer.AuthToken, c.HTTPServer.Login, c.HTTPServer.AllowInsecure}
+	}
+	raw, err := json.Marshal(struct {
+		Telegram config.TelegramGatewayConfig
+		WebUI    webUIKeys
+	}{tg, web})
 	if err != nil {
 		// Every field of the block marshals; this keeps the bot running on
 		// what it has rather than rebuilding it on every reload.

@@ -307,7 +307,7 @@ func UISchemaMap() map[string]interface{} {
 				"url": strProp("Web UI address",
 					"The public https address the web UI is served at, for example https://coddy.example.com/. No fragment. Empty: the bot offers no Mini App and leaves a menu button set in @BotFather alone."),
 				"menu_button": boolProp("Menu button",
-					"Make the bot's menu button open the web UI. Turned off or with the address emptied, the bot puts back the menu button it set itself."),
+					"Make the bot's menu button open the web UI. Turned off, with the address emptied or while the web UI asks for no sign-in, the bot puts back the button it replaced, as long as that button still opens the address the bot set."),
 			}, []string{"url", "menu_button"}, nil),
 	}
 

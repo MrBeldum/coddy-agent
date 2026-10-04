@@ -96,19 +96,27 @@ func (b *Bot) syncMenuButton(bot *tgbotapi.BotAPI) {
 	botID := bot.Self.ID
 	set, before := b.store.MenuButton(botID)
 	want := app.MenuButtonEnabled()
+	withheld := false
 	if want {
 		allowed, note := b.webUIAllowed()
 		if !allowed {
 			b.log.Warn("telegram: menu button not pointed at the web UI", "url", app.URL, "why", note)
-			want = false
+			want, withheld = false, true
 		} else if note != "" {
 			b.log.Info("telegram: web UI elsewhere", "url", app.URL, "note", note)
 		}
 	}
 	if want {
 		if set == "" {
-			// The button this one replaces, to put back later.
-			if current, err := getMenuButton(bot); err == nil && worthPuttingBack(current, app.URL) {
+			// The button this one replaces, to put back later. One that
+			// cannot be read is not replaced, since it could not come back:
+			// the next start tries again.
+			current, err := getMenuButton(bot)
+			if err != nil {
+				b.log.Warn("telegram: read the menu button before replacing it", "err", err)
+				return
+			}
+			if worthPuttingBack(current, app.URL) {
 				if raw, err := json.Marshal(current); err == nil {
 					before = string(raw)
 				}
@@ -134,7 +142,10 @@ func (b *Bot) syncMenuButton(bot *tgbotapi.BotAPI) {
 		restore := menuButton{Type: "default"}
 		if before != "" {
 			var prev menuButton
-			if json.Unmarshal([]byte(before), &prev) == nil && prev.Type != "" {
+			// The operator's own button goes back, unless it opens the
+			// address the bot stops advertising for asking no sign-in.
+			if json.Unmarshal([]byte(before), &prev) == nil && prev.Type != "" &&
+				(!withheld || prev.WebApp == nil || prev.WebApp.URL != set) {
 				restore = prev
 			}
 		}
@@ -151,10 +162,14 @@ func (b *Bot) syncMenuButton(bot *tgbotapi.BotAPI) {
 
 // worthPuttingBack reports whether a menu button the bot is about to replace
 // should come back later: a Mini App the operator set, not the commands every
-// bot shows, and not one that already opens this address (a store lost on
-// the way).
+// bot shows, and not the bot's own button, which opens this address under the
+// bot's label (a store lost on the way). An operator's button labelled
+// exactly like the bot's on the same address cannot be told from it.
 func worthPuttingBack(current menuButton, url string) bool {
-	return current.Type == "web_app" && current.WebApp != nil && current.WebApp.URL != url
+	if current.Type != "web_app" || current.WebApp == nil {
+		return false
+	}
+	return current.WebApp.URL != url || current.Text != miniAppMenuText
 }
 
 // getMenuButton reads the bot's default menu button.

@@ -1565,7 +1565,7 @@
                     "boolean",
                     "null"
                   ],
-                  "description": "Make the bot's menu button (beside the message field) open the web UI. When it is turned off, or url is emptied, the bot puts the menu button back to its commands, but only if the button still opens the address the bot set itself.",
+                  "description": "Make the bot's menu button (beside the message field) open the web UI. Turned off, with url emptied or while the web UI asks for no sign-in, the bot puts back the menu button it replaced (a Mini App set in @BotFather, else the commands), as long as the button still opens the address the bot set.",
                   "default": true
                 }
               }

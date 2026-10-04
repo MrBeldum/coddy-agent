@@ -438,6 +438,60 @@ func TestMenuButtonSyncTakesBackOnlyItsOwnButton(t *testing.T) {
 			t.Fatalf("a refused button was remembered: %q", set)
 		}
 	})
+	t.Run("a button that cannot be read is not replaced", func(t *testing.T) {
+		f := newFakeAPI(t, tgfake.Options{})
+		setBotFatherButton(t, f, "https://mine.example.com/")
+		f.fake.SetFault(tgfake.Fault{Method: "getChatMenuButton", Code: 500, Description: "Internal Server Error", Times: 1})
+		bot := miniAppBot(t, "https://coddy.example.com/", "")
+		bot.syncMenuButton(f.api)
+		if m := f.fake.MenuButton(0); m.WebApp == nil || m.WebApp.URL != "https://mine.example.com/" {
+			t.Fatalf("a button that could not be read was replaced: %+v", m)
+		}
+		if set, before := bot.store.MenuButton(f.api.Self.ID); set != "" || before != "" {
+			t.Fatalf("remembered %q, %q", set, before)
+		}
+		// The next start reads it, takes it over and keeps it to put back.
+		bot.syncMenuButton(f.api)
+		bot.cfg.MiniApp.MenuButton = &no
+		bot.syncMenuButton(f.api)
+		if m := f.fake.MenuButton(0); m.WebApp == nil || m.WebApp.URL != "https://mine.example.com/" || m.Text != "Mine" {
+			t.Fatalf("menu button after turning it off: %+v", m)
+		}
+	})
+	t.Run("a BotFather button to the same address comes back", func(t *testing.T) {
+		f := newFakeAPI(t, tgfake.Options{})
+		setBotFatherButton(t, f, "https://coddy.example.com/")
+		bot := miniAppBot(t, "https://coddy.example.com/", "")
+		bot.syncMenuButton(f.api)
+		if m := f.fake.MenuButton(0); m.Text != miniAppMenuText {
+			t.Fatalf("menu button after the takeover: %+v", m)
+		}
+		bot.cfg.MiniApp.MenuButton = &no
+		bot.syncMenuButton(f.api)
+		if m := f.fake.MenuButton(0); m.Type != "web_app" || m.Text != "Mine" || m.WebApp == nil || m.WebApp.URL != "https://coddy.example.com/" {
+			t.Fatalf("menu button after turning it off: %+v", m)
+		}
+	})
+	t.Run("a BotFather button to the same address is not put back to advertise an open web UI", func(t *testing.T) {
+		f := newFakeAPI(t, tgfake.Options{})
+		setBotFatherButton(t, f, "https://coddy.example.com/")
+		bot := miniAppBot(t, "https://coddy.example.com/", "")
+		bot.syncMenuButton(f.api)
+		bot.SetWebUIGate(func() (bool, string) { return false, "the web UI asks for no sign-in" })
+		bot.syncMenuButton(f.api)
+		if m := f.fake.MenuButton(0); m.Type != "commands" {
+			t.Fatalf("an open web UI is advertised again by the button put back: %+v", m)
+		}
+	})
+	t.Run("a store lost under the bot's own button keeps nothing to put back", func(t *testing.T) {
+		f := newFakeAPI(t, tgfake.Options{})
+		miniAppBot(t, "https://coddy.example.com/", "").syncMenuButton(f.api)
+		lost := miniAppBot(t, "https://coddy.example.com/", "")
+		lost.syncMenuButton(f.api)
+		if _, before := lost.store.MenuButton(f.api.Self.ID); before != "" {
+			t.Fatalf("the bot's own button was kept as the operator's: %q", before)
+		}
+	})
 	t.Run("an open web UI is not advertised, and a button set before is taken back", func(t *testing.T) {
 		f := newFakeAPI(t, tgfake.Options{})
 		bot := miniAppBot(t, "https://coddy.example.com/", "")
