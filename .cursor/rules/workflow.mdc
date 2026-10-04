@@ -236,3 +236,9 @@ follows it has to open the pull request and work that out; issues #265 and #305 
 4. An issue from step 1 that the merge left open is closed by hand once its comment is up:
    **`gh issue close <N> --reason completed`**; issue #368 stayed open that way after pull
    request #369.
+
+## Site checkout safety
+
+- Run site generation after the agent change merges when generated links depend on `main`.
+- Use an isolated site-repository worktree based explicitly on current `origin/main`; never use a shared checkout at an unknown HEAD.
+- Commit only the expected generated files and verify the diff before publication.

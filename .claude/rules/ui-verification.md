@@ -58,3 +58,10 @@ opens a 3306-message session under CPU throttling, scrolls it without a jump, ed
 older page, runs a turn in a second browser, reads through a swarm relay, and fails past a budget.
 Run it once more with **`CODDY_ENGINE=webkit`** when the change touches scroll anchoring: WebKit does
 not anchor scrolling, so there the window's own correction is all that keeps the reader's row still.
+
+## Capture isolation and redaction
+
+- Captures use a temporary browser-context page, never the operator's main tab, and close it afterward.
+- Navigate the capture page through localhost to avoid host-specific zoom. Set the viewport explicitly and blur focus unless focus is what the screenshot documents.
+- Screenshot stands use isolated `HOME` and `CODDY_HOME` with neutral fixtures.
+- Before pushing, inspect every PNG for skill names, hosts, tokens, usernames, and personal paths.

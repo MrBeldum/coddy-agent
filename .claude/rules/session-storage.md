@@ -1,0 +1,17 @@
+---
+description: Safe persistence of untrusted provider tool-call IDs
+paths:
+  - "internal/session/toolcalls_store.go"
+  - "internal/session/validate.go"
+  - "internal/session/rewind.go"
+  - "internal/agent/react.go"
+  - "internal/agent/resume_permission.go"
+  - "external/httpserver/*toolcall*.go"
+  - "external/httpserver/*toolcalls*.go"
+---
+# Tool-call session storage
+
+- Provider tool-call IDs are untrusted. Every `tool_calls` path resolves through `ToolCallDirName` and the store API.
+- Safe historical IDs remain verbatim. Unsafe, path-like, or overlong IDs map deterministically to `tc_<digest>`, while metadata stores the raw ID.
+- Do not reject unusual non-empty IDs instead of mapping them.
+- Traversal tests send percent-encoded separators through the real `ServeMux`.

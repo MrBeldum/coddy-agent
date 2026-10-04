@@ -42,3 +42,10 @@ alwaysApply: false
 @Makefile
 @code-style.mdc
 @architecture.mdc
+
+## Asynchronous and tool-driven test harnesses
+
+- `Pool.Get` final status does not mean metadata or subscriber persistence is complete. Persistence tests wait with `Pool.Wait` or `waitUntilFinished`; notification tests wait for the subscriber signal. Do not repair races with sleeps or ordering changes.
+- Godog steps that invoke Vitest use `runVitestScenario`, provide a full describe-and-test pattern, and require a nonzero `Tests ... passed` summary. Do not bypass this with a local wrapper.
+- Do not run npm-installing Make targets concurrently with Vitest or external-ui Go tests.
+- `make docs` and `make docs-check` rebuild `build/coddy` and run npm. A live harness uses a copied stable binary or waits for the rebuild.
