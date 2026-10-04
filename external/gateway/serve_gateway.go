@@ -41,6 +41,9 @@ func Serve(ctx context.Context, opts Options) error {
 		if opts.Wakes != nil {
 			bot.SetWakeSurfaces(opts.Wakes)
 		}
+		if opts.WebUI != nil {
+			bot.SetWebUIGate(webUIGate(opts))
+		}
 		adapters = append(adapters, bot)
 	}
 
@@ -50,4 +53,26 @@ func Serve(ctx context.Context, opts Options) error {
 
 	NewHub(log, adapters...).Start(ctx)
 	return nil
+}
+
+// webUIGate turns what the web UI asks of a visitor into the bot's answer to
+// "may I hand out its address", read against the live configuration each time.
+func webUIGate(opts Options) func() (bool, string) {
+	return func() (bool, string) {
+		cfg := opts.Cfg
+		if opts.Mgr != nil {
+			if live := opts.Mgr.Cfg(); live != nil {
+				cfg = live
+			}
+		}
+		switch opts.WebUI(cfg) {
+		case WebUIGated, WebUIOpenByChoice:
+			return true, ""
+		case WebUIOpen:
+			return false, "the web UI of this coddy serve asks for no sign-in, and the bot does not hand out the address of an open agent: " +
+				"set up httpserver.login (`coddy serve set-password`) or a token, or say httpserver.allow_insecure: true to publish it open"
+		default:
+			return true, "this process does not serve the web UI; make sure the one at gateways.telegram.mini_app.url asks for sign-in"
+		}
+	}
 }

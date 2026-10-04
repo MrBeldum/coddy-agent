@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 
+	"github.com/EvilFreelancer/coddy-agent/external/gateway"
+	"github.com/EvilFreelancer/coddy-agent/external/httpserver"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
 )
 
@@ -74,5 +76,36 @@ func TestOfferNewestNeverDropsTheConfigurationItHandsOver(t *testing.T) {
 		default:
 			t.Fatalf("round %d: the supervisor took the older configuration and the newer one was dropped", i)
 		}
+	}
+}
+
+// The Telegram bot hands out the web UI's address only behind a credential, or
+// when the operator said so; a web UI this process does not serve is not its
+// to judge.
+func TestWebUIAccessDecidesWhatTheBotMayAdvertise(t *testing.T) {
+	off := false
+	open := &config.Config{}
+	if httpserver.Available {
+		if got := webUIAccess(open, false, false); got != gateway.WebUIOpen {
+			t.Fatalf("no credentials: %v, want WebUIOpen", got)
+		}
+		if got := webUIAccess(open, true, false); got != gateway.WebUIGated {
+			t.Fatalf("--auth-token: %v", got)
+		}
+		if got := webUIAccess(open, false, true); got != gateway.WebUIGated {
+			t.Fatalf("an account from the environment: %v", got)
+		}
+		withAccount := &config.Config{HTTPServer: config.HTTPServerConfig{Login: config.HTTPLoginConfig{User: "op", PasswordHash: "$argon2id$x"}}}
+		if got := webUIAccess(withAccount, false, false); got != gateway.WebUIGated {
+			t.Fatalf("an account in the file: %v", got)
+		}
+		insecure := &config.Config{HTTPServer: config.HTTPServerConfig{AllowInsecure: true}}
+		if got := webUIAccess(insecure, false, false); got != gateway.WebUIOpenByChoice {
+			t.Fatalf("allow_insecure: %v", got)
+		}
+	}
+	elsewhere := &config.Config{HTTPServer: config.HTTPServerConfig{Enabled: &off}}
+	if got := webUIAccess(elsewhere, false, false); got != gateway.WebUIElsewhere {
+		t.Fatalf("httpserver.enable: false: %v", got)
 	}
 }

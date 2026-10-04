@@ -60,6 +60,11 @@ type Request struct {
 	SubsystemErr error
 	// Remote is the --remote target of a console or acp run.
 	Remote *remote.Options
+	// WebUIOpen says the web UI of this process would be served with no
+	// credentials - no sign-in, no token from the file, a flag or the
+	// environment - and without httpserver.allow_insecure; serve fills it. The
+	// Telegram bot does not advertise such a web UI as its Mini App.
+	WebUIOpen bool
 	// Timeout bounds each network probe; zero means defaultTimeout.
 	Timeout time.Duration
 }
@@ -124,12 +129,14 @@ func Run(ctx context.Context, req Request) *Report {
 	r.paths()
 	r.mcpCommands()
 	r.webLogin()
+	r.miniApp()
 	r.listeners()
 	r.unsentModelSettings()
 
 	var probes []probe
 	probes = append(probes, r.providerProbes()...)
 	probes = append(probes, r.telegramProbes()...)
+	probes = append(probes, r.miniAppProbes()...)
 	probes = append(probes, r.mcpRemoteProbes()...)
 	probes = append(probes, r.remoteProbes()...)
 	probes = append(probes, r.swarmProbes()...)
