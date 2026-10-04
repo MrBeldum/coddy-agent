@@ -4,7 +4,8 @@
  *
  * Whether Mermaid draws, whether the picture fits the transcript and whether
  * KaTeX's fonts arrive are facts of a real engine, so jsdom cannot assert them.
- * This page mounts an answer holding a flowchart, a sequence diagram, a mindmap, a raw SVG,
+ * This page mounts an answer holding a flowchart, a sequence diagram, a mindmap, a
+ * Gantt chart, a pie, a class diagram, a raw SVG,
  * a broken diagram, inline and display formulas and a price that must stay text,
  * from the real components against the real stylesheet, with no backend.
  * `?theme=<id>` picks the appearance, `?lang=ru` the language, `?case=<name>`
@@ -60,6 +61,24 @@ export const CASES: Record<string, string> = {
   mindmap: fence(
     "mermaid",
     ["mindmap", "  root((Coddy))", "    Surfaces", "      Web UI", "      Console", "    Features", "      Diagrams", "      Formulas"].join("\n"),
+  ),
+  gantt: fence(
+    "mermaid",
+    [
+      "gantt",
+      "  title Release 1.3",
+      "  dateFormat YYYY-MM-DD",
+      "  section Web UI",
+      "  Diagrams    :done, d1, 2026-10-01, 3d",
+      "  Formulas    :active, d2, after d1, 2d",
+      "  section Docs",
+      "  Screenshots :crit, d3, 2026-10-05, 2d",
+    ].join("\n"),
+  ),
+  pie: fence("mermaid", ['pie title Where the week went', '  "Code" : 45', '  "Review" : 25', '  "Docs" : 20', '  "Meetings" : 10'].join("\n")),
+  classes: fence(
+    "mermaid",
+    ["classDiagram", "  class Session {", "    +id string", "    +run(prompt)", "  }", "  class Message {", "    +role string", "  }", '  Session "1" --> "*" Message'].join("\n"),
   ),
   svg: fence(
     "svg",

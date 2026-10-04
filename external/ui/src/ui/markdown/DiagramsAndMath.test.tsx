@@ -33,7 +33,15 @@ vi.mock("./renderers", () => ({
 
 import { Markdown } from "./Markdown";
 import { STREAM_SETTLE_MS } from "./DiagramBlock";
-import { cachedPicture, clearPictureCache, renderPicture, standaloneSvg } from "./pictureRender";
+import {
+  cachedPicture,
+  clearPictureCache,
+  mermaidThemeVariables,
+  parseCssColor,
+  renderPicture,
+  standaloneSvg,
+  type DiagramPalette,
+} from "./pictureRender";
 import { resetMathForTests } from "./MathFormula";
 
 function blobText(b: Blob): Promise<string> {
@@ -86,7 +94,7 @@ describe("Mermaid and SVG fences", () => {
     expect(img.getAttribute("height")).toBe("100");
     expect(screen.getByTestId("md-figure").dataset.view).toBe("picture");
     expect(mermaid.initialize).toHaveBeenCalledWith(
-      expect.objectContaining({ securityLevel: "strict", startOnLoad: false, theme: "base" }),
+      expect.objectContaining({ securityLevel: "strict", startOnLoad: false, htmlLabels: false }),
     );
   });
 
@@ -238,6 +246,73 @@ test("a diagram queued for a theme the page has left is neither drawn nor cached
   await expect(renderPicture("mermaid", FLOW, "dark")).rejects.toThrow(/theme changed/);
   expect(cachedPicture("mermaid", FLOW, "dark")).toBeUndefined();
   expect(mermaid.render).not.toHaveBeenCalled();
+});
+
+describe("diagram colours follow the theme and stay readable", () => {
+  // WCAG relative luminance and contrast ratio.
+  const lum = (h: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((c) =>
+      c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrast = (a: string, b: string) => {
+    const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m);
+    return (x! + 0.05) / (y! + 0.05);
+  };
+  // The dark and light themes' own tokens (styles.css), as the browser resolves them.
+  const dark: DiagramPalette = {
+    dark: true,
+    background: [24, 24, 27],
+    text: [244, 244, 245],
+    accent: [167, 139, 250],
+    series: [[167, 139, 250], [134, 239, 172], [147, 197, 253], [253, 230, 138], [240, 171, 252], [103, 232, 249], [253, 164, 175]],
+    font: "sans-serif",
+  };
+  const light: DiagramPalette = {
+    dark: false,
+    background: [236, 236, 238],
+    text: [24, 24, 27],
+    accent: [124, 58, 237],
+    series: [[124, 58, 237], [17, 105, 49], [13, 92, 173], [121, 82, 12], [147, 48, 106], [14, 100, 110], [185, 28, 28]],
+    font: "sans-serif",
+  };
+
+  // A theme whose accent is too dark to carry a label on its own surface.
+  const deepAccent: DiagramPalette = { ...dark, accent: [147, 51, 234], series: [[147, 51, 234], ...dark.series.slice(1)] };
+
+  test.each([["dark", dark], ["light", light], ["dark with a deep accent", deepAccent]])("%s: edges, labels, pie slices and Gantt bars contrast", (_name, palette) => {
+    const v = mermaidThemeVariables(palette) as Record<string, string>;
+    // Edges and lines against the surface (WCAG non-text contrast is 3:1).
+    expect(contrast(v.lineColor!, v.background!)).toBeGreaterThanOrEqual(3);
+    // Node text on node fills, Gantt text on task bars, mindmap labels on their sections.
+    expect(contrast(v.primaryTextColor!, v.primaryColor!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v.taskTextColor!, v.taskBkgColor!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v.taskTextColor!, v.doneTaskBkgColor!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(v.taskTextColor!, v.activeTaskBkgColor!)).toBeGreaterThanOrEqual(4.5);
+    for (let i = 0; i < palette.series.length; i++) {
+      // A slice stands out from the surface, and its percentage reads on it.
+      expect(contrast(v[`pie${i + 1}`]!, v.background!), `pie${i + 1}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(v.pieSectionTextColor!, v[`pie${i + 1}`]!), `pie${i + 1} label`).toBeGreaterThanOrEqual(4.5);
+      if (i < 8) expect(contrast(v[`gitBranchLabel${i}`]!, v[`git${i}`]!), `git${i} label`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(v[`cScaleLabel${i}`]!, v[`cScale${i}`]!), `cScale${i}`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(v.darkMode).toBe(palette.dark);
+  });
+
+  test("two tokens of one colour do not give two slices alike", () => {
+    const v = mermaidThemeVariables({ ...dark, series: [[136, 192, 208], [163, 190, 140], [136, 192, 208], [180, 142, 173]] }) as Record<string, string>;
+    expect(new Set([v.pie1, v.pie2, v.pie3]).size).toBe(3);
+    expect(v.pie3).not.toBe(v.pie1);
+  });
+
+  test("reads the colours a browser serialises", () => {
+    expect(parseCssColor("rgb(24, 24, 27)")).toEqual([24, 24, 27, 1]);
+    expect(parseCssColor("rgba(0, 0, 0, 0.5)")).toEqual([0, 0, 0, 0.5]);
+    expect(parseCssColor("rgb(0 0 0 / 50%)")).toEqual([0, 0, 0, 0.5]);
+    expect(parseCssColor("color(srgb 1 0.5 0 / 0.25)")).toEqual([255, 127.5, 0, 0.25]);
+    expect(parseCssColor("oklch(0.5 0.1 200)")).toBeNull();
+  });
 });
 
 describe("standaloneSvg", () => {

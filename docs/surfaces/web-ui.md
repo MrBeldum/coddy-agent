@@ -1118,7 +1118,14 @@ An answer that holds a diagram or a formula shows it drawn, not as source. This 
 - **The block.** A head row names the kind (**Mermaid diagram**, **SVG image**) and carries a **Picture / Code** switch, a copy button and a download button. Picture is the default; Code shows the highlighted source. Copy always copies the source. Download saves the source (**`diagram.mmd`**, **`image.svg`**); a Mermaid block also offers **SVG**, the drawn picture as a file. A click on the picture opens it in the image viewer with zoom and pan.
 - **Errors.** A diagram Mermaid cannot parse shows its source with the reason under the head (**Could not draw the picture: Parse error on line 3: ... Expecting ..., got ...**), and Picture is disabled. If the renderer cannot be loaded at all (offline, a page older than the binary), the block shows the source with **Could not load the diagram renderer: reload the page**.
 - **Streaming.** A fence that is still arriving is drawn when it first appears and then again once its text has not changed for 300 ms, so Mermaid is not run on every token of a half-written diagram.
-- **Themes.** A diagram takes its colours from the active appearance (the surface, the accent, the text) and is drawn again when the theme changes. An SVG is drawn as written.
+- **Themes.** A diagram takes all its colours from the active appearance and is drawn again when the theme changes: nodes are tinted with the accent, edges are the text colour, and pie slices, chart series and git branches use the theme's accent and syntax colours, each kept far enough from the surface that the slice stands out and its label reads (4.5:1). This holds in all seven themes. An SVG is drawn as written.
+
+![A Gantt chart and a pie chart drawn in the dark theme, slices in the theme's accent and syntax colours](../assets/web-ui/diagrams-charts-dark-1280.png)
+*Charts take the theme's colours: the dark theme...*
+
+![The same Gantt chart and pie chart in the light theme](../assets/web-ui/diagrams-charts-light-1280.png)
+*...and the light one.*
+
 - **Safety.** The picture is an `<img>` with the SVG as a `data:` URL: an SVG drawn that way runs no script, loads nothing from the network and cannot style the page, so an SVG the model wrote is shown as it is. Mermaid runs with **`securityLevel: "strict"`**.
 
 ![Inline and display formulas typeset by KaTeX, with the Formula / Code switch on a display block](../assets/web-ui/diagrams-formulas-dark-1280.png)
@@ -1581,7 +1588,7 @@ CODDY_BIN=../../build/coddy npm run check:telegram
 
 ### Checking diagrams and formulas
 
-Whether Mermaid draws, whether the browser decodes the picture, whether KaTeX's fonts arrive and whether a picture fits the transcript are facts of a real engine. **`external/ui/scripts/diagram-check.mjs`** opens **`src/diagram-check.html`**, a stand that mounts an answer with three Mermaid diagrams (a flowchart, a sequence diagram and a mindmap), an SVG, a broken diagram, inline and display formulas and a price from the real components against the real stylesheet, in all seven themes at **360** and **1280px**, and fails when a picture is not drawn or sticks out of the column, the broken diagram does not name its error, a formula is not typeset, KaTeX's font did not load, the price became a formula, the page scrolls sideways, Mermaid and KaTeX were not fetched on demand, or anything was logged as an error.
+Whether Mermaid draws, whether the browser decodes the picture, whether KaTeX's fonts arrive and whether a picture fits the transcript are facts of a real engine. **`external/ui/scripts/diagram-check.mjs`** opens **`src/diagram-check.html`**, a stand that mounts an answer with six Mermaid diagrams (a flowchart, a sequence diagram, a mindmap, a Gantt chart, a pie and a class diagram), an SVG, a broken diagram, inline and display formulas and a price from the real components against the real stylesheet, in all seven themes at **360** and **1280px**, and fails when a picture is not drawn or sticks out of the column, the broken diagram does not name its error, a formula is not typeset, KaTeX's font did not load, the price became a formula, the page scrolls sideways, Mermaid and KaTeX were not fetched on demand, or anything was logged as an error.
 
 ```bash
 cd external/ui && npx vite --port 5247 &
