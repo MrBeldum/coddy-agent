@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useT } from "../i18n/I18nProvider";
 import { LIGHT_THEMES } from "../theme/themeCookie";
 import { readAppliedUiTheme } from "../theme/uiTheme";
-import { signIn } from "./authState";
+import { signIn, snapshotAuth } from "./authState";
 // Both wordmarks are small enough that Vite inlines them into the bundle, so
 // the screen paints with no second request - which matters on the one page a
 // browser sees before it has any credential at all.
@@ -29,6 +29,8 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The server took the password, but the session it set did not come back.
+  const [notKept, setNotKept] = useState(false);
 
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -37,8 +39,20 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
     }
     setBusy(true);
     setError("");
+    setNotKept(false);
     const res = await signIn(user, password);
     if (res.ok) {
+      // signIn has asked the server again. A browser that does not send the
+      // cookie back in this frame - a page embedded in another site, such as
+      // Telegram Web running a Mini App in an iframe - is still signed out:
+      // reloading would only bring this form back with no word of why.
+      const after = snapshotAuth();
+      if (after.loginRequired && !after.authenticated) {
+        setBusy(false);
+        setPassword("");
+        setNotKept(true);
+        return;
+      }
       // A reload rather than a re-render: every list, stream and cached
       // response on the page was fetched by a browser that had no session, so
       // starting over is both simpler and more honest than patching them up.
@@ -107,6 +121,15 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
           {error ? (
             <p className="auth-error" role="alert">
               {error}
+            </p>
+          ) : null}
+
+          {notKept ? (
+            <p className="auth-error" role="alert">
+              {t("auth.signIn.notKept")}{" "}
+              <a href={window.location.href} target="_blank" rel="noopener noreferrer">
+                {t("auth.signIn.openInTab")}
+              </a>
             </p>
           ) : null}
 

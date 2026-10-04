@@ -31,6 +31,9 @@ export const messagesEn: Record<string, string> = {
     "Sign-in is switched on but no account is configured. Run `coddy serve set-password` on the server.",
   "auth.signIn.crossSite": "That request did not come from this page.",
   "auth.signIn.failed": "Sign-in failed ({status}).",
+  "auth.signIn.notKept":
+    "The server accepted the sign-in, but this browser did not keep it in this frame, because the page is embedded in another site such as Telegram Web.",
+  "auth.signIn.openInTab": "Open Coddy in a tab of its own",
   "auth.signOut.action": "Sign out",
   "auth.signOut.tooltipUser": "Sign out ({user})",
 
