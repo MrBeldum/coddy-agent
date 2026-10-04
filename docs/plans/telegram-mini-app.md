@@ -546,3 +546,80 @@ accidental hardware back would answer the agent), loading the SDK only inside
 a launch (it keeps the half of P1 that happens inside Telegram), the sum of the
 safe areas (the documentation measures the content area from the top of the
 content, and the sum errs on the safe side).
+
+## 10. What implementing changed
+
+The plan held; three things went differently, all found by the live check
+(`npm run check:telegram`), which drives the stand of D11 in a real browser.
+
+- **The lift over the docked composer is a block, not padding.** D4 grew the
+  composer's padding by the hidden part. `ChatScreen` measures the reserve
+  from the content box of `.chat-bottom-inner`, so padding on `.chat-bottom`
+  was never seen and padding on the inner element lies outside the box it
+  observes: the composer rose and the transcript's tail stayed under it. The
+  lift is now an empty block after the composer column's content,
+  `.chat-bottom:has(.composer-wrap-docked) .chat-bottom-inner::after`, as tall
+  as the hidden part beyond the keyboard. It is content, so the observer sees
+  it, the reserve grows and a transcript parked at its newest message follows,
+  still with nothing new in `ChatScreen`.
+- **`resize` only when the hidden part moves.** The first application of the
+  viewport runs before React mounts and dispatches nothing; later
+  `viewport_changed` events dispatch one only when
+  `--coddy-telegram-hidden-bottom` changed, so a keyboard, which the window
+  reports itself, or a repeated stable height does not make every sheet
+  measure again.
+- **The stand's own defects.** The loading veil of the phone frame took its
+  `display: flex` over `[hidden]` and caught every click; the sheet positions
+  were first compared in page coordinates rather than the frame's; a run that
+  failed left its servers on their ports. The veil hides, the check measures
+  inside the frame, refuses ports that are busy and exits when it is done.
+
+## 11. Cross-review, round 2
+
+The implementation (8b6f68a9..a2d17e68) in two briefs, the Go half and the
+SPA half, to Coddy on `codex/gpt-5.6-sol`, Coddy on `devin/swe-2` and Cursor
+`auto`; Coddy on `neuraldeep/qwen3.8-27b-noreason` got the production code
+alone, since it stalls on long briefs, and finished the SPA half only when
+its session was continued after the output limit cut it off. Every reviewer
+said approve with changes, and so did the orchestrators after checking each
+finding against the code, the Telegram documentation and the source of
+`telegram-bot-api`. Fixed:
+
+- **medium:** Back did not reach the composer's slash and `@` pickers or the
+  image viewer, which heard Escape only with the focus inside them; a click
+  on Telegram Web's Back leaves the frame's focus on `body`, so the press
+  left the conversation instead. Both now listen through `useEscapeCloses`,
+  as the SPA's rule for menus and dialogs says;
+- **medium:** a `getChatMenuButton` that failed on the first takeover lost the
+  button set in @BotFather for good; the bot now leaves a button it cannot
+  read alone until the next start;
+- an operator's button on the bot's own address never came back (told apart
+  from the bot's by its label now, and not put back to advertise an open web
+  UI); the fingerprint rebuilt a bot with no Mini App on a new web UI
+  password (the HTTP keys count only with `mini_app.url`); tgfake showed the
+  bot's menu button in groups and answered `getChatMenuButton` for a group's
+  id, where the Bot API reads `chat_id` as a user; the description of
+  `menu_button` and a sentence about where the launch data is kept.
+
+Rejected, with the evidence in the reports: the menu button synced only at
+start (the fingerprint covers the keys of the gate, and the manager publishes
+the configuration before it tells the supervisor), origin checks on the
+frame's messages (only `window.parent` is heard and the events only present,
+which is how the SDK filters too), the safe area requested from clients older
+than 8.0 (the SDK sends both requests unconditionally), and the observer of
+the back button watching `body` without its subtree (every layer is a portal
+into `body`).
+
+Open: the hidden part is the WebView's height minus the stable height, which
+assumes that a half-open Mini App keeps its full height with the lower part
+off the screen, as Telegram's documentation of `viewportHeight` says. The
+stand encodes the same assumption, so only a half-open app on a real Android
+or iOS client settles it.
+
+Done in the same branch while the round ran: the `/resume` and subagent
+permission harnesses moved onto tgfake, a tap on the current model no longer
+re-sends an identical menu (Telegram refuses it), the long-model scenario that
+could not fail, an MCP test that left its stub running for an hour, and the
+godog steps of the web UI reading one Vitest run per file (the package went
+from 950 s to 214 s on a loaded machine).
+
