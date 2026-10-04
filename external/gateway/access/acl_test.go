@@ -100,7 +100,7 @@ func TestKeyIsAdmin(t *testing.T) {
 		}
 	}
 	r := access.NonAdminTurn()
-	if !r.AskAlways || !r.ConfineToWorkspace || r.Allows("config_commit") || r.Allows("switch_model") || r.Allows("run_command") || r.Allows("github__create_issue") || !r.Allows("read") {
+	if !r.AskAlways || !r.ConfineToWorkspace || r.Allows("config_commit") || r.Allows("switch_model") || r.Allows("run_command") || r.Allows("github__create_issue") || r.Allows("load_skill") || !r.Allows("read") {
 		t.Fatalf("restriction: %+v", r)
 	}
 }

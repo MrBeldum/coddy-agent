@@ -1492,7 +1492,11 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	// inlines the document) instead of turning into a run request.
 	askMode := state.GetMode() == string(ModeAsk)
 
-	if slug := RunPlanSlugFromPromptMeta(params.Meta); slug != "" && !subagentTurn {
+	// A restricted turn (a messenger user who is not the bot's admin) does not
+	// run a plan: running one switches the session's mode, which is the
+	// admins' to change. Its text goes to the model as an ordinary prompt.
+	restricted := opts != nil && opts.Restriction != nil
+	if slug := RunPlanSlugFromPromptMeta(params.Meta); slug != "" && !subagentTurn && !restricted {
 		if askMode {
 			return nil, fmt.Errorf("plan %q cannot be run in ask mode: switch to agent mode first", slug)
 		}
@@ -1518,7 +1522,7 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	if err != nil {
 		return nil, err
 	}
-	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && !askMode {
+	if sd := strings.TrimSpace(state.GetPersistedSessionDir()); sd != "" && !subagentTurn && !askMode && !restricted {
 		if mentionSlug := ExtractRunPlanSlugFromPromptText(contentBlocksToPlainText(hydrated)); mentionSlug != "" {
 			return m.runPlanAdmitted(turnCtx, params.SessionID, mentionSlug, state, sender)
 		}

@@ -96,22 +96,31 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
           width={188}
           height={56}
         />
-        {telegramNote && !snapshotAuth().loginRequired ? (
+        {(telegramNote || telegramNotKept) && !auth.loginRequired ? (
           <div className="auth-card">
             <p className="auth-error" role="alert" data-testid="telegram-note">
-              {telegramNote}
+              {telegramNote || t("auth.signIn.notKept")}{" "}
+              {telegramNotKept ? (
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t("auth.signIn.openInTab")}
+                </a>
+              ) : null}
             </p>
           </div>
         ) : (
           <form className="auth-card" onSubmit={submit}>
             <h1 className="auth-title">{t("auth.signIn.title")}</h1>
-            {snapshotAuth().telegramRefused ? (
+            {telegramNote ? (
               <p
                 className="auth-error"
                 role="alert"
-                data-testid="telegram-not-admin"
+                data-testid="telegram-note"
               >
-                {t("auth.signIn.telegramNotAdmin")}
+                {telegramNote}
               </p>
             ) : null}
 

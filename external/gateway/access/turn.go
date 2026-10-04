@@ -17,13 +17,14 @@ const AdminOnlyNote = "only the bot's admins can do this"
 // nonAdminTools are the only tools a turn of a messenger user who is not the
 // bot's admin may call: reading inside the session's working directory, the
 // built-in documentation, a web search, the session's own plan and to-do
-// list, and a question back. Everything else - the configuration, the model,
+// list, and a question back. Everything else - the configuration, the model
+// (a skill sets one too, so load_skill is out),
 // subagents, worktrees, the scheduler, background tasks, servers, MCP tools,
 // shell commands, writes, fetching a page from the server - is the admins'.
 var nonAdminTools = []string{
 	"read", "grep", "glob", "print_tree",
 	"coddy_docs_search", "coddy_docs_read", "websearch",
-	"question", "load_skill", "plan_read", "plan_list",
+	"question", "plan_read", "plan_list",
 	"coddy_todo_plan_read", "coddy_todo_plan_replace", "coddy_todo_plan_archive",
 	"coddy_todo_item_add", "coddy_todo_item_remove", "coddy_todo_item_update", "coddy_todo_item_move",
 }

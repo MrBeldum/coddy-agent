@@ -807,6 +807,10 @@ func findMentionRule(catalog []*rules.Rule, name string) *rules.Rule {
 }
 
 func (r *mentionResolver) ruleResource(rule *rules.Rule, typed string) (*acp.Resource, bool) {
+	// A restricted turn attaches the rules of its working directory only.
+	if r.scope.Confined && !PathInWorkspace(rule.FilePath, r.cwd, r.scope.ConfineHome) {
+		return nil, false
+	}
 	res := RuleAttachment(r.cwd, r.home, rule)
 	if !r.claim(mention.KindRule + "|" + res.URI) {
 		return nil, false

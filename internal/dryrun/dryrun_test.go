@@ -877,6 +877,10 @@ func TestMiniAppChecks(t *testing.T) {
 
 func TestGatewayWithoutAdminsIsWarned(t *testing.T) {
 	t.Setenv(config.PachcaBotTokenEnvVar, "")
+	t.Setenv(config.TelegramBotTokenEnvVar, "")
+	if c := find(t, run(t, "gateways:\n  telegram:\n    enable: true\n", nil), "gateways.telegram.admins"); c.Status != StatusWarning {
+		t.Errorf("a Telegram bot without admins: %+v", c)
+	}
 	body := "gateways:\n  pachca:\n    enable: true\n"
 	if c := find(t, run(t, body, nil), "gateways.pachca.admins"); c.Status != StatusWarning || !strings.Contains(c.Message, "no admins") {
 		t.Errorf("no admins: %+v", c)

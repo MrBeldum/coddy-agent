@@ -201,3 +201,38 @@ func TestCommandAfterAMentionIsTheCommand(t *testing.T) {
 		t.Fatal("an admin's \"@bot /clear\" did not start a new session")
 	}
 }
+
+// In a shared group session everybody shares the asking session: only the
+// bot's admins may answer what the agent asks.
+func TestPermissionTapFromANonAdminInASharedGroupIsIgnored(t *testing.T) {
+	f := newFakeAPI(t, tgfake.Options{})
+	b := New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationShared, Admins: []int64{9}},
+		newScriptedRunner(), t.TempDir(), slog.New(slog.DiscardHandler), "", nil)
+	key := sessionstore.SessionKey(adapterName, -100, 0, config.IsolationShared, true)
+	sid := b.store.Get(key)
+	p := &chatPrompt{sessionID: sid, options: []acp.PermissionOption{{OptionID: "allow", Name: "Allow"}}, answer: make(chan *acp.PermissionResult, 1)}
+	b.asks.mu.Lock()
+	b.asks.pending["tok"] = p
+	b.asks.mu.Unlock()
+	tap := func(uid int64) {
+		b.answerPermissionTap(f.api, &tgbotapi.CallbackQuery{
+			From:    &tgbotapi.User{ID: uid},
+			Message: &tgbotapi.Message{MessageID: 1, Chat: &tgbotapi.Chat{ID: -100, Type: "group"}},
+		}, "tok:0")
+	}
+	tap(5)
+	select {
+	case <-p.answer:
+		t.Fatal("a non-admin answered a permission request in a shared group")
+	default:
+	}
+	tap(9)
+	select {
+	case res := <-p.answer:
+		if res.OptionID != "allow" {
+			t.Fatalf("the admin's answer: %+v", res)
+		}
+	default:
+		t.Fatal("the admin's tap did not answer the request")
+	}
+}

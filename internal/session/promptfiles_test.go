@@ -875,3 +875,45 @@ func TestConfinedTurnMentionsStayInsideTheWorkspace(t *testing.T) {
 		t.Fatal("PathInWorkspace misread a relative path")
 	}
 }
+
+// A restricted turn attaches the rules of its working directory only: a rule
+// of the agent's home stays out of "@rule:", as a file of the home does.
+func TestConfinedTurnRuleMentionsStayInsideTheWorkspace(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	for _, f := range []struct{ path, body string }{
+		{filepath.Join(home, "rules", "home-secret.md"), "---\npaths:\n  - never/**\n---\nHOME RULE BODY"},
+		{filepath.Join(root, ".claude", "rules", "local.md"), "---\npaths:\n  - never/**\n---\nLOCAL RULE BODY"},
+	} {
+		_ = os.MkdirAll(filepath.Dir(f.path), 0o755)
+		if err := os.WriteFile(f.path, []byte(f.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &config.Config{Paths: config.Paths{Home: home, CWD: root}}
+	cfg.Agent.ApplyDefaults()
+	cfg.Rules.ApplyDefaults()
+	m := session.NewManager(cfg, noopSender{}, noopRunner, slog.New(slog.DiscardHandler), root, &session.FileStore{Root: t.TempDir()})
+	res, err := m.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := m.SessionByID(res.SessionID)
+	attach := func(scope session.MentionScope) string {
+		blocks := m.ResolvePromptMentions(context.Background(), st, []acp.ContentBlock{{Type: acp.ContentTypeText, Text: "@rule:home-secret @rule:local"}}, scope)
+		var b strings.Builder
+		for _, x := range blocks {
+			if x.Resource != nil {
+				b.WriteString(x.Resource.Text)
+			}
+		}
+		return b.String()
+	}
+	if open := attach(session.MentionScope{}); !strings.Contains(open, "HOME RULE BODY") {
+		t.Skipf("the home rule is not in this session's catalog (%q); nothing to confine", open)
+	}
+	got := attach(session.MentionScope{Confined: true, ConfineHome: home})
+	if strings.Contains(got, "HOME RULE BODY") || !strings.Contains(got, "LOCAL RULE BODY") {
+		t.Fatalf("rule attachments of a confined turn: %q", got)
+	}
+}
