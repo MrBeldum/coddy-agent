@@ -253,6 +253,23 @@ def flow_sequence_complete(value: str) -> bool:
     return depth == 0
 
 
+def flow_quote_state(value: str) -> str:
+    quote = ""
+    escaped = False
+    for char in value:
+        if quote:
+            if char == "\\" and quote == '"' and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if char in ("'", '"'):
+            quote = char
+    return quote
+
+
 def flow_line_continues(value: str) -> bool:
     quote = ""
     escaped = False
@@ -298,7 +315,12 @@ def parse_rule(path: Path) -> Rule | None:
             if cleaned_value.startswith("[") and not flow_sequence_complete(cleaned_value):
                 while index + 1 < len(lines):
                     index += 1
-                    continuation = strip_yaml_comment(lines[index].strip())
+                    raw_continuation = lines[index].strip()
+                    continuation = (
+                        raw_continuation
+                        if flow_quote_state(cleaned_value)
+                        else strip_yaml_comment(raw_continuation)
+                    )
                     if continuation:
                         if flow_line_continues(cleaned_value):
                             cleaned_value = cleaned_value[:-1] + continuation.lstrip()
@@ -521,8 +543,8 @@ def main() -> int:
     try:
         rules = load_rules()
     except Exception:
-        return 0
-    if not rules:
+        if event == "SessionStart" and payload.get("source", "") != "resume":
+            clear_sent(session_id)
         return 0
 
     if event == "SessionStart":
@@ -542,6 +564,9 @@ def main() -> int:
             )
 
         deliver_session_start(session_id, source, always, deliver)
+        return 0
+
+    if not rules:
         return 0
 
     if event != "PreToolUse":

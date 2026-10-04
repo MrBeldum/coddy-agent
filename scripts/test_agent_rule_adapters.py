@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import importlib.util
 import io
@@ -77,7 +79,9 @@ def multiline_flow_rule(directory: Path) -> Path:
         "globs: [\n"
         "  \"internal/llm/\\\n"
         "    *.go\",\n"
-        "  \"cmd/coddy/providers.go\"\n"
+        "  \"cmd/coddy/providers.go\",\n"
+        "  \"fixtures/foo\n"
+        "    #bar.go\"\n"
         "]\n"
         "alwaysApply: false\n"
         "---\n\n"
@@ -204,7 +208,11 @@ class AdapterContractTest(unittest.TestCase):
                 self.assertTrue(rule.always)
                 multiline = module.parse_rule(multiline_flow_rule(Path(tmp)))
                 self.assertEqual(
-                    ["internal/llm/*.go", "cmd/coddy/providers.go"],
+                    [
+                        "internal/llm/*.go",
+                        "cmd/coddy/providers.go",
+                        "fixtures/foo #bar.go",
+                    ],
                     multiline.globs,
                 )
                 self.assertFalse(multiline.always)
@@ -290,6 +298,36 @@ class AdapterContractTest(unittest.TestCase):
                         "Every provider request",
                         run_pretool(module, rules_dir, state_dir, tool_input),
                     )
+
+    def test_empty_rules_lifecycle_resets_scoped_state(self):
+        codex = load_module("codex_empty_reset", CODEX)
+        zcode = load_module("zcode_empty_reset", ZCODE)
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            root = Path(tmp)
+            rules_dir = root / "rules"
+            rules_dir.mkdir()
+            list_rule(rules_dir)
+            empty_dir = root / "empty-rules"
+            empty_dir.mkdir()
+            tool_input = {"file_path": "internal/llm/openai.go"}
+            for name, module in (("codex", codex), ("zcode", zcode)):
+                state_dir = root / f"state-{name}"
+                self.assertIn(
+                    "Every provider request",
+                    run_pretool(module, rules_dir, state_dir, tool_input),
+                )
+                self.assertIsNone(
+                    run_hook_optional(
+                        module,
+                        empty_dir,
+                        state_dir,
+                        {"hook_event_name": "SessionStart", "source": "compact"},
+                    )
+                )
+                self.assertIn(
+                    "Every provider request",
+                    run_pretool(module, rules_dir, state_dir, tool_input),
+                )
 
     def test_zcode_default_state_dir_is_repository_scoped(self):
         zcode = load_module("zcode_state_dir", ZCODE)

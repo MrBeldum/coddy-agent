@@ -53,6 +53,28 @@ func TestRepositoryRuleMirrors(t *testing.T) {
 	}
 }
 
+func TestRepositoryWorkflowRuleCoversGovernedArtifacts(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	path := filepath.Join(root, ".cursor", "rules", "workflow.mdc")
+	rule, err := ParseRuleFile(path, SourceCursor, mustReadRule(t, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule.Root = root
+	for _, governed := range []string{
+		"config.example.yaml",
+		"examples/httpserver/config.example.yaml",
+		"go.mod",
+		"go.sum",
+		".golangci.yml",
+		"Dockerfile",
+	} {
+		if !matchesRuleGlobs(rule, []string{governed}) {
+			t.Errorf("workflow rule does not cover %s", governed)
+		}
+	}
+}
+
 func TestRepositoryInstructionCompatibilityFiles(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))
 	target, err := instructionCompatibilityTarget(filepath.Join(root, "CLAUDE.md"))

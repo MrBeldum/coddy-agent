@@ -239,6 +239,24 @@ function flowLineContinues(value) {
   return quote === '"' && value.endsWith("\\")
 }
 
+function flowQuoteState(value) {
+  let quote = ""
+  let escaped = false
+  for (const character of value) {
+    if (quote) {
+      if (character === "\\" && quote === '"' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (character === quote && !escaped) quote = ""
+      escaped = false
+      continue
+    }
+    if (character === '"' || character === "'") quote = character
+  }
+  return quote
+}
+
 export function parseRule(filePath, text, repoRoot) {
   const frontmatter = text.match(
     /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/,
@@ -261,7 +279,10 @@ export function parseRule(filePath, text, repoRoot) {
       if (cleanedValue.startsWith("[") && !flowSequenceComplete(cleanedValue)) {
         while (index + 1 < lines.length) {
           index += 1
-          const continuation = stripYamlComment(lines[index].trim())
+          const rawContinuation = lines[index].trim()
+          const continuation = flowQuoteState(cleanedValue)
+            ? rawContinuation
+            : stripYamlComment(rawContinuation)
           if (continuation) {
             if (flowLineContinues(cleanedValue)) {
               cleanedValue = cleanedValue.slice(0, -1) + continuation.trimStart()

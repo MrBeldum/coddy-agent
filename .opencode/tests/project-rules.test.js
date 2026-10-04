@@ -106,7 +106,9 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
       "globs: [",
       '  "internal/llm/' + "\\",
       '    *.go",',
-      '  "cmd/coddy/providers.go"',
+      '  "cmd/coddy/providers.go",',
+      '  "fixtures/foo',
+      '    #bar.go"',
       "]",
       "alwaysApply: false",
       "---",
@@ -117,6 +119,7 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
   assert.deepEqual(multiline.globs, [
     "internal/llm/*.go",
     "cmd/coddy/providers.go",
+    "fixtures/foo #bar.go",
   ])
   assert.equal(multiline.always, false)
 
