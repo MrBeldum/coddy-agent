@@ -85,7 +85,10 @@ func anthropicThinkingBudget(level string, maxTokens int) int64 {
 }
 
 func (p *anthropicProvider) Complete(ctx context.Context, messages []Message, tools []ToolDefinition) (*Response, error) {
-	system, msgs := p.splitMessages(messages)
+	system, msgs, err := p.splitMessages(messages)
+	if err != nil {
+		return nil, err
+	}
 	params := p.buildParams(system, msgs, tools)
 	resp, err := p.client.Messages.New(ctx, params)
 	if err != nil {
@@ -95,7 +98,10 @@ func (p *anthropicProvider) Complete(ctx context.Context, messages []Message, to
 }
 
 func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tools []ToolDefinition, onChunk func(StreamChunk)) (*Response, error) {
-	system, msgs := p.splitMessages(messages)
+	system, msgs, err := p.splitMessages(messages)
+	if err != nil {
+		return nil, err
+	}
 	params := p.buildParams(system, msgs, tools)
 
 	stream := p.client.Messages.NewStreaming(ctx, params)
@@ -200,6 +206,29 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 				}, fmt.Errorf("anthropic stream: %w", err)
 			}
 		}
+		// The SDK decodes every framed event with json.Unmarshal, so an event
+		// whose JSON stops short surfaces here as a syntax error at the end
+		// of its input: a cut inside the event (issue #384), held to the
+		// truncation contract of the branch below - the delivered text and
+		// thinking next to the error, no tool_use blocks, whose input may be
+		// cut mid-JSON, the decoder's error kept as the cause. With nothing
+		// delivered the truncation error goes back alone, unlike the stall
+		// branch, whose transport wrapper carries the guard's own error: here
+		// the decoder's error is the more specific cause.
+		if trunc := streamDecodeTruncation(err, emitted, 0); trunc != nil {
+			truncErr := fmt.Errorf("anthropic stream: %w", trunc)
+			if strings.TrimSpace(fullContent) != "" || strings.TrimSpace(thinkingBuf.String()) != "" {
+				return &Response{
+					Content:            fullContent,
+					Reasoning:          thinkingBuf.String(),
+					ReasoningSignature: thinkingSig,
+					InputTokens:        inputTokens,
+					OutputTokens:       outputTokens,
+					CachedInputTokens:  cachedInputTokens,
+				}, truncErr
+			}
+			return nil, truncErr
+		}
 		// Same transport wrapper as the openai path: the emitted flag lets
 		// classification retry status-less failures only while nothing was
 		// delivered. HTTP errors keep their status reachable through Unwrap.
@@ -259,9 +288,10 @@ func (p *anthropicProvider) Stream(ctx context.Context, messages []Message, tool
 }
 
 // splitMessages extracts the system message and converts messages to Anthropic format.
-func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthropic.MessageParam) {
+func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthropic.MessageParam, error) {
 	var system string
 	var result []anthropic.MessageParam
+	var skippedTrailingAssistant bool
 
 	for _, m := range messages {
 		if m.Role == RoleSystem {
@@ -271,7 +301,8 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 
 		switch m.Role {
 		case RoleUser:
-			result = append(result, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
+			result = append(result, anthropic.NewUserMessage(anthropicUserBlocks(m)...))
+			skippedTrailingAssistant = false
 
 		case RoleAssistant:
 			var blocks []anthropic.ContentBlockParamUnion
@@ -281,7 +312,7 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 			if p.thinkingEnabled() && m.ReasoningSignature != "" && m.Reasoning != "" {
 				blocks = append(blocks, anthropic.NewThinkingBlock(m.ReasoningSignature, m.Reasoning))
 			}
-			if m.Content != "" {
+			if strings.TrimSpace(m.Content) != "" {
 				blocks = append(blocks, anthropic.NewTextBlock(m.Content))
 			}
 			for _, tc := range m.ToolCalls {
@@ -290,18 +321,54 @@ func (p *anthropicProvider) splitMessages(messages []Message) (string, []anthrop
 				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, inputMap, tc.Name))
 			}
 			if len(blocks) == 0 {
-				blocks = append(blocks, anthropic.NewTextBlock(m.Content))
+				// Nothing in this assistant turn can be replayed. In particular,
+				// a signature without thinking text cannot form a valid block.
+				skippedTrailingAssistant = true
+				continue
 			}
 			result = append(result, anthropic.NewAssistantMessage(blocks...))
+			skippedTrailingAssistant = false
 
 		case RoleTool:
+			if skippedTrailingAssistant {
+				return "", nil, fmt.Errorf("anthropic: tool result follows an assistant turn with no replayable content")
+			}
 			result = append(result, anthropic.NewUserMessage(
 				anthropic.NewToolResultBlock(m.ToolCallID, m.Content, false),
 			))
+			skippedTrailingAssistant = false
 		}
 	}
 
-	return system, result
+	if skippedTrailingAssistant {
+		return "", nil, fmt.Errorf("anthropic: final assistant turn has no replayable content")
+	}
+	return system, result, nil
+}
+
+// anthropicUserBlocks is a user message as the Messages API takes it: the
+// text, with every attached file that is not a picture appended as a labelled
+// block the way the other providers carry it, then the pictures as image
+// blocks - base64 data from a data URL, an https address as it is. A message
+// of pictures alone sends no empty text block, which the API refuses.
+func anthropicUserBlocks(m Message) []anthropic.ContentBlockParamUnion {
+	text := m.Content
+	var images []anthropic.ContentBlockParamUnion
+	for _, ip := range m.ImageParts {
+		kind, mime, payload := sortAttachment(ip)
+		switch {
+		case kind == attachedPicture && payload != "":
+			images = append(images, anthropic.NewImageBlockBase64(mime, payload))
+		case kind == attachedPicture:
+			images = append(images, anthropic.NewImageBlock(anthropic.URLImageSourceParam{URL: ip.DataURL}))
+		default:
+			text += attachmentText(ip, kind, mime)
+		}
+	}
+	if text == "" && len(images) > 0 {
+		return images
+	}
+	return append([]anthropic.ContentBlockParamUnion{anthropic.NewTextBlock(text)}, images...)
 }
 
 func (p *anthropicProvider) buildParams(system string, messages []anthropic.MessageParam, tools []ToolDefinition) anthropic.MessageNewParams {

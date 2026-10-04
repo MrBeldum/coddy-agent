@@ -3,6 +3,7 @@ package llm
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -51,6 +52,13 @@ func TestHTTPStatusFromError_openai429(t *testing.T) {
 	}
 }
 
+// jsonCutError is the decoder's own error for a payload that stops between
+// tokens, the cause a truncation inside an event carries.
+func jsonCutError() error {
+	var v any
+	return json.Unmarshal([]byte(`{"a":`), &v)
+}
+
 func TestIsRetryableLLMError(t *testing.T) {
 	if !isRetryableLLMError(err429Neuraldeep()) {
 		t.Fatal("429 should be retryable")
@@ -59,6 +67,12 @@ func TestIsRetryableLLMError(t *testing.T) {
 		"400":      errors.New("openai stream: 400 Bad Request"),
 		"cancel":   context.Canceled,
 		"deadline": context.DeadlineExceeded,
+		// A frame that is not JSON is final whatever its text holds: the
+		// status scan and the transport needles never see it.
+		"undecodable frame with a status in its text": fmt.Errorf("openai stream: %w",
+			&streamUndecodableError{snippet: "<html><title>502 Bad Gateway</title></html>", cause: errors.New("invalid character '<' looking for beginning of value")}),
+		"undecodable frame with a transport phrase in its text": fmt.Errorf("openai stream: %w",
+			&streamUndecodableError{snippet: "garbage unexpected EOF here", cause: errors.New("invalid character 'g' looking for beginning of value")}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if isRetryableLLMError(err) {
@@ -298,6 +312,11 @@ func TestTransientTransportErrorClassification(t *testing.T) {
 		{"Windows connection aborted", fmt.Errorf("openai stream: %w", windowsSocketError(10053)), true},
 		{"Windows connection reset flattened to its text", errors.New(
 			"openai stream: read tcp 127.0.0.1:53107->127.0.0.1:62557: wsarecv: An existing connection was forcibly closed by the remote host."), true},
+		// The decoder's end-of-input diagnostic is classified at the provider
+		// boundary (streamDecodeTruncation), never here: a needle for it would
+		// also match a request whose own JSON is wrong.
+		{"decoder end of input, flattened to its text", errors.New("codex stream: unexpected end of JSON input"), false},
+		{"decoder end of input, typed", fmt.Errorf("codex stream: %w", jsonCutError()), false},
 		{"Windows connection aborted flattened to its text", errors.New(
 			"openai stream: write tcp 127.0.0.1:53107->127.0.0.1:62557: wsasend: An established connection was aborted by the software in your host machine."), true},
 		{"another Winsock failure", fmt.Errorf("openai stream: %w", windowsSocketError(10013)), false},
@@ -805,6 +824,12 @@ func TestIsTransientProviderError(t *testing.T) {
 		{"server error after text", fmt.Errorf("openai stream: %w", &streamServerError{code: 500, msg: "litellm.MidStreamFallbackError", emitted: true}), true},
 		{"server error before text", fmt.Errorf("openai stream: %w", &streamServerError{code: 502}), true},
 		{"truncated after text", fmt.Errorf("openai stream: %w", &streamTruncatedError{emitted: true}), true},
+		{"truncated inside a JSON event after text", fmt.Errorf("codex stream: %w", &streamTruncatedError{emitted: true, cause: jsonCutError()}), true},
+		{"truncated inside a JSON event before text", fmt.Errorf("codex stream: %w", &streamTruncatedError{cause: jsonCutError()}), true},
+		// Records that no global JSON retry was added: the same decoder error
+		// outside the truncation type is not transient.
+		{"JSON syntax error in a transport wrapper", fmt.Errorf("codex stream: %w", &streamTransportError{cause: jsonCutError(), emitted: true}), false},
+		{"undecodable frame with a status in its text", fmt.Errorf("openai stream: %w", &streamUndecodableError{snippet: "<html><title>502 Bad Gateway</title></html>"}), false},
 		{"connection reset after text", fmt.Errorf("openai stream: %w", &streamTransportError{cause: syscall.ECONNRESET, emitted: true}), true},
 		{"Windows connection reset after text", fmt.Errorf("openai stream: %w", &streamTransportError{cause: windowsSocketError(10054), emitted: true}), true},
 		{"Windows connection aborted before text", fmt.Errorf("openai stream: %w", &streamTransportError{cause: windowsSocketError(10053)}), true},

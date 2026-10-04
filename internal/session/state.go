@@ -48,6 +48,10 @@ type State struct {
 	// CWD is the session working directory.
 	CWD string
 
+	// persistedCWD keeps the original path when a missing managed worktree is
+	// recovered to its parent checkout for this process.
+	persistedCWD string
+
 	// Mode is the current operating mode.
 	Mode Mode
 
@@ -152,11 +156,11 @@ type State struct {
 	// RulesCatalog is discovered project rules for the session CWD.
 	RulesCatalog []*rules.Rule
 	// rulesGeneration counts the catalogs this session has had: every
-	// ReplaceRulesCatalog starts a new generation. rulesPrompts are the
-	// standing part of the system prompt rendered for the current one, one per
-	// kind of template: with {{.Rules}} and without (rules_load.go).
+	// ReplaceRulesCatalog starts a new generation. rulesPrompt is the standing
+	// part of the system prompt rendered for the current one, whatever template
+	// a turn runs on (rules_load.go).
 	rulesGeneration uint64
-	rulesPrompts    [2]*RulesPrompt
+	rulesPrompt     *RulesPrompt
 	// LastContextBreakdown is the latest per-category token estimate for the UI.
 	LastContextBreakdown *ContextBreakdown
 	// contextWindows reads the provider-reported context windows cached by
@@ -267,8 +271,11 @@ type State struct {
 
 	// activitySeq increments when an agent turn finishes (persisted in session.json).
 	// readActivitySeq is advanced when the user marks the session read (PATCH markActivityRead).
+	// lastErrorSeq is the activity generation of the latest real failure, or zero
+	// when the latest outcome was not an error.
 	activitySeq     uint64
 	readActivitySeq uint64
+	lastErrorSeq    uint64
 
 	// persist is invoked after persisted fields change (set by Manager; may be nil).
 	persist func()
@@ -321,13 +328,36 @@ func (s *State) GetID() string {
 
 // GetCWD returns the session working directory.
 func (s *State) GetCWD() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.CWD
+}
+
+// CWDForPersist returns the original stored workspace when a deleted managed
+// worktree was recovered to an effective parent-checkout workspace.
+func (s *State) CWDForPersist() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.persistedCWD != "" {
+		return s.persistedCWD
+	}
+	return s.CWD
+}
+
+// RestoreRecoveredCWD sets an effective fallback without changing the path
+// an ordinary persistence operation writes. SetCWD clears this override.
+func (s *State) RestoreRecoveredCWD(effective, persisted string) {
+	s.mu.Lock()
+	s.CWD = effective
+	s.persistedCWD = persisted
+	s.mu.Unlock()
 }
 
 // SetCWD updates the session working directory (persisted in session.json).
 func (s *State) SetCWD(dir string) {
 	s.mu.Lock()
 	s.CWD = dir
+	s.persistedCWD = ""
 	s.mu.Unlock()
 	s.touchPersist()
 }
@@ -451,6 +481,10 @@ type SubagentMeta struct {
 	Role string
 	// Tools is the effective tool set the child may call. Not persisted.
 	Tools []string
+	// Spawns is the spawn allowlist the child's definition declared: the
+	// names this session itself may delegate to, including at
+	// subagents.max_depth. Not persisted.
+	Spawns []string
 	// Kind marks a child the runtime started on its own behalf (SubagentKindMemory);
 	// empty for a spawn_agent child. The tool registration, the system flag
 	// of the task and the manager's shortcuts key on it. Not persisted.
@@ -500,6 +534,7 @@ const SubagentKindMemory = "memory"
 // itself: the manager saves the state right after building it.
 func (s *State) SetSubagentMeta(meta SubagentMeta) {
 	meta.Tools = append([]string(nil), meta.Tools...)
+	meta.Spawns = append([]string(nil), meta.Spawns...)
 	meta.FallbackModels = append([]string(nil), meta.FallbackModels...)
 	meta.Scheduler = meta.Scheduler.clone()
 	s.mu.Lock()
@@ -529,6 +564,7 @@ func (s *State) Subagent() *SubagentMeta {
 	}
 	out := *s.subagent
 	out.Tools = append([]string(nil), s.subagent.Tools...)
+	out.Spawns = append([]string(nil), s.subagent.Spawns...)
 	out.FallbackModels = append([]string(nil), s.subagent.FallbackModels...)
 	out.Scheduler = s.subagent.Scheduler.clone()
 	return &out
@@ -564,9 +600,11 @@ func (s *State) AddSessionMCPClient(client *mcp.Client) {
 }
 
 // replaceConfiguredMCPClients atomically swaps hot-reloaded config clients and
-// closes the previous processes without disturbing ACP session-provided clients.
-// A session torn down while the new servers were still being dialed keeps none
-// of them, so the reload cannot orphan subprocesses.
+// gives the previous ones back without disturbing ACP session-provided clients.
+// The configured clients are leases on the manager's shared servers, so a
+// server the new set still names keeps its process: the new lease was taken
+// before the old one goes. A session torn down while the new servers were
+// still being dialed keeps none of them, so the reload cannot orphan a lease.
 func (s *State) replaceConfiguredMCPClients(clients []*mcp.Client) {
 	s.mu.Lock()
 	if s.mcpClosed {
@@ -758,8 +796,31 @@ func (s *State) configuredMCPClientDeclared(name string) (string, bool) {
 	return "", false
 }
 
-// closeConfiguredMCPClient disconnects one configured server from the session
-// and stops its process, leaving every other client connected.
+// configuredMCPClientsSnapshot returns the session's configured clients.
+func (s *State) configuredMCPClientsSnapshot() []*mcp.Client {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]*mcp.Client(nil), s.configuredMCPClients...)
+}
+
+// endedConfiguredMCPServers names the configured servers whose connection
+// ended under the session: the server exited or dropped the connection.
+func (s *State) endedConfiguredMCPServers() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var names []string
+	for _, client := range s.configuredMCPClients {
+		if !client.Alive() {
+			names = append(names, client.Name())
+		}
+	}
+	return names
+}
+
+// closeConfiguredMCPClient disconnects one configured server from the session,
+// leaving every other client connected. The client is a lease on a shared
+// server: the server stops once no session holds it and the process does not
+// keep it.
 func (s *State) closeConfiguredMCPClient(name string) {
 	s.mu.Lock()
 	kept := make([]*mcp.Client, 0, len(s.configuredMCPClients))
@@ -1007,6 +1068,7 @@ func normalizeModelID(cfg *config.Config, id string) string {
 // AddMessage appends a message to the conversation history.
 func (s *State) AddMessage(msg llm.Message) {
 	s.mu.Lock()
+	placePendingArtifacts(s.Messages, &msg)
 	s.Messages = append(s.Messages, msg)
 	s.markMessagesAppended()
 	s.mu.Unlock()
@@ -1729,7 +1791,7 @@ func (s *State) ReplaceRulesCatalog(cat []*rules.Rule) {
 	s.mu.Lock()
 	s.RulesCatalog = cat
 	s.rulesGeneration++
-	s.rulesPrompts = [2]*RulesPrompt{}
+	s.rulesPrompt = nil
 	s.mu.Unlock()
 }
 
@@ -1806,8 +1868,10 @@ func (s *State) Cancel() {
 	}
 }
 
-// CloseAll closes all MCP clients. The session is left marked as closed so a
-// settings reload racing this teardown does not reattach fresh servers.
+// CloseAll closes all MCP clients: the session's own ACP-supplied servers
+// stop, and its leases on the shared configured servers are given back. The
+// session is left marked as closed so a settings reload racing this teardown
+// does not reattach fresh servers.
 func (s *State) CloseAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1832,11 +1896,29 @@ func (s *State) RestorePermissionGrantsWithoutPersist(commands, writes, httpKeys
 	s.mu.Unlock()
 }
 
-// RestoreActivityFromSnapshot restores activitySeq/readActivitySeq from disk (session/load).
-func (s *State) RestoreActivityFromSnapshot(activitySeq, readActivitySeq uint64) {
+// RestoreActivityFromSnapshot merges activity counters from disk (session/load).
+// A disk read can be older than a live turn that finished while the read was in
+// flight, so restoring is deliberately monotonic and never rolls counters back.
+// The optional third argument keeps older in-process callers source compatible;
+// snapshots without the field restore a zero error generation.
+func (s *State) RestoreActivityFromSnapshot(activitySeq, readActivitySeq uint64, lastError ...uint64) {
+	lastErrorSeq := uint64(0)
+	if len(lastError) > 0 {
+		lastErrorSeq = lastError[0]
+	}
 	s.mu.Lock()
-	s.activitySeq = activitySeq
-	s.readActivitySeq = readActivitySeq
+	if activitySeq > s.activitySeq {
+		s.activitySeq = activitySeq
+		s.lastErrorSeq = lastErrorSeq
+	} else if activitySeq == s.activitySeq && lastErrorSeq > s.lastErrorSeq {
+		s.lastErrorSeq = lastErrorSeq
+	}
+	if readActivitySeq > s.readActivitySeq {
+		s.readActivitySeq = readActivitySeq
+	}
+	if s.readActivitySeq > s.activitySeq {
+		s.readActivitySeq = s.activitySeq
+	}
 	s.mu.Unlock()
 }
 
@@ -1854,12 +1936,44 @@ func (s *State) GetReadActivitySeq() uint64 {
 	return s.readActivitySeq
 }
 
-// BumpActivitySeq increments the activity counter after a completed agent turn and persists.
-func (s *State) BumpActivitySeq() {
+// GetLastErrorSeq returns the activity generation of the latest real failure.
+func (s *State) GetLastErrorSeq() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastErrorSeq
+}
+
+// ActivityOutcome describes how an admitted agent turn ended.
+type ActivityOutcome uint8
+
+const (
+	ActivityOutcomeSuccess ActivityOutcome = iota
+	ActivityOutcomeFailure
+	ActivityOutcomeCanceled
+)
+
+// RecordActivityOutcome atomically advances the activity generation and records
+// the outcome before persistence is invoked. Cancellation deliberately keeps
+// the previous error marker while retaining the existing activity increment.
+func (s *State) RecordActivityOutcome(outcome ActivityOutcome) {
 	s.mu.Lock()
 	s.activitySeq++
+	switch outcome {
+	case ActivityOutcomeFailure:
+		s.lastErrorSeq = s.activitySeq
+	case ActivityOutcomeSuccess:
+		s.lastErrorSeq = 0
+	case ActivityOutcomeCanceled:
+		// Preserve the previous failure marker.
+	}
 	s.mu.Unlock()
 	s.touchPersist()
+}
+
+// BumpActivitySeq increments the activity counter after a completed agent turn and persists.
+// It is kept for callers that only know about the historical success operation.
+func (s *State) BumpActivitySeq() {
+	s.RecordActivityOutcome(ActivityOutcomeSuccess)
 }
 
 // MarkActivityReadSynced sets readActivitySeq to the current activitySeq in memory.

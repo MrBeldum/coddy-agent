@@ -10,6 +10,7 @@
   --syntax-type: #67e8f9;
   --syntax-meta: #f9a8d4;
   --syntax-deletion: #fca5a5;
+  --coddy-danger: #f87171;
   --bg: #121212;
   --diff-add-bg: rgba(46, 160, 67, 0.13);
   --diff-del-bg: rgba(248, 81, 73, 0.13);
@@ -118,6 +119,7 @@
   --syntax-type: #0e646e;
   --syntax-meta: #93306a;
   --syntax-deletion: #b91c1c;
+  --coddy-danger: #b91c1c;
   --bg: #f8f8fa;
   --diff-add-bg: rgba(46, 160, 67, 0.09);
   --diff-del-bg: rgba(248, 81, 73, 0.09);
@@ -800,6 +802,14 @@ body {
   --rail-shell-track-width: calc(
     var(--rail-pill-track) + var(--rail-column-pad-end)
   );
+  /* The width of the docks that open over the chat - the documentation reader
+     and the swarm map - which share one look (issue #401). */
+  --coddy-dock-width: min(
+    1350px,
+    calc(
+      100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px
+    )
+  );
 }
 
 .shell-main {
@@ -1040,6 +1050,28 @@ body {
 
 .rail-nav-hit-narrow.rail-hit-icon {
   padding: 0;
+}
+
+.rail-nav-hit {
+  position: relative;
+}
+
+.rail-active-count {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--coddy-on-accent-fg);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px var(--coddy-canvas-gradient-top);
 }
 
 .rail-nav-label {
@@ -1379,16 +1411,15 @@ a.rail-brand {
   box-sizing: border-box;
 }
 
-/* Two columns: the state marks, then the title with its tags under it. The tags
-   label the words, so they start where the title's text starts rather than under
-   the marks; a row with no mark leaves the first column empty. */
+/* Two columns: a fixed state-mark slot, then the title with its tags under it.
+   The fixed slot keeps an 8px dot and a 16px prompt marker from moving text. */
 .session-row-link {
   flex: 1;
   min-width: 0;
   text-decoration: none;
   color: inherit;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
 }
 
@@ -1397,8 +1428,13 @@ a.rail-brand {
   grid-row: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-right: 6px;
+  align-content: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: 16px;
+  min-width: 16px;
+  gap: 0;
+  margin-left: 0px;
 }
 
 .session-item:hover {
@@ -1471,6 +1507,31 @@ a.rail-brand {
   flex-shrink: 0;
 }
 
+.session-idle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--text) 30%, var(--coddy-blend-base));
+}
+
+.session-error-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--coddy-danger);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--coddy-danger) 25%, transparent);
+}
+
+.session-error-dot.is-seen {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--coddy-danger);
+}
+
 .session-permission-icon,
 .session-question-icon {
   flex-shrink: 0;
@@ -1483,22 +1544,6 @@ a.rail-brand {
   font-weight: 700;
   line-height: 1;
   color: rgba(196, 181, 253, 0.95);
-}
-
-.session-question-icon {
-  animation: session-question-pulse 1.1s ease-in-out infinite;
-}
-
-@keyframes session-question-pulse {
-  0%,
-  100% {
-    opacity: 0.55;
-    transform: scale(0.92);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.08);
-  }
 }
 
 .sessions-empty {
@@ -1720,12 +1765,18 @@ a.rail-brand {
   background: color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
+.sessions-filter-item.starts-group {
+  margin-top: 5px;
+  padding-top: 11px;
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+}
+
 .sessions-filter-check {
   flex: 0 0 auto;
   color: var(--accent);
   font-size: 12px;
 }
-
 
 /* A heading, the control that starts a chat in it, and the row count. The end
    padding matches a session row's, so the count lands in the same column as the
@@ -1736,7 +1787,6 @@ a.rail-brand {
   gap: 2px;
   padding-right: 8px;
 }
-
 
 /* In the column the rows' own control sits in, and visible at rest: a way to
    start work in this folder is worth a glance, not a hunt with the pointer. */
@@ -2575,10 +2625,6 @@ a.rail-brand {
   z-index: 4;
   flex-shrink: 0;
   padding: 0 0 16px;
-  /* Opaque canvas backing: pinned title stays on top while transcript
-     scrolls behind it (no see-through bleed). Matches canvas top color so
-     the shield is invisible against the page in every theme. */
-  /* background-color: var(--coddy-canvas-gradient-top); */
 }
 
 /* Same max-width as .chat-bottom-inner / transcript column so title and composer share one vertical stripe */
@@ -2825,8 +2871,19 @@ a.rail-brand {
 }
 
 .subagent-readonly-text {
+  display: block;
+}
+
+.subagent-readonly-copy {
   flex: 1 1 240px;
   min-width: 0;
+}
+
+.subagent-readonly-model {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .subagent-readonly-link {
@@ -3690,6 +3747,175 @@ a.rail-brand {
   color: var(--coddy-md-inline-code-fg);
 }
 
+/* The pictures a tool call showed the model (read on an image file) stand under
+   its row, open or closed, at the inset of the row's label: the preview is the
+   point, so it is not folded into the details. They hang close under the row
+   they belong to, and below them the transcript's own gap between rows is the
+   whole space, as after any other row. A card has the size and the manner of a
+   sent attachment, and a click opens the original enlarged. */
+.tool-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0 14px;
+}
+
+.tool-image-card {
+  display: block;
+  width: 128px;
+  height: 96px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, var(--coddy-blend-base));
+  background: color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
+  cursor: zoom-in;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.tool-image-card:hover,
+.tool-image-card:focus-visible {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--coddy-blend-base));
+  background: color-mix(in srgb, var(--text) 12%, var(--coddy-blend-base));
+}
+
+.tool-image-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* Verified shared files render as compact cubes in assistant answers. */
+.tool-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0 14px;
+  min-width: 0;
+}
+
+.tool-artifact-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  width: 168px;
+  height: 176px;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, var(--coddy-blend-base));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 5%, var(--coddy-blend-base));
+}
+
+.tool-artifact-icon {
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--text) 68%, var(--coddy-blend-base));
+}
+
+.tool-artifact-info {
+  display: grid;
+  min-width: 0;
+  grid-row: 1 / -1;
+  grid-template-rows: 1fr auto;
+}
+
+.tool-artifact-name {
+  align-self: end;
+  margin-bottom: 4px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tool-artifact-meta {
+  align-self: end;
+  color: color-mix(in srgb, var(--text) 58%, var(--coddy-blend-base));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.tool-artifact-meta--error {
+  color: var(--coddy-danger, #ef4444);
+}
+
+.inline-artifacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+  margin: 12px 0 16px;
+}
+
+.inline-artifact-card {
+  display: grid;
+}
+
+.tool-artifact-card {
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+.tool-artifact-card:hover {
+  border-color: color-mix(in srgb, var(--text) 30%, var(--coddy-blend-base));
+  background: color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+  transform: translateY(-1px);
+}
+
+.inline-artifact-card .tool-artifact-info { padding-top: 22px; }
+.inline-artifact-extension {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--coddy-blend-base));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  pointer-events: none;
+}
+.inline-artifact-image { position: absolute; inset: 0; padding: 0; overflow: hidden; border: 0; background: transparent; cursor: zoom-in; }
+.inline-artifact-thumb { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.inline-artifact-card:has(.inline-artifact-image) .tool-artifact-info { position: relative; z-index: 1; padding: 32px 0 0; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.inline-artifact-card:has(.inline-artifact-image) .tool-artifact-meta { padding: 4px; margin: 0 -4px -4px; border-radius: 5px; background: color-mix(in srgb, #000 56%, transparent); }
+.inline-artifact-menu-trigger { position: absolute; z-index: 2; top: 5px; right: 5px; width: 24px; height: 24px; border: 0; border-radius: 6px; background: color-mix(in srgb, var(--bg) 74%, transparent); color: var(--text); cursor: pointer; opacity: 0; }
+.inline-artifact-menu-trigger:focus-visible, .inline-artifact-menu-trigger[aria-expanded="true"] { opacity: 1; }
+.inline-artifact-menu { position: absolute; z-index: 1000; top: calc(100% + 4px); right: 0; display: grid; min-width: 180px; padding: 4px; border: 1px solid var(--coddy-glass-panel-border); border-radius: 10px; background: var(--coddy-tip-bg); box-shadow: var(--coddy-tip-shadow); }
+.inline-artifact-menu button { padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 12px; }
+.inline-artifact-menu button:hover:not(:disabled), .inline-artifact-menu button:focus-visible { background: color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base)); }
+
+@media (max-width: 599px) {
+  .tool-artifact-card {
+    width: min(148px, calc(50vw - 28px));
+    height: 164px;
+  }
+
+  .inline-artifact-menu-trigger {
+    width: 32px;
+    height: 32px;
+    opacity: 1;
+  }
+}
+
 .coddy-tool-call-body {
   display: flex;
   flex-direction: column;
@@ -3797,7 +4023,8 @@ a.rail-brand {
 }
 
 .coddy-tool-call-body > .tool-result-toggle-row {
-  margin: 0 0 2px;
+  align-self: flex-start;
+  margin: -8px 0 2px;
 }
 
 .coddy-tool-call-body > .tool-call-result-card + .tool-result-toggle-row {
@@ -4220,7 +4447,10 @@ a.rail-brand {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 6px 6px 12px;
+  /* 12px on the right puts the remove cross on the vertical line of the
+     improve-prompt button of the card below (the row's 12px, the same 24px
+     control): composerQueueCss.test.ts. */
+  padding: 6px 12px;
   border-radius: 12px;
   background: var(--coddy-glass-panel-bg);
   backdrop-filter: var(--coddy-glass-panel-backdrop);
@@ -4308,7 +4538,6 @@ a.rail-brand {
 .composer-run-icon--queue {
   background: color-mix(in srgb, var(--accent) 82%, var(--coddy-blend-base));
 }
-
 
 .slash-sheet-backdrop {
   position: fixed;
@@ -4729,6 +4958,40 @@ textarea#composer.composer-ta-masked::selection {
   background: rgba(147, 51, 234, 0.18);
 }
 
+.composer-code-editing {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, var(--coddy-blend-base));
+}
+
+.composer-code-editing .composer-mirror-inner,
+.composer-code-editing textarea#composer {
+  font-family: var(--mono);
+}
+
+.msg-user-token {
+  display: inline;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  cursor: copy;
+}
+
+.msg-user-token--mention,
+.msg-user-body .coddy-skill-chip {
+  border-radius: 4px;
+  color: var(--coddy-skill-chip-text);
+  background: var(--coddy-skill-chip-bg);
+  box-shadow: 0 0 0 1px var(--coddy-skill-chip-bd);
+}
+
+.msg-user-body .coddy-skill-chip {
+  cursor: copy;
+}
+
 .composer-mirror-inner,
 textarea#composer {
   font-family: inherit;
@@ -5018,22 +5281,17 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   gap: 6px;
 }
 
-.mode-env-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.4;
-}
-
-.mode-env-dot[data-remote="1"] {
-  background: #f59e0b; /* amber when driving a remote server */
-  opacity: 1;
-}
-
 .mode-menu--env {
   min-width: 240px;
   max-width: min(340px, calc(100vw - 24px));
+  /* The anchored menu gets the room it has as max-height (EnvironmentChip);
+     past that it scrolls rather than running off the window. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mode-menu--sheet.mode-menu--env {
+  max-height: 80vh;
 }
 
 .mode-menu--portal.mode-menu--env {
@@ -5059,6 +5317,51 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   font-size: 0.85em;
   opacity: 0.5;
   white-space: nowrap;
+}
+
+/* One remote in the menu: its row, then why it is red when it is (issue #401),
+   then the agents of a relay that let this browser in. Hints and agents start
+   under the name, past the row's padding, the dot and the gap (10 + 8 + 8). */
+.mode-env-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: -4px 0 4px;
+  padding: 0 10px 0 26px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--text) 62%, var(--coddy-blend-base));
+}
+
+.mode-env-hint-action {
+  flex: none;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mode-env-hint-action:hover {
+  background: color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+}
+
+.mode-env-nodes {
+  display: flex;
+  flex-direction: column;
+  margin: -2px 0 4px;
+  padding-left: 16px;
+}
+
+.mode-env-item.mode-env-node {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 12.5px;
 }
 
 /* Reachability dots: green up, red down, amber while probing (local is always up). */
@@ -5338,16 +5641,16 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 .workspace-modal {
   display: flex;
   flex-direction: column;
-  width: min(440px, calc(100vw - 32px));
+  width: min(560px, calc(100vw - 48px));
   /* Roomy body for a folder with few children: 262px is the 140px of head,
      path row and actions plus the 120px of list the body used to claim through
      the list's own min-height. Stated on the dialog, the floor leaves the list
      free to shrink; clamped by the same viewport fraction as the cap below, it
      can never exceed it. */
-  min-height: min(262px, 60vh);
-  min-height: min(262px, 60dvh);
-  max-height: min(60vh, 520px);
-  max-height: min(60dvh, 520px);
+  min-height: min(520px, 80vh);
+  min-height: min(520px, 80dvh);
+  max-height: min(80vh, 760px);
+  max-height: min(80dvh, 760px);
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--muted) 25%, transparent);
   background: var(--bg);
@@ -5355,15 +5658,12 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   overflow: hidden;
 }
 
+/* The head is the drawers' head (.sessions-head: 12px bold capitals, its
+   padding and rule), the one History and the Scheduler open with; this class
+   only keeps it from shrinking. Overriding its font here is what made the
+   title a 16px regular line unlike every other head. */
 .workspace-modal-head {
-  display: flex;
   flex: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px 8px;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
 }
 
 /* Editable path row: type or paste a path (a Windows user needs it to jump to
@@ -5373,14 +5673,31 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   flex: none;
   width: calc(100% - 28px);
   box-sizing: border-box;
-  margin: 0 14px 8px;
+  margin: 10px 14px 6px;
   padding: 6px 9px;
   border-radius: 9px;
   border: 1px solid var(--coddy-glass-panel-border);
   background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
   color: var(--text);
-  font-size: 11.5px;
+  /* Inputs and buttons do not inherit the page font: without font: inherit
+     the field, the rows and the buttons of the dialog were drawn in the
+     browser's control font (Arial) instead of the app's. */
+  font: inherit;
+  font-size: 12px;
   outline: none;
+}
+
+/* Show hidden sits next to New folder on the left of the footer; its auto
+   margin is what sends Cancel / Open to the right. */
+.workspace-modal-show-hidden {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .workspace-modal-path::placeholder {
@@ -5404,7 +5721,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
    platforms with overlay scrollbars (macOS), so it is an affordance, not the
    fix. */
 .workspace-modal-list {
-  flex: 1 1 auto;
+  flex: 1 1 120px;
   min-height: 0;
   overflow-y: auto;
   /* A wheel gesture that runs past the last folder stays in the dialog instead
@@ -5440,7 +5757,8 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 12.5px;
+  font: inherit;
+  font-size: 13px;
   text-align: left;
   padding: 7px 8px;
   border-radius: 8px;
@@ -5456,6 +5774,30 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 
 .workspace-modal-row--up {
   color: var(--muted);
+}
+
+.workspace-modal-row--hidden {
+  opacity: 0.6;
+}
+
+/* The name wins over a link's target: the target path is the part cut short,
+   the name only once it alone passes 70% of the row (a long target used to
+   squeeze "data-link" down to "da..."). */
+.workspace-modal-row-name {
+  flex: 0 0 auto;
+  max-width: 70%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-modal-row-target {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Inline "new folder" row: a name field on the folder-row metrics, directly
@@ -5490,7 +5832,8 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   border: 1px solid var(--coddy-glass-panel-border);
   background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
   color: var(--text);
-  font-size: 12.5px;
+  font: inherit;
+  font-size: 13px;
   outline: none;
 }
 
@@ -5508,12 +5851,14 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   justify-content: flex-end;
   gap: 8px;
   padding: 10px 14px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
 }
 
 .workspace-modal-btn {
   border: 1px solid color-mix(in srgb, var(--muted) 30%, transparent);
   background: transparent;
   color: var(--text);
+  font: inherit;
   font-size: 12.5px;
   padding: 6px 14px;
   border-radius: 9px;
@@ -5526,9 +5871,51 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   color: #fff;
 }
 
-/* New folder leads the footer, opposite the Cancel / Open pair. */
-.workspace-modal-btn--lead {
-  margin-right: auto;
+/* New folder leads the footer: a square as tall as the buttons beside it,
+   with the plus glyph of the scheduler's add button and its colours (the
+   colour rules are shared with .scheduler-btn-primary, light theme included,
+   so the two never drift apart). */
+.workspace-modal-btn--add {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  /* Stated, not derived: aspect-ratio on a stretched flex item left it 18px
+     wide in Chromium. The row stretches Cancel / Open to the same 32px. */
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 9px;
+  color: color-mix(in srgb, var(--text) 88%, var(--coddy-blend-base));
+}
+
+.workspace-modal-btn--add svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* A phone opens the dialog where History opens: a glass panel under the top
+   bar, 10px from the sides and 14px from the bottom, the full height between
+   (the box and the tokens of .sessions.drawer on the stacked shell). Wider
+   screens keep the centred dialog above. */
+@media (max-width: 599px) {
+  .workspace-modal {
+    position: fixed;
+    top: calc(var(--coddy-mobile-top-inset) + 6px);
+    right: max(10px, env(safe-area-inset-right, 0px));
+    bottom: 14px;
+    left: max(10px, env(safe-area-inset-left, 0px));
+    width: auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    border-radius: var(--coddy-glass-panel-radius);
+    border: 1px solid var(--coddy-glass-panel-border);
+    background: var(--coddy-glass-panel-bg);
+    backdrop-filter: var(--coddy-glass-panel-backdrop);
+    -webkit-backdrop-filter: var(--coddy-glass-panel-backdrop);
+    box-shadow: var(--coddy-glass-panel-shadow);
+  }
 }
 
 /* The two buttons inside the inline name row sit on a list row, not in the
@@ -6106,7 +6493,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 .context-breakdown-menu-scroll {
   position: relative;
   z-index: 1;
-  padding: 12px 14px 16px;
+  padding: 0 12px 12px;
   min-height: 0;
 }
 
@@ -6122,7 +6509,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   right: 0;
   bottom: 0;
   margin: 0 auto;
-  max-width: min(560px, 100vw);
+  max-width: min(520px, calc(100vw - 28px));
   border-radius: var(--coddy-glass-panel-radius) var(--coddy-glass-panel-radius)
     0 0;
   z-index: 41;
@@ -6173,31 +6560,60 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
 }
 
 .context-breakdown-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  padding: 10px 12px;
 }
 
 .context-breakdown-title {
-  font-weight: 600;
-  font-size: 13px;
+  min-width: 0;
+  text-transform: none;
+}
+
+.context-breakdown-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 0;
+}
+
+.context-breakdown-used {
+  color: color-mix(in srgb, var(--text) 75%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-breakdown-compact {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.context-breakdown-compact:disabled {
+  cursor: default;
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+.context-breakdown-error {
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.context-breakdown-note {
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+  font-size: 12px;
+}
+
+html:not([data-theme="light"]) .context-breakdown-error {
+  color: #f87171;
 }
 
 .context-breakdown-close {
-  border: none;
-  background: transparent;
-  color: color-mix(in srgb, var(--text) 70%, transparent);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-
-.context-breakdown-close:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  flex: 0 0 auto;
 }
 
 .context-breakdown-summary {
@@ -6205,7 +6621,7 @@ html:not([data-theme="light"]) .mode-item.perm-item.perm-bypass {
   flex-wrap: wrap;
   gap: 6px;
   color: color-mix(in srgb, var(--text) 75%, transparent);
-  margin-bottom: 10px;
+  margin: 4px 14px 10px;
 }
 
 .context-breakdown-summary-sep {
@@ -6499,13 +6915,29 @@ html:not([data-theme="light"]) .context-usage-note--error {
   .backdrop {
     z-index: 60;
   }
+  /* Under the top bar (80), not behind it, and over the backdrop and the
+     drawers, which start below it anyway. */
+  .env-health-banner {
+    top: var(--coddy-mobile-bar-h);
+    z-index: 75;
+  }
   .sessions.drawer,
   .scheduler-jobs.drawer,
   .settings.drawer {
     z-index: 70;
   }
+  /* The top bar the rail becomes, and under it the environment banner when
+     one is shown: the banner publishes its height on <html>
+     (EnvHealthBanner.tsx), so everything placed by the inset starts below
+     both. Declared on :root rather than .shell so a dialog portalled into
+     <body> (the folder browser) is placed by the same inset as the drawers. */
+  :root {
+    --coddy-mobile-bar-h: calc(78px + env(safe-area-inset-top, 0px));
+    --coddy-mobile-top-inset: calc(
+      var(--coddy-mobile-bar-h) + var(--coddy-env-banner-h, 0px)
+    );
+  }
   .shell {
-    --coddy-mobile-top-inset: calc(78px + env(safe-area-inset-top, 0px));
     /* Same rhythm as title row to first message (.messages-inner gap, sticky-head padding-bottom) */
     --coddy-mobile-chat-stack-gap: 12px;
     --coddy-mobile-title-sticky-top: calc(
@@ -6810,7 +7242,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
   flex-shrink: 0;
 }
 
-.scheduler-btn-primary {
+.scheduler-btn-primary,
+.workspace-modal-btn--add {
   border-color: rgba(147, 51, 234, 0.45);
   background: rgba(147, 51, 234, 0.2);
 }
@@ -6832,7 +7265,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
   background: var(--coddy-surface-raised);
 }
 
-[data-theme="light"] .scheduler-btn-primary {
+[data-theme="light"] .scheduler-btn-primary,
+[data-theme="light"] .workspace-modal-btn--add {
   border-color: rgba(124, 58, 237, 0.4);
   background: rgba(124, 58, 237, 0.12);
 }
@@ -8157,8 +8591,7 @@ html:not([data-theme="light"]) .context-usage-note--error {
   flex-direction: column;
   gap: 14px;
   padding: 14px 12px 16px;
-  border: 1px solid
-    color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
+  border: 1px solid color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
   border-radius: 12px;
 }
 
@@ -8772,14 +9205,97 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 /* "Installed skills" heading row with the Refresh action on the right. */
-/* Footer of the Remote skill sources box: Add on the left, Sync all on the
-   right, on one level (matches the SchemaForm array's Add position). */
+/* Footer of the Marketplaces box: the add form on the left, Sync all on the
+   right, on one level; on a narrow box Sync all drops under the form. */
 .skills-sources-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   margin-top: 8px;
+}
+
+/* The add form: the address grows, the scope picker and Add keep their
+   size. */
+.skills-marketplace-add {
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skills-marketplace-add > .settings-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 40px;
+}
+
+.skills-marketplace-add > .skills-marketplace-scope {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.skills-marketplace-add > button {
+  flex: 0 0 auto;
+}
+
+/* A fieldset is as wide as its min-content unless told otherwise, and the
+   add form and the long addresses of this box would widen it past the panel
+   on a phone. */
+.skills-marketplaces-box {
+  min-inline-size: 0;
+  max-width: 100%;
+}
+
+/* The marketplaces list: one row per declared source or marketplace, laid
+   out like an MCP server row (text, then the 40px icon controls). */
+.skills-marketplaces {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.skills-marketplace-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.skills-marketplace-head > button {
+  flex: 0 0 auto;
+}
+
+.skills-marketplace-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.skills-marketplace-key {
+  font-family: var(--mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.skills-marketplace-source {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
+/* A project entry the trust gate holds back reads dimmed, its shield amber
+   (.settings-btn-approve) and the note under it says why. */
+.skills-marketplace.is-held .skills-marketplace-text {
+  opacity: 0.65;
+}
+
+.skills-marketplace-note {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: color-mix(in srgb, var(--text) 72%, transparent);
+  overflow-wrap: anywhere;
 }
 
 .skills-sync-all-btn {
@@ -8927,7 +9443,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .mcp-list {
   /* Where a server row's name starts: the chevron, its gap, the status dot
      and its gap. The tools and the trust note under a row start there too. */
-  --mcp-row-inset: calc(22px + 8px + 9px + 8px);
+  --mcp-switch-inset: calc(22px + 8px);
+  --mcp-row-inset: calc(var(--mcp-switch-inset) + 38px + 8px + 9px + 8px);
   list-style: none;
   margin: 0;
   padding: 0;
@@ -8936,8 +9453,6 @@ html:not([data-theme="light"]) .context-usage-note--error {
 }
 
 .mcp-list-item {
-  border-bottom: 1px solid
-    color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
   padding: 4px 0;
 }
 
@@ -9126,6 +9641,13 @@ html:not([data-theme="light"]) .context-usage-note--error {
   min-width: 0;
 }
 
+/* The shield of a project definition stands at the end of its head, like
+   the MCP tab's, and never shrinks under a long name. */
+.subagents-item-head > .subagents-trust {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 /* The fold toggle is the app's chevron in front of the definition's name, the
    two one control (DESIGN.md "Chevron"). The chevron is centred on the name's
    first 20px line, (20 - 14) / 2 = 3px down, so a name that wraps keeps it on
@@ -9223,8 +9745,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 /* Expanded per-tool rows, under the server's name. */
 .mcp-tools {
   list-style: none;
-  margin: 0 0 6px;
-  padding: 0 0 0 var(--mcp-row-inset);
+  margin: 0;
+  padding: 0 0 0 var(--mcp-switch-inset);
   display: flex;
   flex-direction: column;
 }
@@ -9236,6 +9758,10 @@ html:not([data-theme="light"]) .context-usage-note--error {
   padding: 5px 0;
   border-top: 1px dashed
     color-mix(in srgb, var(--text) 7%, var(--coddy-blend-base));
+}
+
+.mcp-tool-row > .skill-switch {
+  flex: 0 0 auto;
 }
 
 .mcp-tool-row.is-disabled .mcp-tool-text {
@@ -9699,7 +10225,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 /* No header bar above it (the call's arguments name nothing), so the body is the
    whole card and closes its own top edge. */
 .permission-preview-viewport--headless {
-  border-top: 1px solid color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
   border-radius: 12px;
 }
 
@@ -9938,7 +10465,9 @@ html:not([data-theme="light"]) .context-usage-note--error {
   margin-top: 0;
 }
 
-.permission-preview-bar > .todo-tool-preview-mark + .permission-preview-location {
+.permission-preview-bar
+  > .todo-tool-preview-mark
+  + .permission-preview-location {
   font-family: inherit;
   font-size: 12px;
 }
@@ -10224,7 +10753,8 @@ html:not([data-theme="light"]) .context-usage-note--error {
 .structured-tool-answer:not(:first-child) {
   padding-top: 10px;
   /* 16%: on the light theme's grey inset a lighter mix vanishes into the body. */
-  border-top: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
 }
 
 /* A request that skips the certificate check says so in the failure colour. */
@@ -11623,17 +12153,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 2px;
 }
 
-
-
-/* Tab controls hanging off the card above them, like the More / Less row: the
-   body is a flex column with an 8px gap, and these cancel it. */
-.tool-bgtask-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: -8px;
-}
-
 /* ── Background tasks panel (docked inside the session) ────────────────────
    The panel belongs to the chat that started the tasks, so it sits beside the
    transcript rather than floating over the shell like History or Scheduler.
@@ -11670,7 +12189,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
     /* What the panel takes off the end edge: its width and the inset it keeps
        from the viewport (see .bgtasks-panel), plus the gap the column keeps
        from it. */
-    --coddy-tasks-panel-band: calc(min(380px, 100vw - 32px) + 14px + 28px);
+    --coddy-tasks-panel-band: calc(min(380px, 100vw - 32px) + 14px + 12px);
     /* 920px is the transcript stripe (.messages-inner max-width); the stripe is
        centred in what is left, so covering the band costs twice it. */
     --coddy-tasks-reserve: clamp(
@@ -11748,8 +12267,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 .bgtask-section-action:hover {
   color: var(--text);
 }
-
-
 
 /* One card for every task - a shell command, a subagent run, the memory run of a
    turn, running or finished. Same parts in the same place: status dot, a tag that says
@@ -11913,26 +12430,14 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   white-space: pre;
 }
 
-/* The way into the task, on the folded card: an agent run's child conversation,
-   a preview server's address. The run is that conversation and the server is that
-   page, so an operator who had to open a card to find the link was made to take a
-   step on the way to the one move the panel exists for. A card carries at most one
-   of the two, because a task is one kind or the other.
-
-   It takes a row of its own under the status and the usage. The panel is 380px
-   wide: a control sharing that line would be paid for by the model's name, the
-   one thing there that cannot be cut down to something still readable. */
-.bgtask-card-transcript-row,
+/* A running preview server remains reachable from its folded card. */
 .bgtask-card-address-row {
   flex: 1 0 100%;
   display: flex;
   margin-top: 4px;
 }
 
-.bgtask-card-transcript,
 .bgtask-card-link {
-  /* Above the opener stretched over the summary, the way Stop is: it opens the
-     transcript or the page rather than the card it sits on. */
   position: relative;
   z-index: 1;
   padding: 0;
@@ -11945,10 +12450,6 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   cursor: pointer;
 }
 
-.bgtask-card-transcript {
-  flex: 0 0 auto;
-}
-
 /* An address is as long as it is, and the panel is narrow: it wraps onto a second
    line whole rather than trailing off in an ellipsis that names no port. */
 .bgtask-card-link {
@@ -11957,21 +12458,9 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   overflow-wrap: anywhere;
 }
 
-.bgtask-card-transcript:hover:not(:disabled),
-.bgtask-card-transcript:focus-visible,
 .bgtask-card-link:hover,
 .bgtask-card-link:focus-visible {
   text-decoration: underline;
-}
-
-/* A run whose child session is not known yet - it has only just started. The
-   title says so; the control stays in place so the card does not change shape
-   under the reader when the id arrives. */
-.bgtask-card-transcript:disabled {
-  color: inherit;
-  opacity: 0.55;
-  cursor: not-allowed;
-  text-decoration: none;
 }
 
 .bgtask-card.is-overdue .bgtask-card-meta {
@@ -12056,6 +12545,36 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   min-height: 56px;
   max-height: 260px;
   overflow: auto;
+}
+
+/* The child transcript belongs to an agent task's expanded report. The tab
+   cancels the body's flex gap so it attaches directly below the output. */
+.bgtask-card-transcript {
+  align-self: flex-start;
+  margin-top: -8px;
+  padding: 4px 10px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: color-mix(in srgb, var(--text) 4%, var(--coddy-blend-base));
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bgtask-card-transcript:hover:not(:disabled),
+.bgtask-card-transcript:focus-visible {
+  text-decoration: underline;
+}
+
+/* A run whose child session is not known yet keeps the action in place until
+   the child transcript can be opened. */
+.bgtask-card-transcript:disabled {
+  color: inherit;
+  opacity: 0.55;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 .bgtask-card-foot {
@@ -12149,7 +12668,7 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   bottom: 14px;
   left: calc(var(--rail-shell-track-width) + var(--nav-floating-gutter));
   right: 14px;
-  width: min(1350px, calc(100vw - var(--rail-shell-track-width) - var(--nav-floating-gutter) - 14px));
+  width: var(--coddy-dock-width);
   margin-inline: auto;
   z-index: 50;
   display: flex;
@@ -12191,9 +12710,11 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   grid-template-areas: "title search actions";
   column-gap: 32px;
   align-items: center;
-  padding: 14px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 12px var(--docs-inline);
+  padding: 14px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 12px
+    var(--docs-inline);
   background: color-mix(in srgb, var(--bg) 82%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
 }
 
 .docs-title-block {
@@ -12370,7 +12891,11 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
   color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   text-align: center;
   pointer-events: none;
 }
@@ -12480,7 +13005,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
 /* On this page: a thin rule on the left, the section being read on it. */
 .docs-outline ul {
   gap: 0;
-  border-left: 1px solid color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
+  border-left: 1px solid
+    color-mix(in srgb, var(--text) 10%, var(--coddy-blend-base));
 }
 
 .docs-outline a {
@@ -12625,7 +13151,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   padding-bottom: 8px;
   font-size: 20px;
   font-weight: 600;
-  border-bottom: 1px solid color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
 .docs-article .md :where(h3) {
@@ -12841,7 +13368,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   gap: 12px;
   margin-top: 40px;
   padding-top: 18px;
-  border-top: 1px solid color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
+  border-top: 1px solid
+    color-mix(in srgb, var(--text) 9%, var(--coddy-blend-base));
 }
 
 .docs-pager-link {
@@ -12929,7 +13457,8 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
       "title actions"
       "search search";
     row-gap: 10px;
-    padding: 12px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 10px var(--docs-inline);
+    padding: 12px calc(var(--docs-inline) + var(--docs-scrollbar, 0px)) 10px
+      var(--docs-inline);
   }
   .docs-header-search {
     max-width: none;
@@ -13055,6 +13584,9 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
   bottom: 14px;
   left: calc(var(--rail-shell-track-width) + var(--nav-floating-gutter));
   right: 14px;
+  /* As wide as the documentation reader, and centred the same way. */
+  width: var(--coddy-dock-width);
+  margin-inline: auto;
   z-index: 50;
   overflow: auto;
   border-radius: var(--coddy-glass-panel-radius);
@@ -13074,52 +13606,86 @@ button.question-prompt-row.question-prompt-row--other.question-prompt-row--activ
     right: max(8px, env(safe-area-inset-right, 0px));
     top: calc(var(--coddy-mobile-top-inset) + 6px);
     bottom: 8px;
+    width: auto;
+    margin-inline: 0;
   }
 }
 
+/* The map fills its dock: the dock is what sets the width (--coddy-dock-width). */
 .swarm-view {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 20px 24px 32px;
-  max-width: 1100px;
-  margin: 0 auto;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 14px var(--swarm-inline, 24px);
   color: var(--text);
 }
 
+/* The head follows the documentation reader's own: the title block on the
+   left, the search centred, the actions at the right edge, and a hairline
+   under it that runs to the dock's edges. The band is pulled up over the
+   view's own top padding so it starts flush with the dock's top edge
+   instead of floating as a strip inside it. */
 .swarm-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.swarm-header-actions {
-  display: flex;
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) minmax(
+      170px,
+      210px
+    );
+  grid-template-areas: "title search actions";
+  column-gap: 32px;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  margin: -14px calc(-1 * var(--swarm-inline, 24px)) 0;
+  padding: 14px var(--swarm-inline, 24px) 12px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--text) 6%, var(--coddy-blend-base));
 }
 
+.swarm-title-block {
+  grid-area: title;
+  min-width: 0;
+}
+
+/* Spelled like the head of every other panel (.sessions-head, .docs-title):
+   small capitals in a muted tint, the screen's name rather than the relay's. */
 .swarm-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  color: color-mix(in srgb, var(--text) 72%, var(--coddy-blend-base));
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .swarm-subtitle {
-  margin: 4px 0 0;
-  color: color-mix(in srgb, var(--text) 62%, var(--coddy-blend-base));
-  font-size: 13px;
+  margin: 2px 0 0;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.swarm-header-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* The graph, the paragraph that says it in words, and the legend. Positioned,
-   because the summary is taken out of flow and has to hang off this box. */
+   because the summary is taken out of flow and has to hang off this box. It
+   grows to fill the dock's height. */
 .swarm-graph-panel {
   position: relative;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 10px;
 
   /* Every --coddy-surface-* token is translucent on six of the seven themes.
@@ -13144,9 +13710,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   --swarm-sunken: var(--bg);
 }
 
-/* role="img" collapses the SVG, so nothing inside it is announced. This is
-   what a screen reader reads instead, and it is the only copy in the picture
-   that has to stay off the canvas. */
+/* The SVG group keeps its node controls exposed. This paragraph supplements
+   its picture-level description and is the only copy that stays off canvas. */
 .swarm-graph-summary {
   position: absolute;
   width: 1px;
@@ -13159,21 +13724,121 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   border: 0;
 }
 
-/* The graph keeps the size it was drawn at and scrolls inside this box.
-   Scaling a wide swarm down to fit takes its 11px labels below legibility. */
-.swarm-graph-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+/* The graph itself, not the page, receives every navigation gesture. It
+   grows to fill the panel the dock leaves it. */
+.swarm-graph-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 320px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
   border: 1px solid var(--coddy-glass-panel-border);
   border-radius: var(--coddy-glass-panel-radius, var(--radius));
   background: var(--swarm-ground);
-  padding: 10px;
+  cursor: grab;
+  /* Dragging the canvas pans it; nothing in it is text to select. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
+.swarm-graph-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.swarm-graph-viewport:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Absolutely placed rather than height:100%: a percentage on a replaced
+   element resolves against the parent's *specified* height, and the viewport
+   above gets its height from flex-grow, so the SVG would collapse to its
+   intrinsic 150px and show nothing below it. inset: 0 resolves against the
+   used height, which is definite for absolutely positioned boxes. */
 .swarm-graph {
+  position: absolute;
+  inset: 0;
   display: block;
-  margin: 0 auto;
   font-family: inherit;
+}
+
+.swarm-graph-camera {
+  transition: transform 0.12s ease-out;
+}
+
+/* A camera the code refits (mount, poll, resize) lands where it lands:
+   animating it only makes the map look like it reloads. */
+.swarm-graph-camera[data-instant="true"] {
+  transition: none;
+}
+
+.swarm-graph-viewport.is-panning .swarm-graph-camera {
+  transition: none;
+}
+
+.swarm-layout-control,
+.swarm-viewport-control {
+  position: absolute;
+  z-index: 1;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  border-radius: 10px;
+  background: var(--coddy-glass-panel-bg);
+  backdrop-filter: var(--coddy-glass-panel-backdrop);
+  box-shadow: 0 3px 10px color-mix(in srgb, #000 20%, transparent);
+}
+
+.swarm-layout-control {
+  top: 10px;
+  left: 10px;
+}
+
+.swarm-viewport-control {
+  top: 10px;
+  right: 10px;
+}
+
+.swarm-canvas-control {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--text) 78%, var(--coddy-blend-base));
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.swarm-canvas-control:hover,
+.swarm-canvas-control:focus-visible,
+.swarm-canvas-control[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--coddy-blend-base));
+}
+
+.swarm-canvas-control svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 1199px) {
+  .swarm-canvas-control {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* The spine: a light upright with one tick per hop, so distance is counted
@@ -13207,40 +13872,12 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   font-style: italic;
 }
 
-/* Arrowheads. Each head is painted here rather than on the path referencing
-   it, because a marker resolves its paint inside defs and never inherits. */
-.swarm-head-route {
-  fill: var(--accent);
-  stroke: none;
-}
-
-.swarm-head-idle {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.swarm-head-down {
-  fill: none;
-  stroke: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.swarm-head-dial {
-  fill: color-mix(in srgb, var(--text) 66%, var(--coddy-blend-base));
-  stroke: none;
-}
-
 /* A wire crossing a node must not swallow a click meant for the node. */
 .swarm-graph-edges {
   pointer-events: none;
 }
 
-/* The route a request would take: solid, heavier, filled head. */
+/* The route a request would take: solid and heavier. */
 .swarm-edge {
   fill: none;
   stroke: var(--accent);
@@ -13256,8 +13893,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-dasharray: 1.5 5;
 }
 
-/* A way round a ring the relay would not take: drawn, but lighter, dashed and
-   ended with an open chevron instead of a filled head. */
+/* A way round a ring the relay would not take: drawn, but lighter and
+   dashed. */
 .swarm-edge.is-alternate {
   stroke: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
   stroke-width: 1.6;
@@ -13592,9 +14229,13 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   stroke-width: 2;
 }
 
-.swarm-node.is-current .swarm-node-meta {
-  fill: var(--accent);
-  font-weight: 600;
+/* Every relay a live route crosses remains visible as the route's structure.
+   The root still has its filled accent tile, and the current relay keeps the
+   stronger current-node ring above this quieter transit outline. */
+.swarm-node-relay.is-route-relay:not(.is-current) .swarm-node-ring {
+  opacity: 0.78;
+  stroke-width: 2.5;
+  stroke-dasharray: none;
 }
 
 /* Off the traced path: still readable, no longer competing with it. */
@@ -13615,6 +14256,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   padding: 0 2px;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px 18px;
 }
 
@@ -13634,7 +14276,9 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .swarm-node-ring {
+  .swarm-node-ring,
+  .swarm-graph-camera,
+  .swarm-canvas-control {
     transition: none;
   }
 
@@ -13658,21 +14302,74 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   }
 }
 
-/* The search is the only control left under the map, so it stands on its own
-   rather than inside a row of them. */
+/* The search sits with the header like the documentation reader's own: a
+   field with a "/" hint, and the results hang over the map rather than push
+   it down. */
+.swarm-search-box {
+  grid-area: search;
+  position: relative;
+}
+
 .swarm-search {
   width: 100%;
+  box-sizing: border-box;
   background: var(--coddy-surface-field);
   border: 1px solid var(--coddy-glass-panel-border);
   border-radius: 10px;
   color: var(--text);
-  padding: 8px 12px;
+  padding: 8px 36px 8px 12px;
+  font: inherit;
   font-size: 14px;
 }
 
 .swarm-search:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.swarm-search-kbd {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  min-width: 18px;
+  padding: 1px 5px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, var(--coddy-blend-base));
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+  font:
+    11px/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The results hang under the field, in the menus' glass, like the
+   documentation search draws them. */
+.swarm-search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(62vh, 560px);
+  overflow: auto;
+  margin: 0;
+  padding: 6px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 1px solid var(--coddy-glass-panel-border);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--text) 5%, transparent),
+      color-mix(in srgb, var(--text) 5%, transparent)
+    ),
+    var(--bg);
+  box-shadow: var(--coddy-glass-panel-shadow);
+  scrollbar-width: thin;
+  z-index: 2;
 }
 
 .swarm-warnings {
@@ -13705,6 +14402,23 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.swarm-result-group {
+  padding: 4px 12px 2px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text) 52%, var(--coddy-blend-base));
+}
+
+.swarm-result-here {
+  color: var(--accent);
+}
+
+.swarm-result-offline {
+  color: color-mix(in srgb, var(--text) 45%, var(--coddy-blend-base));
 }
 
 .swarm-result-hit {
@@ -13782,7 +14496,7 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
 @media (max-width: 700px) {
   .swarm-view {
-    padding: 14px 12px 24px;
+    --swarm-inline: 12px;
   }
 }
 
@@ -14177,7 +14891,8 @@ html:not([data-theme="light"]) .swarm-graph-panel {
   cursor: pointer;
   background: transparent;
   color: color-mix(in srgb, var(--text) 40%, var(--coddy-blend-base));
-  border: 1px dashed color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
+  border: 1px dashed
+    color-mix(in srgb, var(--text) 22%, var(--coddy-blend-base));
   transition:
     color 140ms ease,
     border-color 140ms ease;
@@ -14354,7 +15069,11 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     /* Room for focus rings inside the scroller. */
     padding: 3px;
     margin: -3px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
     mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
 
@@ -14394,7 +15113,11 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     /* Room for the 3px glow of the plan / ask / bypass chips and focus rings. */
     padding: 4px;
     margin: -4px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+    -webkit-mask-image: linear-gradient(
+      to right,
+      #000 calc(100% - 16px),
+      transparent
+    );
     mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   }
 
@@ -14450,6 +15173,28 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     flex-basis: calc(100% - var(--mcp-row-inset));
   }
 
+  /* Marketplaces: the same rule as an MCP row. The address and its badges
+     take the first line, the shield, Sync and trash wrap to the row's end,
+     and the add form puts its scope picker and Add under the address. */
+  .skills-marketplace-head {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
+  .skills-marketplace-text {
+    flex-basis: 100%;
+  }
+
+  .skills-marketplace-add {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .skills-marketplace-add > .settings-input:first-child {
+    flex-basis: 100%;
+  }
+
   /* Settings maps (the default headers): a name and a value side by side left
      the name 82px at 390px, User-Agent cut to "User-Ag". The value goes under
      the name, the trash stays beside the pair, and the pairs stand further
@@ -14473,7 +15218,9 @@ html:not([data-theme="light"]) .swarm-graph-panel {
     font-size: 16px;
   }
 
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+      [type="color"]
+    ):not([type="file"]),
   select,
   textarea:not(#composer) {
     font-size: max(16px, 1em);
@@ -14528,6 +15275,20 @@ html:not([data-theme="light"]) .swarm-graph-panel {
 
 .rail-more-item.is-active {
   color: var(--accent);
+}
+
+.rail-more-active-count {
+  min-width: 18px;
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--coddy-on-accent-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .rail-more-sep {

@@ -40,8 +40,8 @@ type ToolStatus struct {
 
 // statusProbe is the probe ListStatus runs for one server, a variable so a
 // test can watch the probes without spawning servers.
-var statusProbe = func(ctx context.Context, gate *TrustGate, srv ManagedServer, cwd string, log *slog.Logger) ([]ToolInfo, error) {
-	return gate.Probe(ctx, srv, cwd, log)
+var statusProbe = func(ctx context.Context, gate *TrustGate, pool *Pool, srv ManagedServer, cwd string, log *slog.Logger) ([]ToolInfo, error) {
+	return gate.ProbeShared(ctx, pool, srv, cwd, log)
 }
 
 // statusProbeTimeout bounds one server's probe (spawn, initialize, tools/list),
@@ -50,8 +50,11 @@ const statusProbeTimeout = 8 * time.Second
 
 // ListStatus probes approved, enabled servers through the trust gate. The
 // probes run side by side, so the list takes as long as its slowest server.
-// Its declaration summary omits environment and header values.
-func ListStatus(ctx context.Context, cfg *config.Config, cwd string, log *slog.Logger) ([]ServerStatus, error) {
+// With a pool a server that already runs is asked for nothing new and no
+// second copy of it is started (TrustGate.ProbeShared); a nil pool probes
+// every server on a connection of its own. Its declaration summary omits
+// environment and header values.
+func ListStatus(ctx context.Context, cfg *config.Config, cwd string, pool *Pool, log *slog.Logger) ([]ServerStatus, error) {
 	managed, err := ListManagedServers(cfg, cwd)
 	if err != nil {
 		return nil, err
@@ -73,16 +76,13 @@ func ListStatus(ctx context.Context, cfg *config.Config, cwd string, log *slog.L
 		if srv.Origin == OriginHome {
 			source = config.GlobalMCPJSONPath(cfg.Paths.Home)
 		}
-		if srv.Origin == OriginConfig {
-			source = cfg.Paths.ConfigPath
-		}
 		rows[i] = ServerStatus{Name: srv.Config.Name, Scope: srv.Scope, Origin: srv.Origin,
 			Enabled: !srv.Config.Disabled, Trusted: trust == TrustStateAllowed, Tools: []ToolStatus{},
 			// A per-server decision exists only for a project entry under ask:
 			// under allow every one starts, under deny none does.
 			Approvable:  srv.Origin == OriginProject && gate.Policy() == config.ProjectTrustAsk,
 			Fingerprint: Fingerprint(srv.Config),
-			Declaration: DeclarationSummary(EffectiveTransport(srv.Config), srv.Config.Command, srv.Config.Args, srv.Config.URL, envKeys, headerKeys, cwd, source)}
+			Declaration: DeclarationSummary(EffectiveTransport(srv.Config), srv.Config.Command, srv.Config.Args, srv.Config.URL, envKeys, headerKeys, ReadsEnvironment(srv.Config), cwd, source)}
 		switch {
 		case trust != TrustStateAllowed:
 			rows[i].Status = string(trust)
@@ -95,10 +95,10 @@ func ListStatus(ctx context.Context, cfg *config.Config, cwd string, log *slog.L
 			go func(row *ServerStatus, srv ManagedServer) {
 				defer wg.Done()
 				probeCtx, cancel := context.WithTimeout(ctx, statusProbeTimeout)
-				tools, probeErr := statusProbe(probeCtx, gate, srv, cwd, log)
+				tools, probeErr := statusProbe(probeCtx, gate, pool, srv, cwd, log)
 				cancel()
 				if probeErr != nil {
-					row.Status, row.Error = "error", probeErr.Error()
+					row.Status, row.Error = "error", RedactValues(srv.Config, cwd, probeErr.Error())
 				} else {
 					row.Status = "connected"
 				}
@@ -115,9 +115,10 @@ func ListStatus(ctx context.Context, cfg *config.Config, cwd string, log *slog.L
 
 // DeclarationSummary presents an approval without exposing credential values:
 // the transport, the command line or the URL, the names of the environment
-// variables and headers it carries (never their values), the workspace and
-// the file it came from. A list that is empty is left out.
-func DeclarationSummary(transport, command string, args []string, target string, envKeys, headerKeys []string, cwd, source string) string {
+// variables and headers it carries (never their values), the variables of the
+// Coddy process its values read (ReadsEnvironment), the workspace and the
+// file it came from. A list that is empty is left out.
+func DeclarationSummary(transport, command string, args []string, target string, envKeys, headerKeys, reads []string, cwd, source string) string {
 	sort.Strings(envKeys)
 	sort.Strings(headerKeys)
 	line := strings.TrimSpace(command + " " + strings.Join(args, " "))
@@ -130,6 +131,13 @@ func DeclarationSummary(transport, command string, args []string, target string,
 	}
 	if len(headerKeys) > 0 {
 		parts = append(parts, "headers: "+strings.Join(headerKeys, ", "))
+	}
+	if len(reads) > 0 {
+		refs := make([]string, len(reads))
+		for i, name := range reads {
+			refs[i] = "${" + name + "}"
+		}
+		parts = append(parts, "reads: "+strings.Join(refs, ", "))
 	}
 	parts = append(parts, "workspace: "+cwd, "source: "+source)
 	return strings.Join(parts, " · ")

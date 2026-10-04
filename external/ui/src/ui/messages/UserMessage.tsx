@@ -1,7 +1,7 @@
 import { memo, useState } from "react";
 
 import { useT } from "../i18n/I18nProvider";
-import { ImageLightbox } from "../components/ImageLightbox";
+import { ApiImage, ApiImageLightbox } from "../components/ApiImage";
 import { stripCoddyAttachmentsForUserDisplay } from "../skills/stripCoddyAttachments";
 import { segmentSlashKnownSpans } from "../skills/segmentComposerSlashSpans";
 import {
@@ -12,13 +12,46 @@ import { MessageCopyIconButton } from "./MessageCopyIconButton";
 import { fileTypeIcon } from "./fileTypeIcon";
 import { splitDocMentions } from "../docs/docMentions";
 import { appNavHrefDocs } from "../scheduler/hashRoute";
-import { useApiImageSrc } from "../env/apiImage";
 
-/** Prose of a sent message with its **`@coddy:`** mentions as links to the reader. */
+const USER_MENTION = /(^|[\s([])(@(?:[~./]|[a-zA-Z0-9_-])[\w./~:@#'"-]*)/g;
+
+function copyUserToken(token: string) {
+  void navigator.clipboard?.writeText(token);
+}
+
+function copyableMentions(text: string, keyPrefix: string) {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  const re = new RegExp(USER_MENTION.source, "g");
+  while ((match = re.exec(text)) !== null) {
+    const lead = match[1] ?? "";
+    const token = match[2] ?? "";
+    const prefix = text.slice(last, match.index) + lead;
+    if (prefix) out.push(<span key={`${keyPrefix}-text-${last}`}>{prefix}</span>);
+    out.push(
+      <button
+        key={`${keyPrefix}-mention-${match.index}`}
+        type="button"
+        className="msg-user-token msg-user-token--mention"
+        data-testid={`user-token-mention-${token.slice(1).replace(/[^a-zA-Z0-9_-]+/g, "_")}`}
+        title={token}
+        onClick={() => copyUserToken(token)}
+      >
+        {token}
+      </button>,
+    );
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) out.push(<span key={`${keyPrefix}-tail`}>{text.slice(last)}</span>);
+  return out.length > 0 ? out : text;
+}
+
+/** Prose of a sent message with reader links and copyable workspace mentions. */
 function withDocMentions(text: string, keyPrefix: string) {
   return splitDocMentions(text).map((part, i) => {
     if (part.type === "text") {
-      return <span key={`${keyPrefix}-${i}`}>{part.value}</span>;
+      return <span key={`${keyPrefix}-${i}`}>{copyableMentions(part.value, `${keyPrefix}-${i}`)}</span>;
     }
     const cut = part.ref.indexOf("#");
     const href =
@@ -29,34 +62,6 @@ function withDocMentions(text: string, keyPrefix: string) {
       </a>
     );
   });
-}
-
-/**
- * An <img> of an image the server named. Through a relay or any remote
- * environment the bytes come through that environment (useApiImageSrc); until
- * they arrive the image has no src rather than a broken one.
- */
-function ApiImage(props: {
-  src: string;
-  alt: string;
-  className: string;
-  "data-testid": string;
-}) {
-  const src = useApiImageSrc(props.src);
-  return (
-    <img
-      className={props.className}
-      alt={props.alt}
-      data-testid={props["data-testid"]}
-      {...(src ? { src } : {})}
-    />
-  );
-}
-
-/** The original of an attached image, enlarged, read the same way as its thumbnail. */
-function ApiImageLightbox(props: { src: string; alt: string; onClose: () => void }) {
-  const src = useApiImageSrc(props.src);
-  return src ? <ImageLightbox src={src} alt={props.alt} onClose={props.onClose} /> : null;
 }
 
 function fmtBytes(
@@ -179,7 +184,15 @@ export const UserMessage = memo(function UserMessage(props: {
                     data-testid="coddy-skill-span"
                     data-skill-name={seg.name}
                   >
-                    {seg.literal}
+                    <button
+                      type="button"
+                      className="msg-user-token"
+                      data-testid={`user-token-skill-${seg.name}`}
+                      title={seg.literal}
+                      onClick={() => copyUserToken(seg.literal)}
+                    >
+                      {seg.literal}
+                    </button>
                   </span>
                 ) : (
                   <span key={i}>{withDocMentions(seg.value, String(i))}</span>

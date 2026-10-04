@@ -113,9 +113,9 @@ func TestAskPromptKeepsRefusingRequestedChanges(t *testing.T) {
 	}
 }
 
-// The agent invents a place for a git worktree unless the prompt names one,
-// and what it invents ends up untracked at the repository root.
-func TestAgentPromptNamesWorktreesDirectory(t *testing.T) {
+// The agent uses the worktree tool instead of constructing git commands and
+// guessing where the new checkout belongs.
+func TestAgentPromptUsesWorktreeTool(t *testing.T) {
 	result, err := prompts.Render("agent", "", defaultAgentTplFile, defaultPlanTplFile, defaultAskTplFile, prompts.TemplateData{
 		CWD:    "/home/user/project",
 		UTCNow: fixtureUTC,
@@ -124,14 +124,18 @@ func TestAgentPromptNamesWorktreesDirectory(t *testing.T) {
 		t.Fatalf("Render agent: %v", err)
 	}
 	for _, want := range []string{
-		".coddy/worktrees",            // the directory itself
-		"main checkout",               // resolved, not relative to a linked worktree
-		"feature-login",               // the branch name is mapped to a folder name
-		".coddy/worktrees/.gitignore", // the ignore file sits beside the worktrees
+		"worktree_create",
+		".coddy/worktrees",
+		"main checkout",
+		"default branch",
+		"without a manual `cd`",
 	} {
 		if !strings.Contains(result, want) {
-			t.Errorf("agent prompt should mention %q so worktrees land where Coddy puts them", want)
+			t.Errorf("agent prompt should mention %q for tool-based worktrees", want)
 		}
+	}
+	if strings.Contains(result, "git worktree add") {
+		t.Error("agent prompt still teaches manual worktree creation")
 	}
 }
 
@@ -371,10 +375,13 @@ func TestDefaultSource(t *testing.T) {
 	}
 }
 
-func TestRenderWithFallbackNoPanic(t *testing.T) {
-	result := prompts.RenderWithFallback("agent", "/nonexistent/prompt-dir", defaultAgentTplFile, defaultPlanTplFile, defaultAskTplFile, prompts.TemplateData{CWD: "/p"})
-	if result == "" {
-		t.Error("RenderWithFallback should return non-empty string even on error")
+func TestRenderCheckedFallsBackAndSaysSo(t *testing.T) {
+	result, rendered := prompts.RenderChecked("agent", "/nonexistent/prompt-dir", defaultAgentTplFile, defaultPlanTplFile, defaultAskTplFile, prompts.TemplateData{CWD: "/p"})
+	if result == "" || rendered {
+		t.Errorf("RenderChecked = %q, %v; want the fallback prompt, reported as not rendered", result, rendered)
+	}
+	if _, rendered := prompts.RenderChecked("agent", "", defaultAgentTplFile, defaultPlanTplFile, defaultAskTplFile, prompts.TemplateData{CWD: "/p"}); !rendered {
+		t.Error("the built-in template reported as not rendered")
 	}
 }
 

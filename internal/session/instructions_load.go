@@ -3,7 +3,6 @@ package session
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -46,57 +45,16 @@ func ResolveInstructionFile(entry, cwd, home string) string {
 	return filepath.Clean(path)
 }
 
-// LoadInstructions reads the configured instruction files and concatenates their
-// contents. Files that don't exist are silently skipped (matching other-agent
-// AGENTS.md convention), as are empty ones, a file named twice, and any file
-// whose path is in skip - the preamble documents the rules block already
-// carries, which would otherwise reach the model a second time.
-func LoadInstructions(cwd, home string, files, skip []string) string {
-	seen := make(map[string]struct{}, len(files)+len(skip))
-	for _, s := range skip {
-		if key := instructionKey(s); key != "" {
-			seen[key] = struct{}{}
+// ResolveInstructionFiles resolves the entries of instructions.files, in their
+// order, for rules.LoadStanding: the files the operator added below the
+// AGENTS.md and DESIGN.md layers. An entry that cannot be resolved is left
+// out.
+func ResolveInstructionFiles(entries []string, cwd, home string) []string {
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if path := ResolveInstructionFile(entry, cwd, home); path != "" {
+			out = append(out, path)
 		}
 	}
-	var parts []string
-	for _, entry := range files {
-		path := ResolveInstructionFile(entry, cwd, home)
-		if path == "" {
-			continue
-		}
-		key := instructionKey(path)
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		body := strings.TrimSpace(string(data))
-		if body == "" {
-			continue
-		}
-		parts = append(parts, body)
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-// instructionKey identifies a file for the dedupe, so the same bytes are not
-// sent twice under two names: symlinks are resolved where the file exists
-// (a CLAUDE.md pointing at AGENTS.md is one file, not two) and the case is
-// folded on the platforms whose filesystems ignore it.
-func instructionKey(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
-	}
-	path = filepath.Clean(path)
-	if runtime.GOOS == "windows" {
-		return strings.ToLower(path)
-	}
-	return path
+	return out
 }

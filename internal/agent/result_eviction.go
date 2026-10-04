@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
-	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools"
 )
 
@@ -86,7 +85,7 @@ func (a *Agent) evictionDue(msgs []llm.Message) bool {
 			overhead = b.EstimatedTotal - b.Conversation
 		}
 	}
-	total := overhead + session.EstimateTokens(conversationText(msgs))
+	total := overhead + conversationTokens(msgs, a.modelReadsImages())
 	return total*100 >= start*ent.MaxContextTokens
 }
 
@@ -175,8 +174,9 @@ func pruneToolResults(history []llm.Message, opt resultEvictionOptions) []llm.Me
 			}
 		}
 		// Skip tiny results: not worth a placeholder, and they do not consume the
-		// working-window budget.
-		if len(m.Content) <= opt.MinResultBytes {
+		// working-window budget. A picture a read showed counts with its bytes:
+		// its text is one line, and the picture is what fills the context.
+		if resultBytes(m) <= opt.MinResultBytes {
 			continue
 		}
 		switch call.Name {
@@ -204,6 +204,8 @@ func pruneToolResults(history []llm.Message, opt resultEvictionOptions) []llm.Me
 			cloned = true
 		}
 		out[msgIdx].Content = placeholder
+		// A collapsed read no longer shows the model its picture either.
+		out[msgIdx].ImageParts = nil
 	}
 
 	for _, r := range reads {
@@ -234,6 +236,16 @@ func pruneToolResults(history []llm.Message, opt resultEvictionOptions) []llm.Me
 	}
 
 	return out
+}
+
+// resultBytes is what a tool result costs the request: its text plus the
+// pictures it carries.
+func resultBytes(m llm.Message) int {
+	n := len(m.Content)
+	for _, p := range m.ImageParts {
+		n += partBytes(p)
+	}
+	return n
 }
 
 func writeResultSucceeded(content string) bool {

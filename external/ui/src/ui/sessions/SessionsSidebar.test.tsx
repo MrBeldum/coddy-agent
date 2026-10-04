@@ -1,10 +1,15 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { setEnv } from "../env/remoteEnv";
 import { SessionsSidebar } from "./SessionsSidebar";
 import type { SessionRow } from "./types";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  setEnv({ mode: "local" });
+  window.localStorage.clear();
+});
 
 const row = (id: string, title: string): SessionRow => ({
   id,
@@ -128,7 +133,7 @@ test("draft session row links to #/draft/<id>", () => {
   expect(link).toHaveAttribute("href", "#/draft/draft_1");
 });
 
-test("shows the activity dot on every running session and the unread dot on others", () => {
+test("shows activity on every running session without duplicating unread state", () => {
   render(
     <SessionsSidebar
       sessionId="current"
@@ -153,7 +158,7 @@ test("shows the activity dot on every running session and the unread dot on othe
     />,
   );
   expect(screen.getByTestId("session-activity-busy")).toBeInTheDocument();
-  expect(screen.getByTestId("session-unread-busy")).toBeInTheDocument();
+  expect(screen.queryByTestId("session-unread-busy")).toBeNull();
   expect(screen.getByTestId("session-activity-current")).toBeInTheDocument();
   expect(screen.queryByTestId("session-unread-current")).toBeNull();
 });
@@ -179,7 +184,99 @@ test("question pending hides the activity dot and shows animated question icon",
     />,
   );
   expect(screen.queryByTestId("session-activity-q")).toBeNull();
+  expect(screen.queryByTestId("session-idle-q")).toBeNull();
   expect(screen.getByTestId("session-question-q")).toBeInTheDocument();
+});
+
+test("server-reported permission owns the state slot and exposes its name", () => {
+  renderDrawer({
+    sessionId: "other",
+    sessions: [
+      {
+        id: "permission",
+        title: "Permission",
+        turnActive: true,
+        permissionPending: true,
+      },
+    ],
+  });
+
+  expect(screen.queryByTestId("session-activity-permission")).toBeNull();
+  expect(screen.queryByTestId("session-idle-permission")).toBeNull();
+  expect(
+    screen.getByRole("img", { name: "Permission required" }),
+  ).toBeInTheDocument();
+});
+
+test("server-reported question owns the state slot before its chat is opened", () => {
+  renderDrawer({
+    sessionId: "other",
+    sessions: [
+      {
+        id: "question",
+        title: "Question",
+        turnActive: true,
+        questionPending: true,
+      },
+    ],
+  });
+
+  expect(screen.queryByTestId("session-activity-question")).toBeNull();
+  expect(
+    screen.getByRole("img", { name: "Question pending" }),
+  ).toBeInTheDocument();
+});
+
+test("permission marker wins when a row reports both pending states", () => {
+  renderDrawer({
+    sessionId: "other",
+    sessions: [
+      {
+        id: "both",
+        title: "Both",
+        turnActive: true,
+        permissionPending: true,
+        questionPending: true,
+      },
+    ],
+  });
+
+  expect(screen.getByTestId("session-permission-both")).toBeInTheDocument();
+  expect(screen.queryByTestId("session-question-both")).toBeNull();
+  expect(screen.getAllByRole("img", { name: /pending|required/i })).toHaveLength(
+    1,
+  );
+});
+
+test("finished and failed rows carry a state dot that distinguishes unseen errors", () => {
+  renderDrawer({
+    sessionId: "current",
+    sessions: [
+      { id: "idle", title: "Idle" },
+      {
+        id: "unseen-error",
+        title: "Unseen error",
+        lastErrorSeq: 4,
+        readActivitySeq: 3,
+      },
+      {
+        id: "seen-error",
+        title: "Seen error",
+        lastErrorSeq: 4,
+        readActivitySeq: 4,
+        unreadComplete: true,
+      },
+    ],
+  });
+
+  expect(screen.getByTestId("session-idle-idle")).toBeInTheDocument();
+  expect(screen.getByTestId("session-error-unseen-error")).not.toHaveClass(
+    "is-seen",
+  );
+  expect(screen.getByTestId("session-error-seen-error")).toHaveClass(
+    "is-seen",
+  );
+  expect(screen.queryByTestId("session-unread-seen-error")).toBeNull();
 });
 
 test("the dot names background work when the row has no turn running", () => {
@@ -233,10 +330,11 @@ test("the state marks stand apart from the title so the tags line up under its t
   expect(
     busy.querySelector(".session-row-leading .session-activity-dot"),
   ).toBeNull();
-  // A row without a state mark has no empty column holder to push its title in.
-  expect(
-    screen.getByTestId("session-row-calm").querySelector(".session-row-marks"),
-  ).toBeNull();
+  // The transparent finished ring gives grouped rows the same left anchor as
+  // a busy row without pretending work is still running.
+  const calm = screen.getByTestId("session-row-calm");
+  expect(calm.querySelector(".session-row-marks")).not.toBeNull();
+  expect(screen.getByTestId("session-idle-calm")).toBeInTheDocument();
 });
 
 // --- grouping and the archive ---
@@ -310,6 +408,51 @@ test("a heading collapses the rows under it and opens them again", () => {
 
   fireEvent.click(screen.getByTestId("session-group-toggle-today"));
   expect(screen.getByTestId("session-row-today")).toBeInTheDocument();
+});
+
+test("a collapsed workspace group survives navigation and temporary absence", () => {
+  const sessions = [
+    { id: "workspace", title: "Report", cwd: "/srv/reports" },
+  ] as SessionRow[];
+  const first = renderDrawer({ sessions, groupMode: "workspace" });
+  const toggle = screen.getByTestId(
+    "session-group-toggle-cwd:/srv/reports",
+  );
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  first.unmount();
+
+  const withoutGroup = renderDrawer({ sessions: [], groupMode: "workspace" });
+  withoutGroup.unmount();
+
+  renderDrawer({ sessions, groupMode: "workspace" });
+  expect(
+    screen.getByTestId("session-group-toggle-cwd:/srv/reports"),
+  ).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByTestId("session-row-workspace")).toBeNull();
+});
+
+test("collapsed groups are scoped to their environment", () => {
+  const sessions = [dated("today", "Report", "2026-09-15T09:00:00")];
+  setEnv({ mode: "remote", baseUrl: "https://alpha.example", token: "" });
+  const alpha = renderDrawer({ sessions, groupMode: "time" });
+  fireEvent.click(screen.getByTestId("session-group-toggle-today"));
+  alpha.unmount();
+
+  setEnv({ mode: "remote", baseUrl: "https://beta.example", token: "" });
+  const beta = renderDrawer({ sessions, groupMode: "time" });
+  expect(screen.getByTestId("session-group-toggle-today")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  beta.unmount();
+
+  setEnv({ mode: "remote", baseUrl: "https://alpha.example", token: "" });
+  renderDrawer({ sessions, groupMode: "time" });
+  expect(screen.getByTestId("session-group-toggle-today")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
 });
 
 test("the filter menu is closed until its control is pressed, and shuts again", () => {
@@ -412,7 +555,7 @@ test("sort is reported up for the server to apply", () => {
 test("one environment is no choice at all, so the section stays out", () => {
   renderDrawer({
     environments: [
-      { key: "local", label: "Local", active: true, onPick: () => {} },
+      { kind: "origin", key: "local", label: "Local", active: true, onPick: () => {} },
     ],
   });
   fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
@@ -425,8 +568,8 @@ test("an environment row switches where the history is read from", () => {
   const onPick = vi.fn();
   renderDrawer({
     environments: [
-      { key: "local", label: "Local", active: true, onPick: () => {} },
-      { key: "nas02", label: "nas02", active: false, onPick },
+      { kind: "origin", key: "local", label: "Local", active: true, onPick: () => {} },
+      { kind: "switch", key: "nas02", label: "nas02", active: false, onPick },
     ],
   });
   fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
@@ -434,6 +577,92 @@ test("an environment row switches where the history is read from", () => {
   fireEvent.click(screen.getByTestId("sessions-filter-env-nas02"));
   expect(onPick).toHaveBeenCalledTimes(1);
   expect(screen.queryByTestId("sessions-filter-menu")).toBeNull();
+});
+
+test("environment origins and remote switches keep independent menu semantics", () => {
+  renderDrawer({
+    environments: [
+      { kind: "origin", key: "all", label: "All", active: false, onPick: () => {} },
+      { kind: "origin", key: "gateway", label: "Gateway", active: true, onPick: () => {} },
+      { kind: "switch", key: "nas02", label: "nas02", active: true, onPick: () => {} },
+    ],
+  });
+  fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  const section = screen.getByTestId("sessions-filter-section-environment");
+  expect(section).toHaveTextContent("nas02 · Gateway");
+  expect(section.querySelector(".sessions-filter-value")).not.toHaveClass(
+    "is-default",
+  );
+
+  fireEvent.click(section);
+  expect(screen.getByTestId("sessions-filter-env-gateway")).toHaveAttribute(
+    "role",
+    "menuitemradio",
+  );
+  expect(screen.getByTestId("sessions-filter-env-gateway")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(screen.getByTestId("sessions-filter-env-nas02")).toHaveAttribute(
+    "role",
+    "menuitem",
+  );
+  expect(screen.getByTestId("sessions-filter-env-nas02")).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  expect(screen.getByTestId("sessions-filter-env-nas02")).not.toHaveAttribute(
+    "aria-checked",
+  );
+  expect(screen.getByTestId("sessions-filter-env-nas02")).toHaveClass(
+    "starts-group",
+  );
+});
+
+test("environment summary names only the remote when All is selected", () => {
+  renderDrawer({
+    environments: [
+      { kind: "origin", key: "all", label: "All", active: true, onPick: () => {} },
+      { kind: "switch", key: "nas02", label: "nas02", active: true, onPick: () => {} },
+    ],
+  });
+  fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  const section = screen.getByTestId("sessions-filter-section-environment");
+  expect(section.querySelector(".sessions-filter-value")).toHaveTextContent(
+    "nas02",
+  );
+  expect(section.querySelector(".sessions-filter-value")).not.toHaveClass(
+    "is-default",
+  );
+});
+
+test("environment summary uses the origin and defaults only to All locally", () => {
+  renderDrawer({
+    environments: [
+      { kind: "origin", key: "all", label: "All", active: true, onPick: () => {} },
+      { kind: "origin", key: "gateway", label: "Gateway", active: false, onPick: () => {} },
+    ],
+  });
+  fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  let value = screen
+    .getByTestId("sessions-filter-section-environment")
+    .querySelector(".sessions-filter-value");
+  expect(value).toHaveTextContent("All");
+  expect(value).toHaveClass("is-default");
+
+  cleanup();
+  renderDrawer({
+    environments: [
+      { kind: "origin", key: "all", label: "All", active: false, onPick: () => {} },
+      { kind: "origin", key: "gateway", label: "Gateway", active: true, onPick: () => {} },
+    ],
+  });
+  fireEvent.click(screen.getByTestId("sessions-filter-trigger"));
+  value = screen
+    .getByTestId("sessions-filter-section-environment")
+    .querySelector(".sessions-filter-value");
+  expect(value).toHaveTextContent("Gateway");
+  expect(value).not.toHaveClass("is-default");
 });
 
 test("escape folds an open section first, and the menu next", () => {

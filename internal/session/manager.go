@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,6 +55,28 @@ type Manager struct {
 	backgroundMCP atomic.Bool
 	// mcpConnectTimeout overrides defaultMCPConnectTimeout; tests shorten it.
 	mcpConnectTimeout time.Duration
+	// mcpPool shares the configured MCP servers between the sessions of the
+	// manager (mcp_pool.go): one connection per global server, one per
+	// workspace for a project server, each session holding a lease.
+	mcpPool *mcp.Pool
+	// keepGlobalMCP says the global servers start with the manager and stay
+	// up for its life (StartGlobalMCPServers).
+	keepGlobalMCP atomic.Bool
+	// mcpTrust is the mcp.project_trust the live sessions' configured servers
+	// were last reconciled under. A configuration replacement compares the
+	// new policy with it rather than with the previous object, which a
+	// management surface may already have changed in place
+	// (mcp.SetProjectTrust mirrors the policy into the live configuration).
+	mcpTrust atomic.Value
+	// mcpDecls is what <home>/mcp.json declared when the live sessions were
+	// last reconciled with it (ReloadMCPDeclarations): server name -> the
+	// digest of its declaration and its switch.
+	mcpDeclMu sync.Mutex
+	mcpDecls  map[string]string
+	// mcpWatchStop ends the watcher of <home>/mcp.json that
+	// StartGlobalMCPServers starts; nil until then.
+	mcpWatchMu   sync.Mutex
+	mcpWatchStop context.CancelFunc
 
 	// stubTurnMu guards in-process turns when flock is unavailable or SessionDir is empty.
 	stubTurnMu sync.Map // sessionID -> *sync.Mutex
@@ -88,6 +110,12 @@ type Manager struct {
 	cfgObserverMu  sync.Mutex
 	cfgObservers   map[int]func(*config.Config)
 	cfgObserverSeq int
+	// cfgReplaceMu holds one replacement from its store to its last observer,
+	// so observers hear replacements in the order they were stored. Not every
+	// writer takes the config file lock (config_commit, the file watcher), and
+	// two overlapping replacements otherwise reached an observer newest first,
+	// leaving it on the older configuration while the manager held the newer.
+	cfgReplaceMu sync.Mutex
 
 	// deleting marks sessions whose bundles are being removed by
 	// DeleteSessionTree, so a turn racing the delete is refused instead of
@@ -137,7 +165,7 @@ type Manager struct {
 // ACP client omits cwd; may be empty if every session supplies a non-empty cwd.
 // store may be nil to disable persistence.
 func NewManager(cfg *config.Config, server acp.UpdateSender, runner AgentRunner, log *slog.Logger, defaultCWD string, store *FileStore) *Manager {
-	skillsDirs := append([]string(nil), cfg.Skills.Dirs...)
+	skillsDirs := cfg.Skills.SearchDirs()
 	m := &Manager{
 		server:     server,
 		runner:     runner,
@@ -149,6 +177,12 @@ func NewManager(cfg *config.Config, server acp.UpdateSender, runner AgentRunner,
 		store:      store,
 		sessions:   make(map[string]*State),
 	}
+	m.mcpPool = mcp.NewPool(m.log)
+	m.mcpPool.SetDialTimeout(defaultMCPConnectTimeout)
+	m.mcpPool.SetStopDelay(cfg.MCP.EffectiveIdleTimeout())
+	m.mcpPool.SetWanted(m.mcpServerWanted)
+	m.mcpTrust.Store(cfg.MCP.ResolvedProjectTrust())
+	m.mcpDecls = globalMCPDeclarations(cfg, m.log)
 	m.cfgAt.Store(cfg)
 	return m
 }
@@ -174,13 +208,110 @@ func (m *Manager) ReplaceConfig(next *config.Config) {
 	if next == nil {
 		return
 	}
-	previous := m.storeConfig(next)
-	if previous != nil && reflect.DeepEqual(previous.MCPServers, next.MCPServers) {
+	previous, previousTrust := m.storeConfig(next)
+	if previous != nil && !mcpTrustChanged(next, previousTrust) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
 	defer cancel()
 	m.reloadConfiguredMCPServers(ctx)
+}
+
+// mcpTrustChanged reports whether a new configuration changes which
+// configured MCP servers the live sessions may run. config.yaml declares no
+// server (they live in <home>/mcp.json and the project's .coddy/mcp.json,
+// see ReloadMCPDeclarations), so what it can change is the trust policy that
+// decides whether project servers run at all: previousTrust is the policy
+// the sessions were reconciled under. A policy moved to deny must take the
+// project servers away from the sessions holding them, not only from new
+// ones.
+func mcpTrustChanged(next *config.Config, previousTrust string) bool {
+	return previousTrust != next.MCP.ResolvedProjectTrust()
+}
+
+// ReloadMCPDeclarations brings the live sessions in line with
+// <home>/mcp.json after it changed on disk: an editor, another process, a
+// file dropped in by a deployment. Only the servers whose declaration or
+// switch moved are reconciled, each as RefreshMCPServer does it, so a
+// stateful neighbour keeps its process; a server that left the file is
+// closed in every session that ran it. A per-tool switch needs nothing here,
+// since every turn rebuilds its tool filter from the file. The management
+// surfaces reconcile the server they changed themselves, and a reload that
+// follows their write finds the session already in line.
+func (m *Manager) ReloadMCPDeclarations(ctx context.Context) {
+	next, err := readGlobalMCPDeclarations(m.activeCfg())
+	if err != nil {
+		// A file caught mid-write or saved with a typo says nothing about
+		// which servers should stop: the running ones stay, and the snapshot
+		// with them, until it reads again.
+		m.log.Warn("global MCP servers file changed but does not read; the running servers stay",
+			"path", config.GlobalMCPJSONPath(m.activeCfg().Paths.Home), "error", err)
+		return
+	}
+	m.mcpDeclMu.Lock()
+	previous := m.mcpDecls
+	m.mcpDecls = next
+	m.mcpDeclMu.Unlock()
+	changed := changedMCPDeclarations(previous, next)
+	if len(changed) == 0 {
+		return
+	}
+	m.log.Info("global MCP servers changed on disk, reconciling the sessions",
+		"path", config.GlobalMCPJSONPath(m.activeCfg().Paths.Home), "servers", changed)
+	for _, name := range changed {
+		m.RefreshMCPServer(ctx, name)
+	}
+}
+
+// globalMCPDeclarations is what <home>/mcp.json declares, by server name:
+// the digest of the declaration and its server switch. Per-tool switches
+// are left out; they apply on the next turn without reconnecting anything.
+// A file that does not read declares nothing here, as at session start.
+func globalMCPDeclarations(cfg *config.Config, log *slog.Logger) map[string]string {
+	out, err := readGlobalMCPDeclarations(cfg)
+	if err != nil {
+		if log != nil {
+			log.Warn("failed to load mcp.json", "path", config.GlobalMCPJSONPath(cfg.Paths.Home), "error", err)
+		}
+		return map[string]string{}
+	}
+	return out
+}
+
+// readGlobalMCPDeclarations is globalMCPDeclarations with a file that does
+// not read reported: a missing file declares no server, a broken one is an
+// error, never "no servers".
+func readGlobalMCPDeclarations(cfg *config.Config) (map[string]string, error) {
+	out := map[string]string{}
+	if cfg == nil {
+		return out, nil
+	}
+	servers, err := config.LoadMCPJSONServers(config.GlobalMCPJSONPath(cfg.Paths.Home))
+	if err != nil {
+		return nil, err
+	}
+	for _, srv := range servers {
+		out[srv.Name] = fmt.Sprintf("%s disabled=%t", mcp.Fingerprint(srv), srv.Disabled)
+	}
+	return out, nil
+}
+
+// changedMCPDeclarations lists, sorted, the names whose declaration differs
+// between two snapshots, a name present in only one of them included.
+func changedMCPDeclarations(previous, next map[string]string) []string {
+	var out []string
+	for name, decl := range next {
+		if previous[name] != decl {
+			out = append(out, name)
+		}
+	}
+	for name := range previous {
+		if _, ok := next[name]; !ok {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // mcpRefreshTimeout bounds RefreshMCPServer: the dials of the one server in
@@ -201,11 +332,29 @@ var mcpRefreshTimeout = mcpReloadTimeout
 // and dialed when its next turn starts, as is a server whose dial the
 // deadline cut short.
 func (m *Manager) RefreshMCPServer(ctx context.Context, name string) {
+	m.refreshMCPServer(ctx, name, "", "")
+}
+
+// RefreshMCPServerInWorkspace reconciles a changed project declaration only
+// with sessions in that workspace. Global declarations still reconcile every
+// session because a project shadow may reveal a changed global server.
+func (m *Manager) RefreshMCPServerInWorkspace(ctx context.Context, name, origin, cwd string) {
+	m.refreshMCPServer(ctx, name, origin, cwd)
+}
+
+func (m *Manager) refreshMCPServer(ctx context.Context, name, origin, cwd string) {
 	ctx, cancel := context.WithTimeout(ctx, mcpRefreshTimeout)
 	defer cancel()
+	// The change is on disk already (a switch, an edit of <home>/mcp.json):
+	// the kept global servers follow it before the sessions do, so a
+	// session that dials the server now joins the one the pool starts.
+	m.syncGlobalMCPServers()
 	m.mu.RLock()
 	states := make([]*State, 0, len(m.sessions))
 	for _, st := range m.sessions {
+		if origin == mcp.OriginProject && CanonicalWorkspacePath(st.GetCWD()) != CanonicalWorkspacePath(cwd) {
+			continue
+		}
 		states = append(states, st)
 	}
 	m.mu.RUnlock()
@@ -226,6 +375,9 @@ func (m *Manager) RefreshMCPServer(ctx context.Context, name string) {
 		}(st)
 	}
 	wg.Wait()
+	// A server no session held any more, waiting out its idle timeout, is
+	// asked about too: switched off or no longer approved, it stops now.
+	m.mcpPool.Recheck()
 }
 
 // reconcileParkedWhileIdle reconciles what is parked on a session whose turn
@@ -257,7 +409,7 @@ func (m *Manager) reconcileParkedWhileIdle(ctx context.Context, st *State) {
 // controls of the console and the chat, through the same managed declarations
 // and trust gate as the HTTP settings surface.
 func (m *Manager) MCPServers(ctx context.Context, cwd string) ([]mcp.ServerStatus, error) {
-	return mcp.ListStatus(ctx, m.activeCfg(), cwd, m.log)
+	return mcp.ListStatus(ctx, m.activeCfg(), cwd, m.mcpPool, m.log)
 }
 
 // SetMCPEnabled flips a server's switch, or one tool's when tool is set, and
@@ -308,19 +460,32 @@ func (m *Manager) SetMCPTrust(ctx context.Context, cwd, name, fingerprint string
 }
 
 // storeConfig replaces the process configuration and the loader used by new
-// sessions. It returns the previous configuration so callers can decide
+// sessions. It returns the previous configuration and the project trust
+// policy the live sessions were reconciled under, so callers can decide
 // whether active MCP clients need reconnecting.
-func (m *Manager) storeConfig(next *config.Config) *config.Config {
+func (m *Manager) storeConfig(next *config.Config) (*config.Config, string) {
+	m.cfgReplaceMu.Lock()
+	defer m.cfgReplaceMu.Unlock()
 	previous := m.activeCfg()
-	m.skillsLoad = skills.NewLoader(append([]string(nil), next.Skills.Dirs...))
+	// The policy the live sessions were reconciled under is swapped in the
+	// same order as the configurations themselves.
+	previousTrust, _ := m.mcpTrust.Swap(next.MCP.ResolvedProjectTrust()).(string)
+	m.skillsLoad = skills.NewLoader(next.Skills.SearchDirs())
 	m.cfgAt.Store(next)
+	// The global servers the pool keeps follow the configuration: a server
+	// added or switched on starts, one removed, switched off or redeclared
+	// is let go once no session holds it. A changed mcp.idle_timeout_seconds
+	// applies to the servers that go unheld from now on.
+	m.mcpPool.SetStopDelay(next.MCP.EffectiveIdleTimeout())
+	m.syncGlobalMCPServers()
+	m.mcpPool.Recheck()
 	// The provider rows behind the usage cache may have changed with the
 	// configuration: work in flight for the old rows is dropped, the
 	// snapshots and their pacing stay, and the fingerprint tells a changed
 	// credential apart on the next read.
 	m.pauseProviderUsage()
 	m.publishConfigReplaced(next)
-	return previous
+	return previous, previousTrust
 }
 
 // ReloadConfigForSession reloads config.yaml and applies runtime-owned state to
@@ -335,7 +500,7 @@ func (m *Manager) ReloadConfigForSession(ctx context.Context, st *State) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	loader := skills.NewLoader(append([]string(nil), next.Skills.Dirs...))
+	loader := skills.NewLoader(next.Skills.SearchDirs())
 	var warnings []string
 	var loadedSkills []*skills.Skill
 	if st != nil {
@@ -365,7 +530,7 @@ func (m *Manager) ReloadConfigForSession(ctx context.Context, st *State) ([]stri
 		}
 	}
 
-	previous := m.storeConfig(next)
+	previous, previousTrust := m.storeConfig(next)
 	if st != nil {
 		st.ReplaceSkills(loadedSkills)
 		st.ReplaceRulesCatalog(DiscoverRules(next, st.GetCWD()))
@@ -380,7 +545,7 @@ func (m *Manager) ReloadConfigForSession(ctx context.Context, st *State) ([]stri
 		}
 		m.sendAvailableSlashCommands(st.GetID(), st)
 	}
-	if previous == nil || !reflect.DeepEqual(previous.MCPServers, next.MCPServers) {
+	if previous == nil || mcpTrustChanged(next, previousTrust) {
 		reloadCtx, cancel := context.WithTimeout(context.Background(), mcpReloadTimeout)
 		defer cancel()
 		m.reloadConfiguredMCPServersExcept(reloadCtx, st)
@@ -633,12 +798,21 @@ func (m *Manager) loadSessionFromDisk(ctx context.Context, params acp.SessionLoa
 	if err != nil {
 		return nil, fmt.Errorf("session/load cwd: %w", err)
 	}
+	persistedCWD := ""
+	if strings.TrimSpace(params.CWD) == "" {
+		if recovered, ok := RecoverManagedWorktreeCWD(cwd); ok {
+			persistedCWD, cwd = cwd, recovered
+		}
+	}
 
 	st := &State{
 		ID:             params.SessionID,
 		CWD:            cwd,
 		SessionDir:     snap.Dir,
 		contextWindows: m,
+	}
+	if persistedCWD != "" {
+		st.RestoreRecoveredCWD(cwd, persistedCWD)
 	}
 
 	mode := Mode(snap.Meta.Mode)
@@ -678,7 +852,7 @@ func (m *Manager) loadSessionFromDisk(ctx context.Context, params acp.SessionLoa
 	st.SetPlanWithoutPersist(snap.Plan)
 	st.RestorePermissionGrantsWithoutPersist(snap.PermissionCommands, snap.PermissionWriteKeys, snap.PermissionHTTPKeys)
 	st.RestoreUILogWithoutPersist(snap.UILog)
-	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq)
+	st.RestoreActivityFromSnapshot(snap.Meta.ActivitySeq, snap.Meta.ReadActivitySeq, snap.Meta.LastErrorSeq)
 	restoreContextBreakdown(st)
 
 	st.SetPersistHook(m.makePersist(st))
@@ -1317,9 +1491,14 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	}
 
 	var ranRunner bool
+	outcome := ActivityOutcomeSuccess
+	outcomeRecorded := false
 	defer func() {
-		if ranRunner {
-			state.BumpActivitySeq()
+		if ranRunner && !outcomeRecorded {
+			if turnCtx.Err() != nil && outcome == ActivityOutcomeSuccess {
+				outcome = ActivityOutcomeCanceled
+			}
+			state.RecordActivityOutcome(outcome)
 		}
 	}()
 
@@ -1328,6 +1507,13 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	stopReason, err := m.runner(turnCtx, state, hydrated, sender)
 	if err != nil {
 		state.TakeTurnStopNotice()
+		if errors.Is(err, context.Canceled) {
+			outcome = ActivityOutcomeCanceled
+		} else {
+			outcome = ActivityOutcomeFailure
+		}
+		state.RecordActivityOutcome(outcome)
+		outcomeRecorded = true
 		if !errors.Is(err, context.Canceled) {
 			state.AppendUILogError(CountUserTurns(state.GetMessages()), err.Error())
 		}
@@ -1389,6 +1575,13 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 		}
 		if err != nil {
 			state.TakeTurnStopNotice()
+			if errors.Is(err, context.Canceled) {
+				outcome = ActivityOutcomeCanceled
+			} else {
+				outcome = ActivityOutcomeFailure
+			}
+			state.RecordActivityOutcome(outcome)
+			outcomeRecorded = true
 			if !errors.Is(err, context.Canceled) {
 				state.AppendUILogError(CountUserTurns(state.GetMessages()), err.Error())
 			}
@@ -1401,6 +1594,11 @@ func (m *Manager) HandleSessionPromptWithSender(ctx context.Context, params acp.
 	// output limit - says why, on every surface (issue #255): the notice is
 	// kept in the UI log and handed to the caller.
 	if notice := state.TakeTurnStopNotice(); notice != "" {
+		if turnCtx.Err() != nil && outcome == ActivityOutcomeSuccess {
+			outcome = ActivityOutcomeCanceled
+		}
+		state.RecordActivityOutcome(outcome)
+		outcomeRecorded = true
 		state.AppendUILogNotice(CountUserTurns(state.GetMessages()), notice)
 		res.StopNotice = notice
 	}
@@ -1672,8 +1870,55 @@ func (m *Manager) bringInTurnMCPServers(ctx context.Context, state *State) {
 	if state.WaitMCPConnect(ctx) != nil {
 		return
 	}
+	m.applyParkedMCPReload(ctx, state)
+	m.parkEndedMCPServers(state)
 	m.applyParkedMCPServers(ctx, state)
 	m.connectDeferredMCPServers(ctx, state)
+}
+
+// applyParkedMCPReload applies a full reload of the configured servers still
+// parked on the session when its turn starts - one a workspace switch or a
+// settings save could not finish within its deadline - before the turn is
+// handed its tools. Left for the turn's end, it would hand the turn the
+// servers of the workspace or the configuration the session has left: the
+// project servers of the previous folder while it runs in the new one.
+func (m *Manager) applyParkedMCPReload(ctx context.Context, state *State) {
+	if !state.takeMCPReloadPending() {
+		return
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, mcpStartTimeout)
+	defer cancel()
+	if !m.applyConfiguredMCPReload(dialCtx, state) {
+		// The reload did not finish this time either: what the session holds
+		// that is not in effect for its workspace and configuration now goes
+		// before the turn gets its tools.
+		m.dropStaleConfiguredMCPClients(state)
+	}
+}
+
+// dropStaleConfiguredMCPClients gives back the session's configured servers
+// that the session's workspace and the configuration no longer give it: one
+// removed, switched off or no longer approved, and one held for another
+// workspace or an older declaration (its lease was taken under another pool
+// key).
+func (m *Manager) dropStaleConfiguredMCPClients(st *State) {
+	cwd := st.GetCWD()
+	cfg := m.activeCfg()
+	gate := mcp.NewTrustGate(cfg)
+	current := make(map[string]mcp.ManagedServer)
+	for _, srv := range mcp.ListManagedServersTolerant(cfg, cwd, m.log) {
+		current[srv.Config.Name] = srv
+	}
+	for _, client := range st.configuredMCPClientsSnapshot() {
+		srv, ok := current[client.Name()]
+		if ok && !srv.Config.Disabled && client.PoolKey() == mcp.PoolKey(srv, cwd) &&
+			gate.Evaluate(cwd, srv) == mcp.TrustStateAllowed {
+			continue
+		}
+		st.closeConfiguredMCPClient(client.Name())
+		m.log.Warn("MCP server dropped from the turn: not in effect for the session's workspace and configuration",
+			"server", client.Name(), "session", st.GetID())
+	}
 }
 
 // applyParkedMCPServers dials the servers a switch parked on the session - a
@@ -1942,10 +2187,31 @@ func (m *Manager) acquireTurnLockWithReloadDrain(sessionID string, st *State) (f
 	if err != nil {
 		return nil, err
 	}
+	if err := m.synchronizeActivityAfterTurnLock(st); err != nil {
+		unlock()
+		return nil, err
+	}
 	return func() {
 		unlock()
 		m.drainPendingMCPReload(sessionID, st)
 	}, nil
+}
+
+// synchronizeActivityAfterTurnLock refreshes the activity generation while
+// this process owns the per-session turn lock. A State can outlive a turn in
+// another process, so its in-memory counter may be behind the generation that
+// process persisted. Refreshing before the runner records its outcome makes
+// the next outcome allocation monotonic across processes.
+func (m *Manager) synchronizeActivityAfterTurnLock(st *State) error {
+	if m.store == nil || st == nil || strings.TrimSpace(st.GetPersistedSessionDir()) == "" {
+		return nil
+	}
+	activitySeq, readActivitySeq, lastErrorSeq, err := m.store.ReadDiskActivity(st.GetID())
+	if err != nil {
+		return fmt.Errorf("refresh session activity: %w", err)
+	}
+	st.RestoreActivityFromSnapshot(activitySeq, readActivitySeq, lastErrorSeq)
+	return nil
 }
 
 // acpMCPServerToConfig converts an ACP client-supplied MCP server definition
@@ -1967,12 +2233,14 @@ func acpMCPServerToConfig(srv acp.MCPServer) config.MCPServerConfig {
 	return out
 }
 
-// connectMCPServer opens an ACP client-supplied server. This is the only
-// ungated connect: the declaration came from the editor over the wire, not from
-// a file the checkout carried. Configured servers must go through
-// dialConfiguredMCPServers so TrustGate.Connect sees them.
+// connectMCPServer takes a lease on an ACP client-supplied server from the
+// manager's pool. This is the only ungated connect: the declaration came from
+// the editor over the wire, not from a file the checkout carried. Configured
+// servers must go through dialConfigured so TrustGate.Acquire sees them. The
+// pool shares the server with every session that sends the same declaration,
+// so a subagent redialing its parent's servers gets the parent's process.
 func (m *Manager) connectMCPServer(ctx context.Context, state *State, srv config.MCPServerConfig) (*mcp.Client, error) {
-	client, err := mcp.Connect(ctx, srv, state.GetCWD(), m.log)
+	client, err := m.mcpPool.Acquire(ctx, mcp.ManagedServer{Config: srv, Origin: mcp.OriginClient}, state.GetCWD())
 	if err != nil {
 		return nil, err
 	}

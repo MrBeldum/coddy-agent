@@ -77,7 +77,7 @@ Clear the field to use the session model for summarization.
 
 *A provider row set to connect directly, its proxy URL field disabled*
 
-- Every row in **Settings → LLM providers**, codex included, carries an **Ignore system proxy** switch above the **Proxy URL** field (**`ProxySettingField`**). Both edit **`providers[].proxy`**, the route of every request of the row: its completions, its model list, its account usage and its sign-in ([Provider proxy](../getting-started/configuration.md#provider-proxy)). The Telegram bot's **`gateways.telegram.proxy`** reads the same way and has the same pair in **Settings → Gateways**, in the Telegram block ([Telegram gateway](gateway.md#proxy)).
+- Every row in **Settings → LLM providers**, codex included, carries an **Ignore system proxy** switch above the **Proxy URL** field (**`ProxySettingField`**). Both edit **`providers[].proxy`**, the route of every request of the row: its completions, model list, account usage, OAuth/device sign-in and token refresh, and sign-out revoke ([Provider proxy](../getting-started/configuration.md#provider-proxy)). **Sign In** uses the value currently in the form before **Save all**: an absent value keeps the saved row route, a cleared field follows the system proxy, and `none` connects directly. This includes a saved row just switched to another provider type. The Telegram bot's **`gateways.telegram.proxy`** reads the same way and has the same pair in **Settings → Gateways**, in the Telegram block ([Telegram gateway](gateway.md#proxy)).
 - The switch writes **`none`**: the row connects directly and ignores **`HTTPS_PROXY`**, **`HTTP_PROXY`** and **`NO_PROXY`** of the Coddy process. While it is on, the URL field is disabled and reads **Direct connection**.
 - With the switch off, a URL in the field sends every request of the row through that proxy, and an empty field (or a stored **`inherit`**) reads **Follows the system proxy**, the default route.
 - Turning the switch off brings back what the row held before it went on, for as long as the form is open. The document keeps one value, so after **Save** a row set to **`none`** no longer remembers the URL it replaced.
@@ -135,7 +135,7 @@ Clear the field to use the session model for summarization.
 
 *Hovering the (i) beside a field's name shows what the field means, above it and over the page.*
 
-- A settings form shows the names of its fields and the controls, nothing else. What a field means is behind the **(i)** right after its name: hover it (or reach it with Tab) and the description appears above it; on a touch screen tap it. Moving away, Escape, a tap elsewhere or scrolling the form closes it. Fieldsets (the provider **Models** list, **Remote skill sources**, **MCP discovery**, the Subagents **Definitions**, the object and list blocks of the generated forms) carry their description the same way, beside the legend.
+- A settings form shows the names of its fields and the controls, nothing else. What a field means is behind the **(i)** right after its name: hover it (or reach it with Tab) and the description appears above it; on a touch screen tap it. Moving away, Escape, a tap elsewhere or scrolling the form closes it. Fieldsets (the provider **Models** list, the Skills **Marketplaces**, **MCP discovery**, the Subagents **Definitions**, the object and list blocks of the generated forms) carry their description the same way, beside the legend.
 - The tip is drawn over the whole page, not inside the settings panel, so it is never clipped by the panel and never adds a scrollbar to it. Text that reports a state (a fetch result, a sign-in code, a warning about a stored value) stays in the form under its control.
 - Automated checks: **`FieldHint.test.tsx`**. Live check: hover an (i) at **1280px** and tap one at **390px**; the tip is a child of `<body>`, sits 8px above the (i) and centred on it, and `.settings-scroll` keeps `scrollWidth` equal to `clientWidth`.
 
@@ -153,7 +153,7 @@ Clear the field to use the session model for summarization.
 *The settings sheet with the tabbed navigation, ReAct loop tab: its fields in fieldsets by meaning*
 
 - Coddy hot-reloads its own configuration, and not only from this page: the agent's **`config_commit`** / **`config_rollback`** tools rewrite it mid-turn, installing a skill rewrites it, another browser tab may be saving the settings form. Anything the SPA derives from the configuration - the composer **Model** picker, the **`multimodal`** attachment button, the slash-command names - was read once at boot and would otherwise stay stale until a page reload (issue **#161**).
-- **`GET /coddy/events`** carries **`event: config_reloaded`** after every swap of the live configuration. **`chat/serverEvents.ts`** turns it into the optional **`onConfigReloaded`** callback, delivered over the stream the tab shares with the other tabs (see [Server events shared across tabs](#server-events-shared-across-tabs)), and **`App.tsx`** bumps **`configEpoch`**. Both config-derived fetches - **`GET /v1/models`** and **`GET /coddy/slash-commands`** - depend on that counter, so they re-read together. The Settings **Save** button bumps the same counter through **`onConfigSaved`**, which is why a local save and a remote swap behave identically.
+- **`GET /coddy/events`** carries **`event: session_question_pending`** with only **`{object, sessionId}`** whenever an interactive `question` wait starts or settles. The event and the `questionPending` field are process-local to the Coddy server process that owns the interactive wait; **`event: config_reloaded`** after every swap of the live configuration. **`chat/serverEvents.ts`** turns these into the optional **`onQuestionPending`** and **`onConfigReloaded`** callbacks, delivered over the stream the tab shares with the other tabs (see [Server events shared across tabs](#server-events-shared-across-tabs)); **`App.tsx`** re-reads History for the former and bumps **`configEpoch`** for the latter. Both config-derived fetches - **`GET /v1/models`** and **`GET /coddy/slash-commands`** - depend on that counter, so they re-read together. The Settings **Save** button bumps the same counter through **`onConfigSaved`**, which is why a local save and a remote swap behave identically.
 - The event carries no model list: what changed is already behind those two endpoints, and the server publishes it only after the new configuration is live, so the re-read cannot catch the outgoing one.
 - When the events stream itself is unavailable (an older server, a proxy that eats SSE), nothing else re-reads the model list: the page falls back to exactly the behaviour it had before, stale until a reload. The stream is an optimisation here, not a guarantee, and no extra poll was added for it.
 - The event also reads again the copy of the configuration the **Settings** drawer keeps (see [Settings: opening and saving](#settings-opening-and-saving)). An open form takes it only while it holds no edits of its own: refetching under unsaved edits would discard work, so those stay, and the **Reload** control in the form is the deliberate way to drop them.
@@ -180,16 +180,19 @@ Server behaviour, the cookie and the CSRF rule: [HTTP API](../reference/http-api
 
 ## Environment (local / remote server)
 
-- **Workspace-row chip:** an environment selector sits in the composer workspace-context row above the input, next to the folder / branch / worktree chips (**`EnvironmentChip.tsx`**, rendered inside **`.composer-context-row`**, styled as a **`.workspace-chip--env`**, **`data-testid="composer-env-btn"`**), Claude-Code style — **not** in Settings. The chip shows **`Local`** or the remote's name. It opens a portal menu (**`data-testid="composer-env-menu"`**, mode-menu family; bottom sheet on mobile) with an **Environment** section (**Local**) and a **Remote** section (configured remotes + **`+ Add remote…`**). The menu hangs from the chip's left edge and stays inside the window: in the swarm header of a relay the chip is the last control on the right.
-- **Select = connect:** choosing **Local** or a remote connects **immediately** (no confirm step) and reloads; there is no per-select token prompt. A **bearer token** is entered only in **`+ Add remote…`** (name / URL / token) and remembered per-remote.
-- **Reachability dots:** each remote shows a status dot probed on menu open — **green** reachable+authorized (a cross-origin **`GET /v1/models`**), **red** unreachable / CORS-blocked / unauthorized, **amber** while probing. **Local** is always green.
-- **Purpose:** point the UI at a remote, already-running **`coddy serve`** server, or use the local one. Offered remotes come from the local server's **`httpserver.remotes`** (**`[{name, url}]`**); **`+ Add remote…`** takes an ad-hoc name/URL/token.
+- **Workspace-row chip:** an environment selector sits in the composer workspace-context row above the input, next to the folder / branch / worktree chips (**`EnvironmentChip.tsx`**, rendered inside **`.composer-context-row`**, styled as a **`.workspace-chip--env`**, **`data-testid="composer-env-btn"`**), Claude-Code style — **not** in Settings. The chip shows **`Local`** or the remote's name. It opens a portal menu (**`data-testid="composer-env-menu"`**, mode-menu family; bottom sheet on mobile) with an **Environment** section (**Local**) and a **Remote** section (configured remotes + **`Connect to…`**). The menu hangs from the chip's left edge and stays inside the window: in the swarm header of a relay the chip is the last control on the right. It is as tall as the room between the chip and the window's edge and scrolls past it, since a relay's agents and the hints under a remote that cannot be used can outgrow the window.
+- **Select = connect:** choosing **Local** or a remote connects **immediately** (no confirm step); there is no per-select token prompt. Between two remotes the app starts over on the new one in place, without reloading the page (**`EnvScope`**, **`onEnvironmentSwitch`**); to or from Local the page reloads. A **bearer token** comes from the remote's `httpserver.remotes` entry when it carries one, else it is entered in **`Connect to…`** (name / URL / token) and remembered per-remote in the browser. A remote that refuses its token and has none in the configuration offers **Enter token**, which opens that form filled in for it.
+- **Where each environment was left:** switching the environment starts the app over, so the route is remembered per environment (**`coddy_env_routes`**): back on Local the app opens the conversation Local was left in, a remote opens where it was left or at its home, and a relay's map never follows the app to a plain agent.
+- **Reachability dots:** each remote is probed on menu open (**`env/remoteProbe.ts`**) - **green** when it answers and accepts the token, **red** when it does not, **amber** while probing; **Local** is always green. A red remote says why on a line under it: it does not answer, it refuses the token (an agent's **`httpserver.auth_token`**, a relay's **`swarm.auth_token`**), or the browser keeps its answer from the page, which is how a CORS setting that leaves this origin out looks from a browser (the line names the origin and the two keys). An agent is asked for **`GET /v1/models`**; a relay, which serves no **`/v1`**, is recognised by its public **`GET /swarm/info`** and its token is checked on **`GET /swarm/nodes`**, and a no-CORS request tells a remote that answers from one that does not.
+- **A relay's agents:** once a relay accepts the token, its agents are listed under it (every hop deep, from **`GET /swarm/topology`**), each a menu item that enters that node through the relay.
+- **An entry without a name** is shown by the name the remote reports (**`reportedName`** in **`env/remoteProbe.ts`**): a relay's name from its public **`GET /swarm/info`** (its host name unless **`swarm.name`** sets one), an agent's host name from **`GET /coddy/info`**. Its address stays on the right of the row; with no reported name the address is the name, and it is not said twice.
+- **Purpose:** point the UI at a remote, already-running **`coddy serve`** server or swarm relay, or use the local one. Offered remotes come from the local server's **`httpserver.remotes`** (**`[{name, url, token?}]`**), read when the menu opens and again on every configuration reload; **`Connect to…`** takes an ad-hoc name/URL/token.
 - **Client-side state:** the active env lives in **`localStorage`** key **`coddy_env`**; per-remote tokens in **`coddy_env_tokens`**. Never persisted to server config; leave empty for a remote without auth. Workspace **folder recents** are namespaced per environment (**`envStorageSuffix()`**) so each remote remembers its own last paths; **models** and defaults come from the remote's **`GET /v1/models`** after the reload.
-- **Mechanism:** a global **`fetch`** shim (**`external/ui/src/ui/env/remoteEnv.ts`**, installed in **`main.tsx`**) rewrites same-origin API requests (**`/v1/*`**, **`/coddy/*`**, **`/openapi*`**) to the selected remote base URL and adds **`Authorization: Bearer <token>`**. Local mode is a transparent pass-through. Selecting an entry persists the choice and reloads so all state re-fetches from the chosen backend; the SPA shell always loads from the local origin, so you can always switch back to **Local** from the chip even if the remote is down.
+- **Mechanism:** a global **`fetch`** shim (**`external/ui/src/ui/env/remoteEnv.ts`**, installed in **`main.tsx`**) rewrites same-origin API requests (**`/v1/*`**, **`/coddy/*`**, **`/openapi*`**) to the selected remote base URL and adds **`Authorization: Bearer <token>`**. Local mode is a transparent pass-through. Selecting an entry persists the choice and starts the app over (in place between two remotes, with a reload to or from Local) so all state re-fetches from the chosen backend; the SPA shell always loads from the local origin, so you can always switch back to **Local** from the chip even if the remote is down.
 - **Images the browser loads by itself:** an **`<img>`** never goes through the shim, so a picture the server names by an API path - the thumbnail of an image a user message carries (**`preview_url`**) and its original (**`url`**) - would be asked of the page's own origin, without the token: through a swarm relay that origin serves no **`/coddy/`** route and the picture broke. In a remote environment those pictures are fetched through it instead (**`useApiImageSrc`** in **`external/ui/src/ui/env/apiImage.ts`**, the same **`remoteApiRequest`** mapping the shim uses: the base URL in front, the token in the **`Authorization`** header, never in a URL) and shown from an object URL that is released when the picture leaves the screen; until the bytes arrive the image has no **`src`** rather than a broken one. On the local origin, and for **`blob:`** / **`data:`** / other addresses, the URL is used as it is. The lightbox reads the original the same way when it opens.
 - **CORS:** the remote must allow the UI's origin via **`httpserver.cors`** (see [http-api.md](../reference/http-api.md)). SSE re-attach (**`GET /coddy/sessions/{id}/composer-stream`**) is fetched (not `EventSource`), so the bearer header applies; that route also accepts **`?access_token=`** for external `EventSource` clients.
 - **Failure surfacing (issue #60):** a `fetch()` to a remote that is unreachable / refused / TLS-or-DNS-failed / CORS-blocked rejects with a `TypeError` (no `Response`); the send flow's final `catch` now distinguishes that from the user's own `AbortError` and emits an error `system_notice` (**`remoteSendErrorMessage`**), and a readable `401/403` gets an auth-specific message (**`remoteHttpErrorMessage`**) instead of a bare status. Pure helpers live in **`external/ui/src/ui/env/remoteErrors.ts`**.
-- **Active-env health (issue #60):** a shared monitor (**`external/ui/src/ui/env/activeHealth.ts`**, started in **`main.tsx`**) probes the *selected* environment's **`GET /v1/models`** on load, on a 30 s interval, and on window focus. The composer chip dot is driven by that health (green up / red down / amber checking, **`.env-status`**), and **`EnvHealthBanner`** shows a persistent alert with a **Switch to Local** action when the active remote is down or unauthorized, so the app never silently renders empty against a dead backend.
+- **Active-env health (issues #60, #401):** a shared monitor (**`external/ui/src/ui/env/activeHealth.ts`**, started in **`main.tsx`**) probes the *selected* environment on load, on a 30 s interval, and on window focus, with the same probe as the menu (**`probeRemote`**): an agent's **`GET /v1/models`**, a relay's **`GET /swarm/info`** and **`GET /swarm/nodes`**. The composer chip dot is driven by that health (green up / red down / amber checking, **`.env-status`**), and **`EnvHealthBanner`** shows a persistent alert with a **Switch to Local** action when the active remote is down, refuses its token or answers in a way the browser keeps from the page, so the app never silently renders empty against a dead backend. The alert says which of the three it is and names the setting that fixes it: the agent's or the relay's token key, or the CORS key with this page's origin (a node reached through a relay is answered by the relay's CORS). On the stacked shell the rail is a bar fixed at the top of the page and the alert hangs under it; its height (**`--coddy-env-banner-h`**) moves the page down, so the bar never covers it. Asked again - on the interval, on focus, or when the same remote is chosen again - a remote keeps its verdict until an answer changes it, so the alert does not blink off for the length of a probe; only the newest ask's answer is kept, and a token rotated in the configuration is asked with at once.
 
 ## Layout
 
@@ -259,7 +262,8 @@ Header links
 
 - GitHub link to `https://github.com/coddy-project/coddy-agent` (**new tab**, `rel=noopener`).
 - API docs link to `/docs/` (**new tab**, `rel=noopener`).
-- Both links sit in the footer of the start screen (**GitHub** | **API docs**) and are gone once a chat is open; the nav rail carries neither.
+- The version of the server the page is talking to, on the right (**`GET /coddy/info`**): a release reads **`v1.2.36`** and links to its notes on GitHub, a build between releases is shown as it is. In a remote environment or inside a node reached through a relay it is that server's version, not the page's.
+- The three sit in the footer of the start screen (**GitHub** | **API docs** | **v1.2.36**, **`chat/HeroFooter.tsx`**) and are gone once a chat is open; the nav rail carries none of them.
 
 Narrow-rail tooltips (desktop)
 
@@ -294,6 +298,8 @@ Closing a screen with Escape
 - **Server activity is separate from the local stream reader.** The UI reads **`GET /coddy/sessions/{id}/activity`** on session open and reconnect, regardless of whether the filtered or paginated **History** list includes that session. **`chat/useSessionTurnActivity`** skips both activity and queue hydration while this tab's own POST awaits admission. A running turn keeps **Stop** and queueing available even without a local reader; losing or closing the reader does not prove the turn ended. A **`turn_ended`** overlapping this tab's pending or admitted POST requires fresh REST activity confirmation before the UI declares idle.
 - **Stop** calls **`POST /coddy/sessions/{id}/cancel`** and aborts this tab's streaming **`fetch`** of the turn right after sending it, not after the answer. A browser keeps six HTTP/1.1 connections per host across all of its tabs; with a few tabs of Coddy open, event and turn streams can hold every one of them, and the cancel request would wait for the connection this reader holds. The turn keeps running on the server without the reader. A failed request shows an error, keeps the running state and **Stop** available for a retry, and the tab rejoins the turn through the composer relay. Success acknowledges cooperative cancellation; the UI waits for the server's turn completion or a fresh activity snapshot reporting idle before treating the session as stopped. The server persists **partial** assistant **`content`** for that turn when tokens had already arrived. **`GET /coddy/sessions/{id}/messages`** may return an older snapshot briefly; the UI **merges** with local shadow or visible rows when the response is only a prefix (**`mergeTranscriptPreferLocalSuffix`**, **`keepLocalTranscriptIfServerEmpty`** in **`external/ui/src/ui/chat/transcriptServerSnapshot.ts`**). The transcript is cleared on fetch failure **only** when the failed load targets the **currently viewed** session so Stop does not wipe the chat.
 
+- **Tool calls keep their outcome.** When Stop interrupts a turn before a queued call starts, its saved result is `cancelled` / **not executed**. A call already running keeps its actual outcome: cancellation does not roll back side effects. For an older transcript with a missing result, the request sent to the provider gets a fixed placeholder that warns of an **unknown outcome**; the old transcript and its UI rows stay unchanged. A permission answer that arrives after a newer user message is stale: it clears that gate, records the call as cancelled when possible, and does not run the tool or rewrite the newer message. Malformed or ambiguous call IDs and results produce a local diagnostic instead of a provider `400`. Use **`/compact`** or start a new session to recover, and do not blindly replay a side-effecting call whose outcome is unknown.
+
 ![A failed cancellation remains retryable while the turn still runs](../assets/message-queue/stop-queue-cancel-failed-dark-1280.png)
 
 *Cancellation failed; the turn still runs and Stop remains available for another attempt.*
@@ -313,7 +319,7 @@ Session title
 - **New chat** defaults **Model** from cookie **`coddy_llm_model`** when it names a configured backend, else the alphabetically first YAML row. A typed **`/model <id>`** in a sent message is a pick on this surface too and writes the same cookie (turn-scoped **`--once`** / **`--count`** forms do not).
 - **Opening a session** restores **Model** from the **`settings`** snapshot of **`GET /coddy/sessions/{id}/messages`** (the session's own model; the top-level **`model`** names what a running turn holds), never from the cookie: the cookie and the start page's pick are the default of a new chat only.
 - Changing **Model** writes the cookie (default for the next **New chat**) and **`PATCH`** **`selectedModelId`** on the active session. ReAct turns still send **`metadata.model`** on **`POST /v1/responses`**.
-- **Many models / long names** — backend ids are **`vendor/model`**. When more than one vendor is configured the menu groups rows under an uppercase vendor header and each row shows only the model name (full id stays in the row tooltip). On desktop the list scrolls with a ~5-row cap. When there are **more than 5** backends a **filter input** appears at the top (auto-focused) that matches the vendor, model name, or full id (case-insensitive); **Enter** picks the first match, **Escape** closes, and an empty result shows a “No models match …” notice. Every menu of the composer (**Mode**, **Model**, **Reasoning**, **Permission**) closes on **Escape**, with the filter or without it, wherever the focus is. Filter/group/threshold logic is in **`chat/llmModelMenu.ts`** (unit-tested in **`llmModelMenu.test.ts`**; menu wiring covered by **`ComposerModelMenu.test.tsx`**).
+- **Many models / long names** — backend ids are **`vendor/model`**. When more than one vendor is configured the menu groups rows under an uppercase vendor header and each row shows only the model name (full id stays in the row tooltip). The vendors keep the order of the configuration and each vendor's models read alphabetically, versions compared as numbers (**`gpt-5.6-luna`**, **`gpt-5.10`**, **`gpt-6-astra`**), so a model added to **`models[]`** later lands where its name puts it rather than at the bottom of its group; **Enter** in the filter takes the first row in that order. On desktop the list scrolls with a ~5-row cap. When there are **more than 5** backends a **filter input** appears at the top (auto-focused) that matches the vendor, model name, or full id (case-insensitive); **Enter** picks the first match, **Escape** closes, and an empty result shows a “No models match …” notice. Every menu of the composer (**Mode**, **Model**, **Reasoning**, **Permission**) closes on **Escape**, with the filter or without it, wherever the focus is. Filter/group/threshold logic is in **`chat/llmModelMenu.ts`** (unit-tested in **`llmModelMenu.test.ts`**; menu wiring covered by **`ComposerModelMenu.test.tsx`**).
 - **Mobile sheet** — on narrow/mobile shells (the **`max-width: 1199px`** shell-stack breakpoint) the **Mode** / **Model** / **Reasoning** menus open as a **full-width bottom sheet** over a dimmed scrim — the same pattern as the slash (**`/`**) and **`@`** pickers — instead of a cramped anchored dropdown. The filter and grouping still apply inside the sheet. Desktop keeps the anchored dropdown.
 
 ### Per-session reasoning level
@@ -336,7 +342,8 @@ Session title
 - **Mode**, **Model** and **Reasoning** follow a change made anywhere - a typed command, the permission dialog, the model's **`switch_model`**, a console or an editor on the same session. Every **`POST /v1/responses`** carries **`metadata.settingsVersion`**, the version the tab last applied; the server ignores the tab's **`model`** / **`reasoning`** / mode when a newer snapshot has been published since, so a stale tab cannot undo a change it has not seen.
 - The **permission chip** (**`data-testid="composer-permission"`**) is the last selector of the row, after **Model** and **Reasoning**: **Ask first**, **Accept edits** or **Bypass**, the last in red with a glow, its tooltip naming the configuration's mode the session returns to after a restart. Its menu calls **`PATCH`** **`permissionMode`**. On a new chat the pick is held and sent as a **`/permissions <mode>`** line ahead of the first message.
 - The **overrides line** (**`data-testid="composer-overrides"`**) lists what is changed for the next turns (**`stub/qwen3.8-demo, 2 turns left`**, **`plan this turn`**), with the full list in its tooltip; it shrinks with an ellipsis on narrow shells rather than pushing the send button off the bar.
-- A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript, where each change is one **SYSTEM** notice row.
+- A prompt of settings commands only runs no turn: the stream ends with **`coddy_meta.settings_only`**, the tab drops its optimistic user and assistant rows and re-reads the transcript. The change shows on the selectors and the overrides line, and the transcript gets no row for it.
+- A **SYSTEM** notice row is left only by a change the agent made itself: its **`switch_model`** call, a skill's frontmatter (`Model: stub/qwen3.8-27b for this session`). What the user picks - a selector, a command, the permission dialog, the model and the mode a console or **`coddy -p`** started the session with - is on the selectors already; the rows a session saved by an earlier version holds for such changes are not shown.
 
 ### Settings: reasoning levels for a logical model
 
@@ -352,24 +359,32 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 
 ### Per-session workspace (folder / branch / worktree chips)
 
-![The Open folder dialog with New folder leading the footer](../assets/ui-folder-picker/folder-picker-after-dark-1280.png)
+![The Open folder dialog with New folder and Show hidden on the left of the footer](../assets/ui-folder-picker/folder-picker-after-dark-1280.png)
 
-*The Open folder dialog with New folder leading the footer*
+*The Open folder dialog with New folder and Show hidden on the left of the footer*
 
 ![The inline name row for a new folder](../assets/ui-folder-picker/folder-picker-new-row-dark-1280.png)
 
 *The inline name row for a new folder*
 
-- A chip row renders at the top of the composer card (**`WorkspaceChips.tsx`**, helpers in **`chat/workspaceContext.ts`**): **folder chip** (workspace basename, full path in tooltip), **branch chip** (current git branch; only when the workspace is a git repository), and a **worktree checkbox**.
+![The Open folder dialog on a phone, opened where History opens](../assets/ui-folder-picker/folder-picker-phone-dark-390.png)
+
+*The Open folder dialog on a phone, opened where History opens*
+
+- A chip row renders at the top of the composer card (**`WorkspaceChips.tsx`**, helpers in **`chat/workspaceContext.ts`**): **folder chip** (main project basename and path for a worktree, otherwise the current folder), **branch chip** (current git branch; only when the workspace is a git repository), and a **worktree checkbox**. The session cwd remains inside its worktree.
 - **Wrapping**: the chips share one **`flex-wrap`** row (**`.composer-context-row`**) with the environment chip and the improve-prompt control; **`.composer-context-chips`** is **`display: contents`** so each chip wraps on its own. On a narrow viewport only the overflow moves down (e.g. environment+folder, then branch+worktree), and the worktree checkbox stays beside the branch until the branch name is long enough to push it.
 - Context loads from **`GET /coddy/workspace/context`** with **`X-Coddy-Session-ID`** whenever the viewed session changes; without a session the server default cwd is shown.
+- **A new chat follows the folder it picked**: before the first message there is no session, and the pick is kept in **`App.tsx`** (**`pendingWorkspaceRef`**, mirrored in the **`pendingWorkspacePath`** state) and applied on the first send. Everything the composer lists while you type is asked for that folder: every cwd-scoped request (**`/coddy/slash-commands`**, **`/coddy/mentions`**, **`POST /coddy/mentions/check`**, **`/coddy/workspace/file`**) carries **`cwd=<folder>`** next to **`X-Coddy-Session-ID`** (helper **`chat/workspaceScope.ts`**), so the **`/`** menu lists that folder's **`.coddy/skills`**, **`@agent:`** its subagents and **`@`** its files. The known skill names that mark a **`/name`** as a skill in the composer and in the transcript follow the same folder: another pick drops them at once and asks again, and an answer for a folder left since is discarded; a slower preview of an earlier pick never paints over a later one. Settings → Skills and Subagents list the same folder.
 - **Chosen once**: folder + branch + worktree are set before the conversation starts. Once the transcript has messages the chips lock (**`workspaceLocked`** — controls disabled, menus closed) and the server answers **409** to **`POST .../workspace`**, and a turn already in flight answers **409** as well.
-- **Folder chip** opens the **Recent** menu (Claude Desktop style): MRU folders from **`localStorage`** **`coddy_workspace_recents_v1`** (**`chat/workspaceRecents.ts`**), current workspace marked with **✓**, then **`Open folder…`** at the bottom which opens the **folder browser modal** (**`WorkspaceFolderModal.tsx`**) fed by **`GET /coddy/workspace/folders?path=`**: rows navigate into folders, **`..`** goes up, **Open** picks the currently browsed folder, **Cancel** dismisses. The folder list is the dialog's only scrollport: it is the one child allowed to shrink (**`min-height: 0`**), so **Cancel** / **Open** stay reachable on a short browser window instead of being clipped by the dialog's height cap, and a wheel gesture past the last folder stays in the list instead of scrolling the page behind it. Verified in WebKit with **`external/ui/scripts/webkit-scroll-check.mjs`** (see below).
-- **New folder** (footer, left of **Cancel** / **Open**) opens an inline name row **between the path field and the list** - a sibling of the list, not a row inside it, so it never scrolls away under you and it stays whole on a short window where the list itself has shrunk to nothing. **Enter** or **Create folder** posts **`POST /coddy/workspace/folders`** **`{"path": <browsed folder>, "name"}`**; the dialog then shows the listing the server answers with, which is the **new folder**, so **Open** picks it straight away. **Escape** or the row's **×** abandons it; with no row open, **Escape** closes the dialog as **Cancel** does. The button is disabled on the drive level (there is no directory to create in) and while the row is already open; **Create folder** stays disabled until a name is typed. A name that is already taken (**409**) keeps the row open with the typed text and says so, and so does any other failure - nothing is created and the browsed folder does not change.
+- **Folder chip** opens the **Recent** menu (Claude Desktop style): MRU folders from **`localStorage`** **`coddy_workspace_recents_v1`** (**`chat/workspaceRecents.ts`**), current workspace marked with **✓**, a local filter field for a long recent list, then **`Open folder…`** at the bottom which opens the **folder browser modal** (**`WorkspaceFolderModal.tsx`**) fed by **`GET /coddy/workspace/folders?path=`**: rows navigate into folders, **`..`** goes up, **Open** picks the currently browsed folder, **Cancel** dismisses. The folder list is the dialog's only scrollport: it is the one child allowed to shrink (**`min-height: 0`**), so **Cancel** / **Open** stay reachable on a short browser window instead of being clipped by the dialog's height cap, and a wheel gesture past the last folder stays in the list instead of scrolling the page behind it. Verified in WebKit with **`external/ui/scripts/webkit-scroll-check.mjs`** (see below).
+- **Size**: a centred card 560px wide (less on a narrow window) from the tablet width up; on a phone it opens where History opens, as the same glass panel under the top bar, so the folder list gets the full height of the screen. The head is drawn like the heads of History and the Scheduler, and the field, the rows and the buttons use the app's font.
+- **Links to folders**: a directory symlink in the list carries an arrow on its folder icon and its target after the name (**`→ /path/to/target`**), so a link does not read as an ordinary folder; clicking it browses the link's path.
+- **New folder** (the square **+** at the left of the footer, on the colours of the Scheduler's add button, with the **Show hidden** switch right after it; **Cancel** / **Open** sit on the right) opens an inline name row **between the path field and the list** - a sibling of the list, not a row inside it, so it never scrolls away under you and it stays whole on a short window where the list itself has shrunk to nothing. **Enter** or **Create folder** posts **`POST /coddy/workspace/folders`** **`{"path": <browsed folder>, "name"}`**; the dialog then shows the listing the server answers with, which is the **new folder**, so **Open** picks it straight away. **Escape** or the row's **×** abandons it; with no row open, **Escape** closes the dialog as **Cancel** does. The button is disabled on the drive level (there is no directory to create in) and while the row is already open; **Create folder** stays disabled until a name is typed. A name that is already taken (**409**) keeps the row open with the typed text and says so, and so does any other failure - nothing is created and the browsed folder does not change.
 - **Leaving the drive (Windows)** — **`..`** from a drive root opens the **drive level** (**`?path=:drives:`**, **`drives:true`** in the response): one row per volume (**`C:`**, **`D:`**, …), no **`..`** above it, and **Open** disabled because it is a place to navigate, not a workspace. The **path row is an editable field** (**`workspace-modal-path`**): typing or pasting a path and pressing **Enter** jumps there, surrounding quotes from Explorer's *Copy as path* are stripped (**`cleanPathInput`**), and while the field holds an unvisited path the primary button reads **Go** instead of **Open**, so a pasted path is never mistaken for the folder being opened. The browser starts at **`pathParent(ctx.path)`**, which keeps the current drive (it used to collapse Windows paths to **`/`**). Picking calls **`POST /coddy/sessions/{id}/workspace`** **`{"path"}`** — the session cwd switches and persists; skills, project rules, slash commands, configured MCP servers (re-dialed for the new workspace through its trust gate, the old workspace's closed) and the SessionStart hook context re-derive from the new cwd.
-- **Branch chip** opens the branch list (current first, marked selected). Picking one posts **`{"branch", "worktree": <checkbox>}`**: in-place checkout by default, a dedicated worktree under **`<repo>/.coddy/worktrees/<branch>/`** when the checkbox is on, or a jump to the worktree that already has the branch checked out (including back to the main checkout).
+- **Branch chip** opens the branch list (current first, marked selected) with a local filter for long lists. Picking one posts **`{"branch", "worktree": <checkbox>}`**: in-place checkout by default, or a dedicated feature worktree under **`<repo>/.coddy/worktrees/<branch>/`** when the checkbox is on. Worktree creation fetches `origin`, starts a new branch from the fresh `origin/HEAD` default and refuses the default branch or one tracking it. Without the checkbox, selecting a branch already checked out in another worktree jumps there (including back to the main checkout).
 - **Worktree checkbox** (**`composer-worktree-checkbox`**, real **`input[type=checkbox]`**) is the worktree preference; when the session already runs inside a linked worktree it shows checked and disabled.
-- **Pre-session (draft/home)**: picks are stored client-side, previewed via **`GET /coddy/workspace/context?path=`**, and applied to the new session id on first send before **`POST /v1/responses`**. Switching to another session drops pending picks.
+- **History folder grouping** uses the main checkout path returned as `repoRoot` on each git session row. A conversation in `main` and conversations in its worktrees appear under one project heading, while each session keeps its own cwd. See [Git worktrees](../features/worktrees.md).
+- **Pre-session (draft/home)**: picks are stored client-side, previewed via **`GET /coddy/workspace/context?path=`**, and applied to the new session id on first send before **`POST /v1/responses`**. Returning from a project conversation to the start screen keeps that conversation's folder as the next-chat preview; switching to another session drops pending picks.
 - Errors (missing folder **400**, git conflicts / locked workspace **409**) keep the current chips; the context is re-fetched to stay truthful.
 - Automated checks: **`chat/workspaceContext.test.ts`**, **`chat/workspaceRecents.test.ts`** (helpers), **`chat/WorkspaceChips.test.tsx`** (chips, menus, modal, lock); backend behavior is specified executable in **`features/workspace_switching.feature`** (godog).
 
@@ -424,8 +439,13 @@ Functional checklist for **Settings -> Logical models -> Reasoning levels**
 - **The tag editor is one component in both places that show tags** (**`SessionTagEditor.tsx`**): a cross on every chip, a box that offers the labels this history already uses (most used first, its own excluded, prefix matches leading), **Enter** to file what was typed, arrow keys and **Enter** to take a suggestion, **Backspace** on an empty box to drop the last chip, **Escape** to close. There is no Save: every change is a **`PATCH`** at once. The row takes the new set **before** the request, so a second gesture made while the first is still in flight builds on it instead of undoing it; the set the server answers with - folded to lower case, whitespace as hyphens, at most eight - then replaces it, so a chip never changes spelling one refresh later, and a refused write puts back what the row carried. The folded form of what is being typed is shown under the box only when it differs from what was typed.
 - Indicators
   - A pulsing dot - the violet unread dot, a third darker - appears on every row whose turn is still running, the open conversation included. It also appears on a row with **background tasks still in flight and no turn running**, because detached work outlives the turn that started it and a row without the mark reads as finished; the dot's tooltip names which of the two it is. The count is **`backgroundRunning`** of the session listing (the model's own tasks, nothing finished, no system errand), and the listing is re-read on the turn events and on the drawer's poll, so a task that starts or ends **outside** a turn moves the dot on the next poll rather than at once. A turn waiting on a permission or a question shows that mark instead.
-  - A violet dot appears only when a background session completed while it was not the active chat.
-  - A question mark icon appears when a session is waiting for user permission.
+  - Every otherwise idle row has a transparent outline ring, so its title does not blend into a grouping heading. A violet dot replaces it only when a session completed while it was not the active chat.
+  - A turn that ends with a real error records **`lastErrorSeq`**. When its generation is newer than the session's read cursor, History shows a filled red dot; opening the session acknowledges it and changes the mark to a red outline. The outline stays until a later successful turn clears the error state. Both an unseen error and its acknowledged outline take precedence over the generic violet unread-completion dot.
+  - A question mark icon appears when a session is waiting for user permission or an interactive question. It stays still: the turn is paused for a person rather than making progress. The question-pending event makes History re-read the session list immediately; the global event never carries question text, which stays on the composer stream.
+
+![History rows with idle, unseen-error and viewed-error state dots](../assets/sessions-history-state-dots-dark-1280.png)
+
+*History groups keep every row visually anchored: a finished session has a neutral outline, an unseen failed turn a filled red dot, and a viewed failure a red outline.*
 - CRUD
   - Rename via `PATCH /coddy/sessions/{id}` setting `title`.
   - Delete via `DELETE /coddy/sessions/{id}`.
@@ -468,7 +488,7 @@ Session delete UX
 
 ## Server events shared across tabs
 
-Every tab needs **`GET /coddy/events`**: turn starts and ends, queue changes, account usage and configuration reloads arrive there. Over plain HTTP/1.1 a browser keeps six connections to one host for all of its tabs, so when each tab held a stream of its own, six open tabs took every connection and no request from any tab could be sent - not a prompt, not a Stop, not a history read. The tabs of one environment now share a single connection.
+Every tab needs **`GET /coddy/events`**: turn starts and ends, queue changes, account usage, question-wait transitions and configuration reloads arrive there. A `session_question_pending` notification carries only `{object, sessionId}` on both lifecycle edges. The notification and `questionPending` are process-local to the Coddy server process that owns the interactive wait; the SPA re-reads session rows to obtain `questionPending`, while question text remains on the per-turn composer stream. Over plain HTTP/1.1 a browser keeps six connections to one host for all of its tabs, so when each tab held a stream of its own, six open tabs took every connection and no request from any tab could be sent - not a prompt, not a Stop, not a history read. The tabs of one environment now share a single connection.
 
 - **SharedWorker** - where the browser has one (desktop Chrome, Edge, Firefox and Safari 16+, on plain http as well as https), **`events-worker.js`** holds the connection. Each tab connects a port and says hello; the first hello opens the stream, the last tab leaving closes it. A remote environment passes its address and bearer token with the hello, because the page's fetch shim does not reach into a worker.
 - **Web Locks and BroadcastChannel** - where there is no SharedWorker, the tabs elect one of their own through **`navigator.locks`**; the tab holding the lock holds the stream and relays it on a **`BroadcastChannel`**. When that tab closes, the next one in line takes the lock and reports the stream down until its own connection is up. Web Locks exist only in secure contexts (https, **`localhost`**, **`127.0.0.1`**).
@@ -559,7 +579,7 @@ Shape and glyphs
 
 Behavior
 
-- **Enter** submits when idle and queues the draft while the session has an active turn, on every device with a keyboard, a desktop window narrower than **1200px** included; **`Shift+Enter`** inserts a newline, and so do **`Ctrl+Enter`** and **`Alt+Enter`** (browsers insert nothing for those two, so the composer puts the newline at the caret itself). What Enter does follows the input device, not the width: on a **touch-only** device (**`(any-hover: none) and (any-pointer: coarse)`**, a phone) Return inserts a newline and the primary button sends or queues, because a phone keyboard has no Shift+Enter; **`Cmd+Enter`** still sends from an attached keyboard. The textarea's **`enterkeyhint`** says the same to the on-screen keyboard (**`send`**, or **`enter`** on a touch-only device). Enter that confirms an input-method candidate (**`isComposing`**, **`keyCode` 229**) never sends. The rule is **`chat/composerEnter.ts`**. No key the input method is composing with reaches the rest of the composer either (the check opens the textarea's **`onKeyDown`** in **`Composer.tsx`**): the slash, **`@`**, command option and line-range pickers take no row, move no highlight and do not close on it, and Ctrl+Z does not restore the draft from before Improve prompt. A keydown counts as composing when it carries **`isComposing`**, or when it is a **`keyCode` 229** keydown within 100 ms of **`compositionend`**, the key Safari sends after ending a composition. Any other 229, which Android keyboards send for ordinary keys, works the pickers as an ordinary key, while the send rule above still declines an Enter that carries it.
+- **Enter** submits when idle and queues the draft while the session has an active turn, on every device with a keyboard, a desktop window narrower than **1200px** included; **`Shift+Enter`** inserts a newline. **`Ctrl+Enter`** or **`Alt+Enter`** inserts a newline too, except on a line containing only **`````**, where it opens an empty fenced code block and puts the caret inside its monospace field; arrow keys naturally leave the block through its line boundary. What Enter does follows the input device, not the width: on a **touch-only** device (**`(any-hover: none) and (any-pointer: coarse)`**, a phone) Return inserts a newline and the primary button sends or queues, because a phone keyboard has no Shift+Enter; **`Cmd+Enter`** still sends from an attached keyboard. The textarea's **`enterkeyhint`** says the same to the on-screen keyboard (**`send`**, or **`enter`** on a touch-only device). Enter that confirms an input-method candidate (**`isComposing`**, **`keyCode` 229**) never sends. The rule is **`chat/composerEnter.ts`**. No key the input method is composing with reaches the rest of the composer either (the check opens the textarea's **`onKeyDown`** in **`Composer.tsx`**): the slash, **`@`**, command option and line-range pickers take no row, move no highlight and do not close on it, and Ctrl+Z does not restore the draft from before Improve prompt. A keydown counts as composing when it carries **`isComposing`**, or when it is a **`keyCode` 229** keydown within 100 ms of **`compositionend`**, the key Safari sends after ending a composition. Any other 229, which Android keyboards send for ordinary keys, works the pickers as an ordinary key, while the send rule above still declines an Enter that carries it.
 - **Stop** sends **`POST /coddy/sessions/{id}/cancel`** and aborts the tab's own reader at once, so the request does not wait for a connection that reader holds. Failure remains visible and retryable, and the tab rejoins the running turn; acknowledgement alone does not mark the turn idle. Partial assistant persistence and transcript merging follow [Parallel sessions and generation cancel](#parallel-sessions-and-generation-cancel).
 - **A send the server never took** comes back to the composer: the text, ahead of anything typed since, and the attached files. That covers a refusal by status (**409** busy, a **4xx** or **5xx**), a request that failed on the way (a dropped upload, a refused connection) and an attachment the browser could not read (a file moved or changed on disk after it was picked, a cloud photo not on the device), in which case nothing is sent. The optimistic bubble leaves the transcript, and a red notice says why, with the browser's reason or the server's message in parentheses (`Failed to fetch`, `request body too large`), so a failure that never reached the server, and therefore left nothing in its log, can still be told apart from a stopped server. After a request that failed on the way the transcript is not read again, since that read would wipe the notice; if the server did take the turn after all, the activity refresh attaches to it and its end reloads the transcript. The rule is **`streamResponses`** in **`App.tsx`**.
 - **Improve prompt**: the compact **24×24px** wand button (**`data-testid="composer-enhance-btn"`**) lives at the **right edge** of the workspace-context row, next to the Local / folder / branch / worktree controls — not in the textarea or lower composer bar. On a phone it stays at the end of that row, outside the chip strip that scrolls sideways. It has `title` and accessible name **`Improve prompt`**, is disabled for blank drafts and while a request or generation is active, calls **`POST /coddy/enhance-prompt`**, and replaces the draft only on success. **Ctrl+Z** / **⌘Z** restores the pre-improvement draft; a failure leaves it unchanged and displays an inline error.
@@ -659,7 +679,7 @@ Mirror and caret alignment
 
 Transcript vs composer
 
-- **`user_message`** bubbles render **plain text** only (**`msg-user-body`**, **`white-space: pre-wrap`**). No Markdown pipeline, no transcript skill chips (**`coddy-skill-span`**). Slash tokens such as **`/path/to`** and YAML blocks stay exactly as persisted, with line breaks preserved.
+- **`user_message`** bubbles render **plain text** only (**`msg-user-body`**, **`white-space: pre-wrap`**). No Markdown pipeline; known `/skill` tokens and workspace `@mention` tokens are compact copy controls that copy their literal source on click. Slash tokens such as **`/path/to`** and YAML blocks stay exactly as persisted, with line breaks preserved.
 - Composer mirror chips (**`composer-skill-chip`**) apply **only** while editing **`#composer`**, not in the transcript.
 - Persisted user turns may carry hydrated attachments as **`coddy_attachment`** XML with **`path`**, **`name`**, and CDATA file bodies (**`internal/agent`**). **`stripCoddyAttachmentsForUserDisplay`** replaces each XML block with a compact **`@path`** **only when** that path is **not** already present as an **`@`** mention in the surrounding text (**avoids duplication** because the persisted turn already repeats the **`@`** in the user text plus the hydrated block).
 
@@ -807,6 +827,12 @@ A failed or cancelled call, and one whose arguments do not parse, keeps the raw 
 
 *An http request, the background task list and a task's output*
 
+![A read of screenshot.png: the picture previewed under the row, then the answer](../assets/read-image-preview-dark-1280.png)
+
+*A picture the model was shown, previewed under the read's row*
+
+A `read` that showed the model a picture ([Images](../features/images.md)) previews it under its row: one card per picture, the size of a sent attachment, seen with the row closed, that opens the original in the viewer the documentation reader uses. While the turn runs the card comes from `_meta.coddy.images` of the call's final update, after a reload from the `files` of the tool row, and the bytes go through the environment like an attachment's, so a remote server or a relay shows it too. It is the copy Coddy kept with the session, so a file overwritten later still previews as the model saw it. The card shows the copy's 160 px thumbnail; a picture with none (a WebP, which the server cannot decode, or one over 16 megapixels, whose decode would cost too much) fills the card with the original. A failed `read` shows no card.
+
 ![Documentation search and read cards and the session filing card](../assets/web-ui/tool-structured-documents-dark-1280.png)
 
 *A documentation search, the section it read and the session's title and tags*
@@ -823,7 +849,13 @@ A failed or cancelled call, and one whose arguments do not parse, keeps the raw 
 
 *Scheduler calls in the transcript: a job read as its fields, a resume and a run as their outcome*
 
-`spawn_agent` has a dedicated argument card: agent icon and name, optional description, a labelled timeout badge, and an inset panel for the full multiline prompt. The timeout is the supplied execution limit in seconds, separate from the elapsed duration beside the tool title. The layout wraps on narrow screens and follows the active light/dark theme. Calls with truncated history arguments load the full arguments once per incomplete preview, including running calls; malformed arguments or failed fetches retain the plain argument preview. Result output and More / Less behave as for other tools, with the result attached below the agent card. Card labels follow the active English/Russian UI locale.
+`share_file` gives the agent an explicit, permission-gated way to hand a report or other workspace file back to the operator. A successful call renders a downloadable file card under its tool row. The browser downloads an immutable copy kept in the session bundle, so the link does not follow later workspace changes; in a remote environment the same action fetches through the configured bearer-authenticated API route. A missing copy stays visible as unavailable rather than becoming a broken image or link.
+
+When a later assistant answer refers to verified shared files, their cards render inline with that answer. Adjacent file markers form one responsive row, which wraps on narrow screens and keeps a 16px gap before the next paragraph. Image artifacts show a thumbnail and open the shared image lightbox at their verified inline preview URL; non-image files keep their type tile. Every card keeps the same actions menu for download, mention, copying paths, and revealing the source on the server host.
+
+`spawn_agent` has a dedicated argument card: agent icon and name, optional description, a labelled timeout badge, and an inset panel for the multiline prompt. The prompt starts as a compact preview; **More…** opens a bounded, scrollable viewport and **Less** restores the preview, so a long subagent instruction does not take over the transcript. When the spawned task has a child session, the card offers **Show transcript**; the same action is below captured output on the opened background-task card. The timeout is the supplied execution limit in seconds, separate from the elapsed duration beside the tool title. The layout wraps on narrow screens and follows the active light/dark theme. Calls with truncated history arguments load the full arguments once per incomplete preview, including running calls; malformed arguments or failed fetches retain the plain argument preview. Card labels follow the active English/Russian UI locale.
+
+On a labelled wide rail, the active-turn badge sits immediately after **History** or **Scheduler**; icon-only rails keep the badge over the icon. History counts active child-subagent turns as well as ordinary active chats, while still keeping child transcripts out of the History list itself.
 
 The happy path is in `features/spawn_agent_card.feature`, run by the `http,ui` godog harness through the React DOM test in `SpawnAgentCard.test.tsx`. Edge cases cover invalid arguments, absent/invalid timeouts, escaped prompt text, and history fetch failure.
 
@@ -839,7 +871,8 @@ Authoritative behaviour matches **`DESIGN.md`** tool timeline plus this checklis
 | Markdown | Not used for tool **result** or **user** bubbles; **assistant** still uses Markdown per below |
 | List merge | **`App.tsx`** **`loadMessages`** merges **`GET /coddy/sessions/{id}/tool-calls`** rows into **`resultText`**, **`resultWasTruncated`**, timing |
 | Full text | First result **More…**, or automatic incomplete-args recovery for restored **`apply_patch`** / **`write`** / **`write_file`** / **`edit`** cards in any status - **`GET /coddy/sessions/{id}/tool-calls/{toolCallId}`**, using JSON **`result`** and **`args`** (same object includes **`meta`**). Transcript reconciles never replace complete args with the truncated 200-char **`argsPreview`** (**`pickRicherToolArgs`**), so live cards keep full previews across permission answers |
-| CSS | **`styles.css`**: **`.coddy-tool-call-row`**, transparent **`.coddy-tool-call-body`**, shared **`.permission-preview*`**, **`.tool-call-result-card`**, **`thinking-details:not([open])` body hidden**, plus result viewport / toggle classes above |
+| Pictures | **`ToolImagePreviews.tsx`** under the row, outside the **`details`**: **`.tool-images`**, one **`button.tool-image-card`** per picture (**`data-testid="tool-image-open"`**, thumbnail **`tool-image-thumb`**) that opens **`ImageLightbox`**; only on a completed call, from **`images`** of the row (**`_meta.coddy.images`** live, the tool row's **`files`** after a reload) |
+| CSS | **`styles.css`**: **`.coddy-tool-call-row`**, transparent **`.coddy-tool-call-body`**, shared **`.permission-preview*`**, **`.tool-call-result-card`**, **`thinking-details:not([open])` body hidden**, **`.tool-images`** / **`.tool-image-card`**, plus result viewport / toggle classes above |
 
 - `assistant_message`
   - Final assistant output text for the turn, after tool calls.
@@ -911,10 +944,10 @@ Automated checks:
 
 ### Subagent definitions
 
-**Settings > Subagents** is a hybrid tab like Skills (section kind `subagents` in `settingsSections.ts`, `SubagentsSection.tsx`): the schema-driven form of the `subagents` config section (`enable`, `dirs`, `project_trust`, `max_concurrent`, `max_depth`, `default_timeout_seconds`, `max_turns`; labels from `settings.schema.subagents.*`) is saved with the rest of the document, and below it a **Definitions** fieldset lists the catalog of `GET /coddy/subagents` for the workspace of the session on screen (`workspaceCtx.path` from `App.tsx`; without one the server answers for its default workspace), with that workspace printed above the list.
+**Settings > Subagents** is a hybrid tab like Skills (section kind `subagents` in `settingsSections.ts`, `SubagentsSection.tsx`): the schema-driven form of the `subagents` config section (`enable`, `dirs`, `project_trust`, `max_concurrent`, `max_depth`, `default_timeout_seconds`, `max_turns`; labels from `settings.schema.subagents.*`) is saved with the rest of the document, and below it a **Definitions** fieldset lists the catalog of `GET /coddy/subagents` for the workspace of the chat on screen (`chatWorkspacePath` from `App.tsx`: the session's folder, or the folder picked before the first message; without one the server answers for its default workspace). The tab does not print that path.
 
-- The list only reads. Each row reuses the MCP list chrome: the name, a scope badge (`built in` / `yours` / `from the project`), `hidden`, the description as plain text and the file.
-- A project definition still awaiting a receipt under `project_trust: ask` carries an amber `needs approval` badge and nothing to click: its tooltip names `coddy agents trust <name>`, which records the receipt on the machine running coddy (or `POST /coddy/subagents/{name}/trust`).
+- Each row reuses the MCP list chrome: the name, a scope badge (`built in` / `yours` / `from the project`), `hidden`, the description as plain text and the file.
+- Under `project_trust: ask` a project definition carries the shield of the MCP tab (`subagent-trust-<name>`): amber while it is not approved, plain once it is. Clicking it approves the file for that workspace with `POST /coddy/subagents/{name}/trust`, naming the `digest` the row showed, so a file the checkout rewrote since is refused (409) and the error is shown above the list; clicking an approved one withdraws the receipt. The list is read again after either. A definition still awaiting a receipt also carries an amber `needs approval` badge whose tooltip names the shield and `coddy agents trust <name>`. Built-in and user definitions, and every definition under `allow` or `deny`, have no shield.
 - **Declared bounds**, collapsed on every row (`subagentDeclaredFacts` in `settings/subagentCatalog.ts`): model, mode, permissions, tools, denies, timeout, max turns, runs detached and instructions size, with every undeclared bound shown as inherited. Long paths and tool lists wrap inside the panel (`.settings-subagents-section` rules) instead of widening it.
 
 ![Settings Subagents catalog](../assets/subagents/settings-subagents-catalog-dark-1280.png)
@@ -933,7 +966,7 @@ Automated checks:
 
 - **external/ui/src/ui/settings/subagentCatalog.test.ts** (inherited and declared facts, formatting, scope badge keys)
 - **external/ui/src/ui/settings/subagentsApi.test.ts** (workspace in the query, normalised catalog, server error messages, offline)
-- **external/ui/src/ui/settings/SubagentsSection.test.tsx** (rows with scope, description and file, no control on any row, the passive needs-approval badge, declared bounds behind a disclosure, failed load, Russian copy)
+- **external/ui/src/ui/settings/SubagentsSection.test.tsx** (rows with scope, description and file, the shield of a project definition under ask approving the file with the digest shown and withdrawing the receipt, a refused approval, no shield under allow or deny nor on a built-in or user definition, the needs-approval badge, declared bounds behind a disclosure, failed load, Russian copy)
 - **external/ui/src/ui/settings/subagentsCatalogCss.test.ts** (the catalog cannot outgrow the panel, facts label column, amber badge)
 - **external/ui/src/ui/settings/SettingsSection.test.tsx** (the subagents kind keeps its form and asks about the session workspace)
 - **external/ui/src/ui/chat/SubagentPermissionCard.test.tsx** (answered against the child session, only waiting tasks and oldest first, nothing while none waits, title prefix, Russian copy)
@@ -1142,10 +1175,10 @@ section kind `mcp`; visual contract in `DESIGN.md`). Screenshot:
 `docs/assets/screenshot-fullhd-settings-mcp.png` (a connected global server plus
 a project-local one awaiting workspace approval):
 
-- `GET /coddy/mcp` backs the list: merged `config.yaml` + global `~/.coddy/mcp.json`
-  + project `./.coddy/mcp.json` servers, each with `source` (`global` / `local`
-  scope badge), `origin` (`config` / `home` / `project`) and `source_path` (the
-  real file, which is what the badge tooltip names), `readonly` (config.yaml entries), probe
+- `GET /coddy/mcp` backs the list: merged global `~/.coddy/mcp.json` + project
+  `./.coddy/mcp.json` servers (config.yaml declares none), each with `source`
+  (`global` / `local` scope badge), `origin` (`home` / `project`) and
+  `source_path` (the real file, which is what the badge tooltip names), probe
   `status`, and its tool inventory.
 - Status dot per server: connected (green), error (red, tooltip shows the probe
   error), disabled (gray), unknown transport type (amber, `unsupported`),
@@ -1169,7 +1202,8 @@ a project-local one awaiting workspace approval):
   `source_path` it was declared in plus the declaration the approval covers
   (`.mcp-trust-facts`, from `declarationFacts` in `mcpServerJson.ts`):
   transport, `runs` (command + args) or `contacts` (url), the **names** of the
-  env vars and headers, and the workspace. Values are never rendered. The shield
+  env vars and headers, the variables of the Coddy process its values read
+  (`reads`, from the row's `reads`), and the workspace. Values are never rendered. The shield
   renders **only under `ask`** (`showsTrustControl` in `mcpServerJson.ts`):
   `allow` starts every project server anyway and `deny` starts none, so there is
   no per-server decision left to offer. Such a row is not probed, so it lists no
@@ -1187,9 +1221,16 @@ a project-local one awaiting workspace approval):
 - Expanding a row lists tools with per-tool switches
   (`POST /coddy/mcp/{name}/tools/{tool}/enable|disable`); tool switches are
   locked while the server is disabled.
-- Edit and Delete are locked for `readonly` (config.yaml) rows; mcp.json rows
-  of both scopes stay editable. Delete calls `DELETE /coddy/mcp/{name}`, Edit
+- Every row is editable, both scopes. Delete calls `DELETE /coddy/mcp/{name}`, Edit
   opens the JSON editor card inline with the scope pinned to the owning file.
+- The list carries no env or header value, only `<redacted>` in its place, so the
+  editor of a row starts from the placeholders and says under the JSON what they do
+  (`mcp-editor-values-hint`): one left as it is keeps the stored value, a new value
+  replaces it, a removed key is deleted. Save sends the row's `fingerprint`
+  (`PUT /coddy/mcp/{name}?scope=…&fingerprint=…`); when the file holds another
+  declaration by then the server answers `409`, the card stays open with
+  `mcp.error.saveChanged` and the list is read again, and the entry has to be
+  reopened to be edited.
 - Add server opens the editor prefilled with a Cursor-style entry template and
   a Local/Global scope picker (default Local); Save issues
   `PUT /coddy/mcp/{name}?scope=local|global` after client-side validation
@@ -1199,6 +1240,55 @@ a project-local one awaiting workspace approval):
 - List refreshes never unmount the list (initial-load-only placeholder), so the
   drawer scroll position is preserved.
 - The tab does not participate in the settings document Save all flow.
+
+## Skill marketplaces (Settings tab)
+
+**Settings > Skills** keeps its form (auto-discovery, `skills.dirs`, and `skills.project_trust` in a
+**Marketplace discovery** fieldset of its own, saved with the rest of the settings) and the installed
+skills, and between them a **Marketplaces** fieldset (`MarketplacesEditor.tsx`, helpers in
+`settings/marketplaces.ts`). Like the MCP tab it is API-driven and never part of the settings
+document: what it lists is declared in `~/.coddy/marketplaces.json`, the project's
+`.coddy/marketplaces.json` and Coddy itself, read through `GET /coddy/skills/sources` for the session
+on screen (`X-Coddy-Session-ID`), and every action applies at once.
+
+- One row per entry, in the order the entries take effect: the key (a marketplace's name, a source's
+  address), a kind badge (**all plugins** for a source, **catalog** for a marketplace, whose address
+  sits under the name) and an origin badge (**built in**, **yours**, **from the project**) whose
+  tooltip names the declaring file.
+- The built-in `EvilFreelancer/rpa-skills` carries a shield that cannot be clicked (always trusted)
+  and a disabled delete button; it syncs like any row.
+- Under `skills.project_trust: ask` a project row carries the MCP shield: amber while the entry
+  waits for approval, plain once approved. Clicking it posts `POST /coddy/skills/sources/trust` with
+  the row's `fingerprint` (an entry the checkout rewrote since is refused with 409 and the message is
+  shown above the list), or `untrust` for an approved one; the list is read again after either. A
+  row still waiting is dimmed, says which file declares it and that it is not synced until approved,
+  and its **Sync** button is disabled. Under `deny` its note says the policy switched it off and
+  there is no shield; under `allow` project rows are in effect and have none either.
+- **Sync** on a row is `POST /coddy/skills/sync?source=<key>`, **Sync all** `POST /coddy/skills/sync`;
+  both refresh the installed list and flash a check mark, and a refresh that fails says so and leaves
+  the buttons usable. The Sync of a held row is disabled, its title asks for the approval first,
+  or under `deny` names the policy. Delete is `DELETE /coddy/skills/sources?source=<key>&origin=<row origin>`: it
+  edits the file of that row only, so removing your entry never touches the project's checked-in copy.
+- The add field declares a source (installed whole) with `POST /coddy/skills/sources`, in your file
+  or, with **This project**, in the project's, which approves it for that workspace as it is written.
+  **This project** is available once the chat has a session: before its first message the server
+  would take its own default folder, not the one on screen, so the picker stays on your file.
+- A chat kept as a draft in the browser has no session on the server: the list and its actions then
+  send no `X-Coddy-Session-ID` and answer for the server's default workspace (the MCP tab does the
+  same). A save of the settings reads the list again, so the rows follow a changed
+  `skills.project_trust`; the Subagents catalog does the same for `subagents.project_trust`.
+- The install search (`GET /coddy/skills/available`), the update check (`GET /coddy/skills/updates`)
+  and **Update** go to the same session, so a project marketplace approved there is offered and one
+  held there is neither checked nor updated from.
+- On a phone the row's controls wrap under the key and the add field takes the full width.
+
+![Settings, Skills: the marketplaces list](../assets/skills/skills-marketplaces-dark-1280.png)
+
+Automated checks:
+
+- **external/ui/src/ui/settings/MarketplacesEditor.test.tsx** (rows with kind, origin and file, the built-in row's disabled shield and delete, a held project row with its note, disabled sync and shield, approval with the fingerprint and its withdrawal, a refused approval, a denied row, add with the scope, remove by key, sync of one and of all, Russian copy)
+- **external/httpserver/server_test.go** (`TestCoddySkillsSourcesSyncDelete`, `TestCoddySkillsNewRoutesEdgeCases`: the routes, the scopes, 409 on a rewritten entry, 400 on syncing a held one)
+- **features/skills_marketplace.feature**, **features/skills_marketplace_trust.feature** (a project marketplace waits for its approval, then syncs into the Coddy home)
 
 ## Swarm screen
 
@@ -1213,17 +1303,26 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a relay the swarm map **is** the home screen: no composer, no `ChatScreen`,
   no History entry and no Scheduler entry, because a relay holds no sessions of
   its own. Its header carries the environment selector, which normally lives in
-  the composer.
-- **Clicking a node on the map connects to it.** There is no list of nodes under
-  the map and no filter chips: from a node, every ordinary screen (chat,
-  history, scheduler, settings, workspace) works against it, and **Swarm** in
-  the rail returns to the relay.
-- Clicking a node that is **asking a question** opens that session, not an empty
-  chat; a node that is merely busy opens its running session; an idle one opens
-  its home.
-- The map marks the node the app is on as *you are here* and draws the route to
-  it from the attached relay as one connected accent path; everything off that
-  route recedes. Hovering another node previews where a click would take you.
+  the composer; the selector remains there in the map's empty and error states
+  as well, so an unavailable relay does not remove the way to change environments.
+- **Clicking a node on the map switches to it** and leaves the map open over
+  it, the node now ringed; what to do there is the next click. There is no list
+  of nodes under the map and no filter chips: from a node, every ordinary screen
+  (chat, history, scheduler, settings, workspace) works against it, and
+  **Swarm** in the rail returns to the relay. The node the app is on, and the
+  relay on its own map, are not buttons.
+- A switch between two remotes does not reload the page: the app starts over on
+  the new one in place, the map drawn at once from its last picture, the rail
+  as it was.
+- The map rings the node the app is on (on the relay itself, the relay's card)
+  and draws the route to it from the attached relay as one connected accent path; everything off that route
+  recedes. Every relay on that route has an outline, and the current relay has
+  the stronger current-node outline. Hovering another node previews where a click would take you, and its
+  tooltip names what the drawing shows: what the node is, whether it dials out,
+  what it is doing. The map writes words under a node only for trouble
+  (*offline*, *no route*) and counts a relay's links on its card; wires carry
+  no arrowheads, and a wire is named only when the relay knows the node under
+  another name.
 - Each node says what it is doing: a session count when idle, a running count
   while a turn is in flight, and *needs an answer* when something there waits on
   a permission prompt. A running node pulses, a waiting node pulses differently,
@@ -1236,6 +1335,21 @@ Guide: `docs/operate/swarm.md`. Visual contract: `DESIGN.md` (**Swarm screen**).
 - On a phone (below 1200 px) the screen opens under the top bar and above the
   dimmed backdrop, so taps reach the map, the search and the nodes; tapping the
   top bar's own entries still leaves it.
+- **Tree** is the default canvas layout. **Graph** is a deterministic rooted
+  top-down graph for rings and cross-links, rooted at the relay or, when drawn,
+  at the local computer that starts the connection. It follows route depth
+  softly rather than with rigid hop rows, and uses smooth links. Selecting Tree
+  or Graph is browser-only state in localStorage key `coddy_swarm_layout`; a
+  saved legacy `star` value migrates to Graph, and an absent, blocked or invalid
+  value selects Tree. No server configuration changes.
+- The canvas starts fitted. Its Tree/Graph selector and **Zoom out**, **Fit
+  graph**, and **Zoom in** controls are usable with 40px targets on the stacked
+  shell. Wheel zoom follows the pointer, drag pans in both axes even when fitted,
+  two-finger pinch zooms, and drag/pinch gestures do not open nodes. When
+  focused, **`+`** / **`=`**, **`-`** and **`0`** zoom in, zoom out and fit. Fit,
+  a relay change, or a layout change resets the camera; polling refits only an
+  untouched camera and otherwise preserves the operator's pan and zoom within
+  changed bounds.
 - Built with `-tags "swarm ui"` the relay serves this SPA at its own address;
   without the `ui` tag its root explains how to rebuild.
 - The environment selector in the map header opens **downward**, because on a
@@ -1252,7 +1366,11 @@ Guide: `docs/features/built-in-docs.md`. Visual contract: `DESIGN.md` (**Documen
 
 - **Docs** in the rail (above Settings), **F1** anywhere in the app, or an address
   **`#/docs/<page>#<section>`** opens the reader (**`ui/docs/DocsView.tsx`**) in the
-  same glass dock the swarm screen uses. The rail entry reopens the page the
+  same glass dock the swarm screen uses, one width for both (**`--coddy-dock-width`**).
+  The pages are read from the server the page came from, whatever environment is active:
+  on a remote, a node or a relay the reader still shows the local binary's own
+  documentation. A relay that serves its own page has none, so there the rail leaves
+  **Docs** out. The rail entry reopens the page the
   reader was left on; **`#/docs`** alone settles on the first page of the
   contents with **`replaceState`**, so Back does not return to an empty reader.
   **F1** again, **Escape** or the **×** control closes it and returns to where it was

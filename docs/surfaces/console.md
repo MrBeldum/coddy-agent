@@ -21,9 +21,9 @@ session in this folder and `coddy -p "..."` runs one non-interactive prompt
 (`coddy -p -` and `coddy -i FILE` read it from stdin or from a file).
 Startup runs before the terminal enters raw mode: the config, the session
 store, the skills and the rule folders, then the first frame. The skills are
-read from their folders only, never from `skills.sources`, so hundreds of
-installed skills cost a fraction of a second and a marketplace that does not
-answer costs nothing ([Skills](../features/skills.md#when-skills-are-read)).
+read from their folders only, never from the marketplaces of
+`marketplaces.json`, so hundreds of installed skills cost a fraction of a
+second and a marketplace that does not answer costs nothing ([Skills](../features/skills.md#when-skills-are-read)).
 The configured MCP servers are **not** on that path, whatever starts them - a
 program the config names, an npm package run through `npx`, a remote server
 over streamable HTTP or SSE: they connect in the background once the console
@@ -39,6 +39,10 @@ outlast the bound while the package installs - and one that failed
 otherwise, or twice, is not dialed again until its switch in `/mcp`, a
 reload or a new session. Resuming a
 session restores its current MCP notices after the transcript is cleared.
+The servers of the global configuration start with the console, before its first
+session asks for them, and stay up for the whole run, so `/new` and `/resume` find
+them connected instead of starting them again; a project server is one process for
+the sessions of its workspace ([MCP](../features/mcp.md#shared-servers)).
 Nothing reads the workspace tree: nested `AGENTS.md` files are read on demand, from the folders
 a tool enters (`docs/features/rules.md`), so a console opened in a home
 directory (a macOS `~/Library` alone runs to hundreds of thousands of
@@ -105,9 +109,14 @@ Top to bottom:
 
 - **Header**: `coddy` (bold accent) + dim version; a dim hint line
   (`escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ctrl+o more`);
-  a dim welcome line; `[Context]` (the files `instructions.files` names) and
+  a dim welcome line; `[Context]` (the documents the session's prompt carries:
+  your and the workspace's `AGENTS.md` and `DESIGN.md` that exist, then the
+  files `instructions.files` adds, each once) and
   `[Skills]` (the loaded skills, the bundled ones first).
-  `ctrl+o` expands the full hint list and adds `[Rules]` and `[MCP]` sections.
+  `ctrl+o` expands the full hint list and adds `[Rules]` and `[MCP]` sections;
+  `[MCP]` names the servers a session of this workspace starts: the enabled ones
+  of `~/.coddy/mcp.json` and of the project's `.coddy/mcp.json` that the trust
+  gate lets run.
 - **Transcript**: user messages in full-width background boxes; assistant
   markdown (headings, bold/italic, inline code, ``` fences with borders,
   `│ ` quotes, lists, box-drawing tables, OSC 8 links); italic gray thinking
@@ -241,9 +250,10 @@ Slash commands: the settings commands `/model`, `/reasoning` (`/effort`),
 `/new`, `/theme`, `/hotkeys`, `/queue`, `/usage`, `/tasks`, `/mcp`, `/docs`, `/quit`; server-driven `/compact`, `/export`,
 `/plugin`, and every loaded skill (from the ACP available-commands catalog).
 A bare `/model`, `/reasoning` or `/permissions` opens its picker; with a value
-the command is applied by the session manager, which answers with a notice
-line, and commands followed by a message apply to the turn that message
-starts. `/mode` is gone: the modes have their own commands.
+the command is applied by the session manager and the footer shows the change,
+and commands followed by a message apply to the turn that message starts. The
+transcript gets a line only for a change the agent made itself, such as
+`Model: stub/coddy-mini for this session` after its `switch_model` call. `/mode` is gone: the modes have their own commands.
 
 **Model memory** — the console is a surface of its own. A session-scoped pick
 (`/model`, the picker, or `/model <id>` ahead of a prompt) is remembered in
@@ -254,9 +264,9 @@ the alphabetically first configured model. Reopened and resumed sessions keep
 the model saved in their bundle, `--model` is a per-invocation override that
 does not rewrite the memory, and `coddy -p` always follows the configuration.
 
-![The console after /permissions bypass and a chained /model --once and /reasoning --count=3: three notices, bypass in the footer, and the line of turn overrides](../assets/session-settings/session-settings-console-footer-dark.png)
+![The console after /permissions bypass and a chained /model --once and /reasoning --count=3: bypass in the footer and the line of turn overrides, no line in the transcript](../assets/session-settings/session-settings-console-footer-dark.png)
 
-*After `/permissions bypass` and `/model stub/coddy-mini --once /reasoning high --count=3`: a notice per change, `bypass` in the footer, the turn overrides under the model.*
+*After `/permissions bypass` and `/model stub/coddy-mini --once /reasoning high --count=3`: `bypass` in the footer, the turn overrides under the model, nothing in the transcript.*
 
 Enter on a slash suggestion applies and submits in one stroke. `/export [md|html|json|jsonl]
 [path]` writes the transcript into the workspace (`docs/features/session-export.md`);
@@ -406,7 +416,9 @@ offers the staged config tools (`config_get`, `config_set`,
 **Agent self-configuration** in `docs/reference/config.md`), and a commit or
 rollback hot-reloads the running console, so the model catalog (`ctrl+l`,
 `ctrl+p`), the footer, and the header's `[Context]`, `[Skills]`, `[Rules]`,
-and `[MCP]` sections follow the new file without a restart. `-p/--prompt`
+and `[MCP]` sections follow the new file without a restart. MCP servers are
+not in that file: the console watches `~/.coddy/mcp.json` and an edit of it
+reaches the session within a couple of seconds ([MCP](../features/mcp.md#edits-made-outside-coddy)). `-p/--prompt`
 offers the same tools; under `--remote` the server owns the reload.
 
 | Key | Action |
@@ -636,8 +648,9 @@ workspace.
 remote `coddy serve` server instead of running the agent in-process. The
 target is a configured remote name (`httpserver.remotes`), a bare
 `host:port` (scheme defaults to http), or a full http(s) URL. The bearer
-token comes from `--remote-token` or `CODDY_REMOTE_TOKEN`; tokens are
-deliberately never read from config.yaml. The same pair of flags works on
+token is the first of `--remote-token`, the `token` of the matching
+`httpserver.remotes` entry (a node mount under a configured relay takes the
+relay's) and `CODDY_REMOTE_TOKEN`. The same pair of flags works on
 `coddy acp`, so an ACP editor can drive a remote coddy too.
 
 Turns execute on the server in its workspace. For a turn this console starts,
@@ -896,8 +909,8 @@ and types `@ment` against a provider that is never asked anything.
   server that never answers (`sleep 600`) and checks that the first frame
   still comes within seconds, with `MCP 0/1` in the footer, and that the
   console still leaves through double ctrl+c; a third one adds 300 installed
-  skills and a `skills.sources` entry that accepts connections and never
-  answers (issue #319), and checks that the first frame comes within two
+  skills and a source in `marketplaces.json` that accepts connections and
+  never answers (issue #319), and checks that the first frame comes within two
   seconds, that a typed key is echoed and that the source was never
   contacted. Those two are the startup bounds CI enforces. The performance of the startup itself is
   measured, not gated: `make bench-cli-startup` times the first frame and a

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,13 @@ func (mcpTestSender) RequestQuestion(context.Context, acp.QuestionRequestParams)
 const (
 	gatedMCPStartedEnv = "CODDY_TEST_GATED_MCP_STARTED"
 	gatedMCPReleaseEnv = "CODDY_TEST_GATED_MCP_RELEASE"
+	// gatedMCPPIDEnv names a file the stub writes its pid to, so a test can
+	// end the process the way a crash would.
+	gatedMCPPIDEnv = "CODDY_TEST_GATED_MCP_PID"
+	// gatedMCPExitsEnv asks the stub to record its exit as well. Only a test
+	// that waits for the exits it causes sets it: a record written after the
+	// test ended would land in a temporary folder that is being removed.
+	gatedMCPExitsEnv = "CODDY_TEST_GATED_MCP_EXITS"
 )
 
 // gatedMCPServer declares a stdio server run by TestGatedMCPHelperProcess:
@@ -69,6 +77,9 @@ func TestGatedMCPHelperProcess(t *testing.T) {
 	if f, err := os.OpenFile(started, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
 		_, _ = f.WriteString("started\n")
 		_ = f.Close()
+	}
+	if pidFile := os.Getenv(gatedMCPPIDEnv); pidFile != "" {
+		_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
@@ -104,6 +115,14 @@ func TestGatedMCPHelperProcess(t *testing.T) {
 			return
 		}
 	}
+	// Stdin closed: the client let the server go. One line per exit, so a
+	// test can tell a server that was stopped from one still running.
+	if os.Getenv(gatedMCPExitsEnv) == "1" {
+		if f, err := os.OpenFile(started, os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.WriteString("exited\n")
+			_ = f.Close()
+		}
+	}
 	os.Exit(0)
 }
 
@@ -128,6 +147,16 @@ func spawns(started string) int {
 	return strings.Count(string(data), "started\n")
 }
 
+// exits counts how often the gated server behind started saw its stdin close
+// and exited.
+func exits(started string) int {
+	data, err := os.ReadFile(started)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(data), "exited\n")
+}
+
 func clientNames(st *State) []string {
 	var names []string
 	for _, c := range st.GetMCPClients() {
@@ -143,7 +172,7 @@ func TestConfiguredServersDialConcurrently(t *testing.T) {
 	dir := t.TempDir()
 	a := gatedMCPServer("a", filepath.Join(dir, "a-started"), filepath.Join(dir, "a-release"))
 	b := gatedMCPServer("b", filepath.Join(dir, "b-started"), filepath.Join(dir, "b-release"))
-	mgr := NewManager(reloadTestConfig(a, b), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, a, b), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 
 	type created struct {
 		res *acp.SessionNewResult
@@ -187,7 +216,7 @@ func TestHungServerIsBoundedPerServer(t *testing.T) {
 	dir := t.TempDir()
 	hung := gatedMCPServer("hung", filepath.Join(dir, "hung-started"), filepath.Join(dir, "never"))
 	good := reloadTestMCPServer("good")
-	mgr := NewManager(reloadTestConfig(hung, good), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, hung, good), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 	mgr.SetMCPConnectTimeoutForTest(2 * time.Second)
 
 	begin := time.Now()
@@ -211,7 +240,7 @@ func TestExpiredContextSpawnsNothing(t *testing.T) {
 	dir := t.TempDir()
 	started := filepath.Join(dir, "started")
 	srv := gatedMCPServer("gated", started, "")
-	mgr := NewManager(reloadTestConfig(srv), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, srv), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	results, _ := mgr.dialConfigured(ctx, mgr.activeCfg(), t.TempDir())
@@ -229,9 +258,9 @@ func TestReloadWarningsNameEveryServerThatDidNotStart(t *testing.T) {
 	dir := t.TempDir()
 	hung := gatedMCPServer("hung", filepath.Join(dir, "hung-started"), filepath.Join(dir, "never"))
 	broken := config.MCPServerConfig{Type: "stdio", Name: "broken", Command: filepath.Join(dir, "missing-binary")}
-	mgr := NewManager(reloadTestConfig(), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 	mgr.SetMCPConnectTimeoutForTest(2 * time.Second)
-	results, held := mgr.dialConfigured(context.Background(), reloadTestConfig(hung, broken, reloadTestMCPServer("good")), t.TempDir())
+	results, held := mgr.dialConfigured(context.Background(), reloadTestConfig(t, hung, broken, reloadTestMCPServer("good")), t.TempDir())
 	clients, warnings := connectedClients(results), dialWarnings(results, held)
 	t.Cleanup(func() {
 		for _, c := range clients {
@@ -244,7 +273,8 @@ func TestReloadWarningsNameEveryServerThatDidNotStart(t *testing.T) {
 	if len(warnings) != 2 {
 		t.Fatalf("warnings = %v, want one for hung and one for broken", warnings)
 	}
-	for i, prefix := range []string{"connect MCP hung: ", "connect MCP broken: "} {
+	// The servers of an mcp.json are dialed in name order.
+	for i, prefix := range []string{"connect MCP broken: ", "connect MCP hung: "} {
 		if len(warnings[i]) < len(prefix) || warnings[i][:len(prefix)] != prefix {
 			t.Fatalf("warning %d = %q, want prefix %q", i, warnings[i], prefix)
 		}
@@ -284,7 +314,7 @@ func TestSlowFirstStartIsTriedOnceMoreAtTheNextTurn(t *testing.T) {
 	dir := t.TempDir()
 	started, release := filepath.Join(dir, "started"), filepath.Join(dir, "release")
 	entered := make(chan []string, 4)
-	mgr := NewManager(reloadTestConfig(gatedMCPServer("slow", started, release)), mcpTestSender{}, namesRunner(entered), slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, gatedMCPServer("slow", started, release)), mcpTestSender{}, namesRunner(entered), slog.Default(), t.TempDir(), nil)
 	mgr.SetMCPConnectTimeoutForTest(2 * time.Second)
 	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
 	if err != nil {
@@ -314,7 +344,7 @@ func TestServerThatNeverAnswersIsTriedTwiceAtMost(t *testing.T) {
 	dir := t.TempDir()
 	started := filepath.Join(dir, "started")
 	entered := make(chan []string, 4)
-	mgr := NewManager(reloadTestConfig(gatedMCPServer("hung", started, filepath.Join(dir, "never")), reloadTestMCPServer("good")),
+	mgr := NewManager(reloadTestConfig(t, gatedMCPServer("hung", started, filepath.Join(dir, "never")), reloadTestMCPServer("good")),
 		mcpTestSender{}, namesRunner(entered), slog.Default(), t.TempDir(), nil)
 	mgr.SetMCPConnectTimeoutForTest(2 * time.Second)
 	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
@@ -368,7 +398,7 @@ func TestStopDuringTheOneMoreTryEndsTheTurnAtOnce(t *testing.T) {
 		entered <- ctx.Err()
 		return string(acp.StopReasonCancelled), nil
 	}
-	mgr := NewManager(reloadTestConfig(gatedMCPServer("hung", started, filepath.Join(dir, "never"))), mcpTestSender{}, runner, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, gatedMCPServer("hung", started, filepath.Join(dir, "never"))), mcpTestSender{}, runner, slog.Default(), t.TempDir(), nil)
 	mgr.SetMCPConnectTimeoutForTest(2 * time.Second)
 	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
 	if err != nil {
@@ -412,7 +442,7 @@ func TestAFailureIsNotCutShortByALaterDeadline(t *testing.T) {
 	dir := t.TempDir()
 	hung := gatedMCPServer("hung", filepath.Join(dir, "started"), filepath.Join(dir, "never"))
 	broken := config.MCPServerConfig{Type: "stdio", Name: "broken", Command: filepath.Join(dir, "missing-binary")}
-	mgr := NewManager(reloadTestConfig(broken, hung), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t, broken, hung), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 	mgr.SetMCPConnectTimeoutForTest(10 * time.Second)
 	res, err := mgr.HandleSessionNew(context.Background(), acp.SessionNewParams{CWD: t.TempDir()})
 	if err != nil {
@@ -428,7 +458,7 @@ func TestAFailureIsNotCutShortByALaterDeadline(t *testing.T) {
 // TestExpiredBudgetDialsNothing: a single-server dial under a context that
 // has already ended does not call the server at all.
 func TestExpiredBudgetDialsNothing(t *testing.T) {
-	mgr := NewManager(reloadTestConfig(), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
+	mgr := NewManager(reloadTestConfig(t), mcpTestSender{}, nil, slog.Default(), t.TempDir(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	called := false

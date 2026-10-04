@@ -190,6 +190,9 @@ function neuralDeepAPIBaseOverride(ctx: FieldOverrideContext) {
         providerName={providerName}
         hasExplicitKey={hasExplicitKey}
         apiBase={apiBase}
+        {...(Object.prototype.hasOwnProperty.call(ctx.parentObj ?? {}, "proxy")
+          ? { proxy: String(ctx.parentObj?.proxy ?? "") }
+          : {})}
       />
     </>
   );
@@ -261,7 +264,14 @@ function providerFieldOverride(ctx: FieldOverrideContext) {
         ctx.parentObj?.name === undefined || ctx.parentObj.name === null
           ? ""
           : String(ctx.parentObj.name);
-      return <CodexAuthField providerName={providerName} />;
+      return (
+        <CodexAuthField
+          providerName={providerName}
+          {...(Object.prototype.hasOwnProperty.call(ctx.parentObj ?? {}, "proxy")
+            ? { proxy: String(ctx.parentObj?.proxy ?? "") }
+            : {})}
+        />
+      );
     }
   }
   return neuralDeepAPIBaseOverride(ctx);
@@ -382,21 +392,24 @@ export function SettingsSection(props: {
         schema={sub}
         value={asObject(doc.skills)}
         onChange={(v) => setKey("skills", v)}
+        workspacePath={props.workspacePath}
+        {...(activeSessionId ? { activeSessionId } : {})}
       />
     );
   }
 
-  // The MCP tab is API-driven (/coddy/mcp*): toggles and project entries
-  // persist into config.yaml / .coddy/mcp.json immediately, so it does not
-  // edit the settings document at all.
+  // The MCP tab is API-driven (/coddy/mcp*): servers and their switches live
+  // in the two mcp.json files (project switches in mcp-overrides.json) and
+  // apply at once, so it does not edit the settings document at all.
   if (section.kind === "mcp") {
-    return <MCPSection />;
+    return <MCPSection {...(activeSessionId ? { activeSessionId } : {})} />;
   }
 
   // Subagents edits its config section like any object tab, and additionally
-  // lists the definitions of the viewed session's workspace, read-only: a
-  // project-scope one is approved from a terminal on the machine running
-  // coddy (`coddy agents trust <name>`), and the list says so.
+  // lists the definitions of the viewed session's workspace: under ask a
+  // project-scope one carries the shield that approves it for that
+  // workspace (POST /coddy/subagents/{name}/trust), as coddy agents trust
+  // does in a terminal.
   if (section.kind === "subagents") {
     const sub = props_.subagents;
     if (!sub) {

@@ -101,6 +101,123 @@ export const messagesEn: Record<string, string> = {
   "settings.section.hooks.desc": "Lifecycle hooks & trust",
   "settings.section.scheduler.label": "Scheduler",
   "settings.section.scheduler.desc": "Scheduled jobs",
+  "settings.section.swarm.label": "Swarm relay",
+  "settings.section.swarm.desc": "Address, tokens, CORS, nodes",
+  "settings.secret.keep": "Set. Leave empty to keep it",
+  "settings.secret.unset": "Not set",
+  "settings.secret.listSet.one":
+    "{count} is set and not shown. Values entered here replace it.",
+  "settings.secret.listSet.other":
+    "{count} are set and not shown. Values entered here replace them all.",
+  "settings.schema.swarm.label": "Swarm relay",
+  "settings.schema.swarm.desc":
+    "This relay's deployment: its name and address, the tokens of its clients and nodes, CORS for pages served elsewhere, the nodes it dials itself and the relays it joins. A save rebuilds the relay; a new address takes a restart.",
+  "settings.schema.swarm.name.label": "Name",
+  "settings.schema.swarm.name.desc":
+    "The relay's name on the map and in /swarm/info.",
+  "settings.schema.swarm.host.label": "Listen host",
+  "settings.schema.swarm.host.desc":
+    "Address to bind. 0.0.0.0 listens on every interface. Takes effect on a restart.",
+  "settings.schema.swarm.port.label": "Listen port",
+  "settings.schema.swarm.port.desc": "Port to bind. Takes effect on a restart.",
+  "settings.schema.swarm.auth_token.label": "Client token",
+  "settings.schema.swarm.auth_token.desc":
+    "Bearer token a client presents to use this relay, and every node behind it. A new one signs out every client, this page included: enter it again with Connect to… in the environment menu.",
+  "settings.schema.swarm.pairing_tokens.label": "Pairing tokens",
+  "settings.schema.swarm.pairing_tokens.desc":
+    "Tokens a node presents to join this relay. The list is not shown; tokens entered here replace the ones set.",
+  "settings.schema.swarm.cors.label": "CORS",
+  "settings.schema.swarm.cors.desc":
+    "Pages served from another origin, such as a laptop's coddy serve, that may call this relay from the browser.",
+  "settings.schema.swarm.cors.enable.label": "Enable CORS",
+  "settings.schema.swarm.cors.enable.desc":
+    "Answer cross-origin requests from the origins below.",
+  "settings.schema.swarm.cors.allowed_origins.label": "Allowed origins",
+  "settings.schema.swarm.cors.allowed_origins.desc":
+    "Exact origins, for example http://localhost:12345, or * for any.",
+  "settings.schema.swarm.tls.label": "TLS",
+  "settings.schema.swarm.tls.desc":
+    "Certificate and key the relay serves HTTPS with. Both or neither.",
+  "settings.schema.swarm.tls.cert_file.label": "Certificate file",
+  "settings.schema.swarm.tls.cert_file.desc": "PEM certificate chain.",
+  "settings.schema.swarm.tls.key_file.label": "Key file",
+  "settings.schema.swarm.tls.key_file.desc": "PEM private key.",
+  "settings.schema.swarm.lease_ttl_seconds.label": "Lease TTL (seconds)",
+  "settings.schema.swarm.lease_ttl_seconds.desc":
+    "How long a registration lasts without a refresh; nodes refresh at a third of it.",
+  "settings.schema.swarm.fanout_timeout_seconds.label":
+    "Fan-out timeout (seconds)",
+  "settings.schema.swarm.fanout_timeout_seconds.desc":
+    "How long the aggregated session list and the topology wait for a node.",
+  "settings.schema.swarm.upstreams.label": "Upstreams",
+  "settings.schema.swarm.upstreams.desc":
+    "Nodes this relay dials itself, pinned on the map whether or not they check in.",
+  "settings.schema.swarm.upstreams.name.label": "Name",
+  "settings.schema.swarm.upstreams.name.desc":
+    "Name the node is mounted under: /swarm/nodes/<name>.",
+  "settings.schema.swarm.upstreams.url.label": "URL",
+  "settings.schema.swarm.upstreams.url.desc":
+    "Address the relay dials the node at.",
+  "settings.schema.swarm.upstreams.kind.label": "Kind",
+  "settings.schema.swarm.upstreams.kind.desc":
+    "agent, or relay for a relay chained under this one.",
+  "settings.schema.swarm.upstreams.token.label": "Token",
+  "settings.schema.swarm.upstreams.token.desc":
+    "The node's own bearer token, which the relay presents when it proxies.",
+  "settings.schema.swarm.upstreams.dial.label": "Dialling",
+  "settings.schema.swarm.upstreams.dial.desc":
+    "How the relay reaches the node: an outbound proxy and the certificate check.",
+  "settings.schema.swarm.upstreams.dial.proxy.label": "Proxy",
+  "settings.schema.swarm.upstreams.dial.proxy.desc":
+    "http, https, socks5 or socks5h proxy URL. It may carry a password, so it is not shown.",
+  "settings.schema.swarm.upstreams.dial.ca_file.label": "CA file",
+  "settings.schema.swarm.upstreams.dial.ca_file.desc":
+    "PEM bundle trusted for the node's certificate, besides the system roots.",
+  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.label":
+    "Skip certificate check",
+  "settings.schema.swarm.upstreams.dial.insecure_skip_verify.desc":
+    "For a lab only: every connection is logged as insecure.",
+  "settings.schema.swarm.join.label": "Joins",
+  "settings.schema.swarm.join.desc":
+    "Parent relays this relay registers into, which is how relays chain.",
+  "settings.schema.swarm.join.url.label": "Relay URL",
+  "settings.schema.swarm.join.url.desc":
+    "Parent relay this relay registers into.",
+  "settings.schema.swarm.join.name.label": "Name",
+  "settings.schema.swarm.join.name.desc":
+    "Name this relay registers under; empty takes the host name.",
+  "settings.schema.swarm.join.pairing_token.label": "Pairing token",
+  "settings.schema.swarm.join.pairing_token.desc":
+    "The parent's pairing token.",
+  "settings.schema.swarm.join.advertise_url.label": "Advertise URL",
+  "settings.schema.swarm.join.advertise_url.desc":
+    "Address the parent dials this relay at. Empty dials out: the parent drives this relay back down a tunnel.",
+  "settings.schema.swarm.join.token.label": "Token",
+  "settings.schema.swarm.join.token.desc":
+    "This relay's own client token, which the parent presents when it proxies.",
+  "settings.schema.swarm.join.dial.label": "Dialling",
+  "settings.schema.swarm.join.dial.desc":
+    "How this relay reaches the parent: an outbound proxy and the certificate check.",
+  "settings.schema.swarm.join.dial.proxy.label": "Proxy",
+  "settings.schema.swarm.join.dial.proxy.desc":
+    "http, https, socks5 or socks5h proxy URL. It may carry a password, so it is not shown.",
+  "settings.schema.swarm.join.dial.ca_file.label": "CA file",
+  "settings.schema.swarm.join.dial.ca_file.desc":
+    "PEM bundle trusted for the parent's certificate, besides the system roots.",
+  "settings.schema.swarm.join.dial.insecure_skip_verify.label":
+    "Skip certificate check",
+  "settings.schema.swarm.join.dial.insecure_skip_verify.desc":
+    "For a lab only: every connection is logged as insecure.",
+  "settings.schema.swarm.allow_private_upstreams.label":
+    "Private upstream hosts",
+  "settings.schema.swarm.allow_private_upstreams.desc":
+    "Host names allowed to resolve into private ranges when a node advertises a URL.",
+  "settings.schema.swarm.allow_insecure.label": "Allow without a client token",
+  "settings.schema.swarm.allow_insecure.desc":
+    "Let a relay bound off loopback run without a client token. For a lab only.",
+  "settings.schema.swarm.insecure_open_registration.label": "Open registration",
+  "settings.schema.swarm.insecure_open_registration.desc":
+    "Let any node join without a pairing token. For a lab only.",
   "settings.section.logger.label": "Logger",
   "settings.section.logger.desc": "Level, outputs, rotation",
   "settings.section.gateways.label": "Gateways",
@@ -258,7 +375,7 @@ export const messagesEn: Record<string, string> = {
     "The model's context window: what the composer context ring and automatic compaction measure against. 0 reads it from the provider's model listing when it reports one, else 128000.",
   "settings.schema.models.multimodal.label": "Multimodal",
   "settings.schema.models.multimodal.desc":
-    "When true, the model accepts image or file inputs in addition to text. The UI will offer file attachment for messages sent with this model.",
+    "When true, the model accepts image or file inputs in addition to text. The UI will offer file attachment for messages sent with this model, and read shows it the picture in a PNG, JPEG, GIF or WebP file.",
   "settings.schema.models.reasoning_levels.label": "Reasoning levels",
   "settings.schema.models.reasoning_levels.desc":
     "Optional override of the reasoning levels offered for this model (e.g. low, medium, high). Leave empty to auto-detect from the model id; an explicit empty list hides the reasoning selector.",
@@ -279,7 +396,7 @@ export const messagesEn: Record<string, string> = {
     "What Enter does with a message written while a turn runs: steer joins the running turn at its next step, after_turn starts a prompt of its own after the answer. Tab sends the other way. Unset, the browser and the console ask on the first such message.",
   "settings.schema.agent.max_turns.label": "Max turns",
   "settings.schema.agent.max_turns.desc":
-    "Cap on ReAct iterations (LLM calls plus tool rounds) for one user request; 0 means no limit.",
+    "Cap on ReAct iterations (LLM calls plus tool rounds) for one user request. The default is 165; 0 disables the cap.",
   "settings.schema.agent.llm_retry_max.label": "LLM retry max",
   "settings.schema.agent.llm_retry_max.desc":
     "Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits.",
@@ -303,7 +420,7 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.agent.loop_tool_repeat_limit.label":
     "Loop tool repeat limit",
   "settings.schema.agent.loop_tool_repeat_limit.desc":
-    "Consecutive identical tool calls before the loop guard steps in (0 disables the check).",
+    "Consecutive identical tool calls in successive ReAct responses before the loop guard steps in (0 disables the check).",
   "settings.schema.agent.loop_stream_repeat_cycles.label":
     "Loop stream repeat cycles",
   "settings.schema.agent.loop_stream_repeat_cycles.desc":
@@ -393,10 +510,10 @@ export const messagesEn: Record<string, string> = {
     "Register the spawn_agent tool and list the subagent catalog in the system prompt (default true).",
   "settings.schema.subagents.dirs.label": "Definition directories",
   "settings.schema.subagents.dirs.desc":
-    "Lowest priority first; later entries override earlier ones by name. ${CODDY_HOME} and ${CWD} expand. Directories inside the workspace are project scope and follow the trust policy.",
+    "Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy.",
   "settings.schema.subagents.project_trust.label": "Project definitions",
   "settings.schema.subagents.project_trust.desc":
-    'Definitions found inside the workspace travel with the checkout. "ask": load them but refuse to spawn one until it is approved for this workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust). "allow": treat them like your own files. "deny": never read them.',
+    'Definitions found inside the workspace travel with the checkout. "ask": load them but refuse to spawn one until it is approved for this workspace (the shield of its row in Definitions, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust). "allow": treat them like your own files. "deny": never read them.',
   "settings.schema.subagents.max_concurrent.label": "Max concurrent",
   "settings.schema.subagents.max_concurrent.desc":
     "How many subagent runs the whole process may have in flight at once (default 4). Extra spawns are refused, not queued.",
@@ -434,7 +551,10 @@ export const messagesEn: Record<string, string> = {
 
   "settings.schema.skills.dirs.label": "Skill directories",
   "settings.schema.skills.dirs.desc":
-    "Search paths for skills. Defaults: ~/.agents/skills (global, shared with npx skills / npx skillsbd), ${CODDY_HOME}/skills (coddy-specific), ${CWD}/.coddy/skills (project-local). ${CODDY_HOME} and ${CWD} expand at runtime.",
+    "Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included).",
+  "settings.schema.skills.project_trust.label": "Project marketplaces",
+  "settings.schema.skills.project_trust.desc":
+    'The project\'s .coddy/marketplaces.json travels with the checkout. "ask": leave its sources and marketplaces out of every sync until each entry is approved for this workspace (the shield in the list below, or coddy plugin marketplace trust). "allow": treat them like your own ~/.coddy/marketplaces.json. "deny": never use them; they are listed as switched off. What they install goes to ~/.coddy/skills; the project\'s skill folders are not affected.',
   "settings.schema.skills.auto_discovery.desc":
     "Let the agent load a matching skill's full instructions on its own (model-driven load_skill tool), instead of only when you type /name. Defaults to on.",
 
@@ -485,6 +605,9 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.compaction.enable.label": "Enabled",
   "settings.schema.compaction.enable.desc":
     "Master switch for compaction (manual command and automatic trigger). Defaults to true.",
+  "settings.schema.compaction.auto_enable.label": "Automatic compaction",
+  "settings.schema.compaction.auto_enable.desc":
+    "Enable the threshold trigger while keeping manual compaction available when off. Defaults to true.",
   "settings.schema.compaction.threshold_percent.label": "Auto threshold (%)",
   "settings.schema.compaction.threshold_percent.desc":
     "Auto-compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000.",
@@ -543,7 +666,7 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.system.instructions.label": "Instructions",
   "settings.schema.system.instructions.files.label": "Instruction files",
   "settings.schema.system.instructions.files.desc":
-    'Filenames relative to session CWD to read as instructions. Defaults to ["AGENTS.md"].',
+    "Extra files added to the prompt after the AGENTS.md and DESIGN.md documents, which are always read (the agent home's, the session folder's, the nested ones). Empty by default; a relative path is read from the session folder, and a file already in the prompt is not read twice.",
   "settings.schema.logger.label": "Logger",
   "settings.schema.logger.level.label": "Level",
   "settings.schema.logger.level.desc":
@@ -692,7 +815,10 @@ export const messagesEn: Record<string, string> = {
   "mcp.error.delete": "Failed to delete {name}",
   "mcp.error.invalidEntry": "Invalid entry.",
   "mcp.error.saveServer": "Failed to save server",
+  "mcp.error.saveChanged":
+    "The entry changed in its file since this editor opened. Cancel and open it again to see what it holds now.",
   "mcp.error.load": "Could not load the MCP servers: {message}",
+  "mcp.error.request": "MCP request failed: {message}",
   "mcp.discovery.legend": "MCP discovery",
   "mcp.discovery.projectServersLabel": "Project servers",
   "mcp.servers.legend": "MCP servers",
@@ -714,11 +840,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.switch.disableAria": "Disable MCP server {name}",
   "mcp.switch.enableAria": "Enable MCP server {name}",
   "mcp.edit.title": "Edit entry ({origin})",
-  "mcp.edit.readonlyTitle":
-    "Defined in config.yaml — edit it in the config sections",
   "mcp.edit.aria": "Edit {name}",
   "mcp.delete.title": "Delete from {origin}",
-  "mcp.delete.readonlyTitle": "Defined in config.yaml — cannot delete here",
   "mcp.delete.aria": "Delete {name}",
   "mcp.note.denied":
     "Project MCP servers are switched off by mcp.project_trust: deny. This entry is never started.",
@@ -737,11 +860,11 @@ export const messagesEn: Record<string, string> = {
   "mcp.editor.save": "Save",
   "mcp.editor.cancel": "Cancel",
   "mcp.discovery.description":
-    "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from config.yaml and ~/.coddy/mcp.json are yours and are never gated.",
+    "The project-local ./.coddy/mcp.json arrives with the checkout, so the repository — not you — picks the command a session would start. On Ask its servers are neither started nor contacted until you approve that exact declaration for this workspace (shield button in the list below); rewriting an approved entry asks again. Servers you add here are approved by the act of writing them. Entries from ~/.coddy/mcp.json are yours and are never gated.",
   "mcp.servers.description":
-    "Model Context Protocol servers from three levels: config.yaml (mcp_servers) and the global ~/.coddy/mcp.json, merged with the local ./.coddy/mcp.json of the project (Cursor-compatible; later levels override by name). Switch off a whole server or individual tools. A global server's switch is saved in the file that defines it, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn.",
+    "Model Context Protocol servers come from two files: the global ~/.coddy/mcp.json and the project's ./.coddy/mcp.json, which overrides a server of the same name (Cursor-compatible). Switch off a whole server or individual tools. A global server's switch is saved in ~/.coddy/mcp.json, a project server's in ~/.coddy/mcp-overrides.json, so the checkout stays as it is. A server switch reaches running sessions at once, a tool switch on their next turn, and an edit of ~/.coddy/mcp.json made outside this screen within a few seconds.",
   "mcp.empty":
-    "No MCP servers configured. Add one here (saved to the local ./.coddy/mcp.json or the global ~/.coddy/mcp.json) or declare it under mcp_servers in config.yaml.",
+    "No MCP servers configured. Add one here: it is saved to the project's ./.coddy/mcp.json or the global ~/.coddy/mcp.json.",
   "mcp.note.declaredBy":
     "Declared by {path}, which travels with the checkout, so it is neither started nor contacted yet. Approving covers exactly this declaration:",
   "mcp.note.namesOnly":
@@ -749,6 +872,8 @@ export const messagesEn: Record<string, string> = {
   "mcp.note.workspaceFallback": "the session workspace",
   "mcp.editor.formatDescription":
     "One mcpServers entry in Cursor format: command/args/env (object), optional disabled and disabledTools. Saved to {path}.",
+  "mcp.editor.valuesHint":
+    "Env and header values are never shown. {placeholder} keeps the saved value, a new value replaces it, and a key you remove is deleted from the entry.",
 
   "mcp.trustOption.ask": "Ask — approve each project server once",
   "mcp.trustOption.allow": "Allow — start project servers automatically",
@@ -758,7 +883,7 @@ export const messagesEn: Record<string, string> = {
   "mcp.fact.contacts": "contacts",
   "mcp.fact.env": "env",
   "mcp.fact.headers": "headers",
-  "mcp.origin.config": "config.yaml",
+  "mcp.fact.reads": "reads",
   "mcp.origin.home": "~/.coddy/mcp.json",
   "mcp.origin.project": "./.coddy/mcp.json",
   // Settings -> Subagents: the definition catalog
@@ -767,7 +892,7 @@ export const messagesEn: Record<string, string> = {
     "The rules of the delegation pool: whether definitions that came with the checkout may run, how many runs go at once, how deep spawning nests, and how much time and how many rounds one run gets when its definition and the call leave them out.",
   "subagents.catalog.legend": "Definitions",
   "subagents.catalog.description":
-    'Every definition a session in this workspace can spawn: the built-ins, your own files under ~/.coddy/agents, and the .coddy/agents and .claude/agents files that came with the checkout. Under "ask" a project file runs only once it is approved for this workspace, from a terminal on the machine running coddy: coddy agents trust <name>.',
+    "Every definition a session in this workspace can spawn: the built-ins, your own files under ~/.agents/agents and ~/.coddy/agents, and the .agents/agents and .coddy/agents files that came with the checkout. Under \"ask\" a project file runs only once it is approved for this workspace: with its shield here, or with coddy agents trust <name> on the machine running coddy. Rewriting an approved file asks again.",
   "subagents.catalog.loading": "Loading definitions…",
   "subagents.catalog.empty":
     "No subagent definitions are visible from this workspace.",
@@ -781,7 +906,13 @@ export const messagesEn: Record<string, string> = {
   "subagents.badge.hidden": "hidden",
   "subagents.badge.needsApproval": "needs approval",
   "subagents.badge.needsApprovalTitle":
-    "Spawning it is refused until it is approved for this workspace: coddy agents trust {name}",
+    "Spawning it is refused until it is approved for this workspace: the shield, or coddy agents trust {name}",
+  "subagents.trust.approveTitle": "Approve spawning {name} in this workspace",
+  "subagents.trust.approvedTitle":
+    "Approved for this workspace, click to withdraw",
+  "subagents.trust.approveAria": "Approve subagent {name}",
+  "subagents.trust.withdrawAria": "Withdraw the approval of subagent {name}",
+  "subagents.error.trust": "Could not change the approval of {name}.",
   "subagents.fact.file": "file",
   "subagents.fact.model": "model",
   "subagents.fact.modelInherits": "the parent's model",
@@ -799,6 +930,7 @@ export const messagesEn: Record<string, string> = {
   "subagents.fact.inherits": "inherited",
   "subagents.fact.background": "runs detached",
   "subagents.fact.backgroundAlways": "always, without waiting",
+  "subagents.fact.spawns": "may spawn",
   "subagents.fact.role": "instructions",
   "mcp.validation.nameRequired": "Server name is required.",
   "mcp.validation.noDoubleUnderscore": 'Server name must not contain "__".',
@@ -839,20 +971,51 @@ export const messagesEn: Record<string, string> = {
   "skills.error.install": "Failed to install {name}",
   "skills.status.updated": "Updated {name}.",
   "skills.status.installed": "Installed {name}.",
-  "skills.sources.legend": "Remote skill sources",
+  "skills.trust.legend": "Marketplace discovery",
+  "skills.trust.description":
+    "The project's .coddy/marketplaces.json arrives with the checkout, so the repository - not you - picks what a sync installs into ~/.coddy/skills. On ask its entries are neither synced nor offered until you approve each one for this workspace (the shield in the list below); rewriting an approved entry asks again. Entries you add to the project here are approved as you write them, and ~/.coddy/marketplaces.json is yours and never gated. Saved with the rest of the settings.",
+  "skills.sources.legend": "Marketplaces",
   "skills.sources.add": "Add",
+  "skills.sources.addAria": "Source to add",
+  "skills.sources.scopeAria": "Where to declare it",
+  "skills.sources.scope.global": "Yours (~/.coddy)",
+  "skills.sources.scope.local": "This project",
   "skills.sources.syncAll": "Sync all",
-  "skills.sources.syncAllTitle": "Fetch every configured marketplace",
+  "skills.sources.syncAllTitle": "Fetch every source and marketplace in effect",
   "skills.sources.completed": "Completed",
   "skills.sources.syncedTitle": "Synced",
   "skills.sources.syncTitle": "Sync {source}",
+  "skills.sources.heldSyncTitle": "Approve it for this workspace first",
+  "skills.sources.deniedSyncTitle":
+    "Project marketplaces are switched off by skills.project_trust: deny",
+  "skills.sources.scope.noSessionTitle":
+    "Send the first message of a chat in the project to declare a marketplace for it; until then this adds to yours",
   "skills.sources.syncAria": "Sync this marketplace",
-  "skills.sources.removeTitle": "Remove",
+  "skills.sources.removeTitle": "Remove from {path}",
   "skills.sources.systemTitle":
-    "Built into Coddy: in effect without being in config.yaml, and not removable",
+    "Built into Coddy: always in effect, always trusted, not removable",
   "skills.sources.removeAria": "Remove marketplace",
+  "skills.sources.kind.source": "all plugins",
+  "skills.sources.kind.marketplace": "catalog",
+  "skills.sources.origin.system": "built in",
+  "skills.sources.origin.home": "yours",
+  "skills.sources.origin.project": "from the project",
+  "skills.sources.trust.systemAria": "{source} is built into Coddy and always trusted",
+  "skills.sources.trust.approveTitle": "Approve syncing {source} in this workspace",
+  "skills.sources.trust.approvedTitle":
+    "Approved for this workspace, click to withdraw",
+  "skills.sources.trust.approveAria": "Approve {source} for this workspace",
+  "skills.sources.trust.withdrawAria": "Withdraw the approval of {source}",
+  "skills.sources.note.held":
+    "Declared by {path}, which travels with the checkout, so it is not synced until you approve it for this workspace with the shield.",
+  "skills.sources.note.denied":
+    "Project marketplaces are switched off by skills.project_trust: deny.",
+  "skills.sources.error.load": "Could not load the marketplaces.",
+  "skills.sources.error.add": "Could not add {source}.",
+  "skills.sources.error.remove": "Could not remove {source}.",
+  "skills.sources.error.trust": "Could not change the approval of {source}.",
   "skills.sources.description":
-    "GitHub repos (owner/repo[@ref]), git URLs, or an agents-standard marketplace.json URL. Saved to skills.sources; fetched only when you sync. The greyed-out rows are built into Coddy and cannot be removed.",
+    "Where remote skills come from. A source installs every plugin it publishes and keeps them in sync; a catalog (coddy plugin marketplace add) installs its plugins one by one. Yours are kept in ~/.coddy/marketplaces.json, the project's in its .coddy/marketplaces.json, which travels with the checkout: under \"ask\" a project entry is synced only once you approve it with the shield. Everything installs into ~/.coddy/skills, and nothing is fetched until you sync. The built-in rpa-skills marketplace is always in effect and always trusted.",
   "skills.sources.placeholder": "owner/repo  ·  https://…/marketplace.json",
   "skills.install.cliHint":
     "You can also install skills via npx skills or npx skillsbd - they land in ~/.agents/skills/ and are picked up automatically.",
@@ -881,6 +1044,10 @@ export const messagesEn: Record<string, string> = {
   "nav.wideSidebarTooltip": "Wide sidebar",
   "nav.history": "History",
   "nav.scheduler": "Scheduler",
+  "nav.activeSessions.one": "{count} active session",
+  "nav.activeSessions.other": "{count} active sessions",
+  "nav.activeRuns.one": "{count} active run",
+  "nav.activeRuns.other": "{count} active runs",
   "nav.swarm": "Swarm",
   "nav.docs": "Docs",
   "nav.schedulerAriaLabel": "Scheduler jobs",
@@ -898,6 +1065,8 @@ export const messagesEn: Record<string, string> = {
   "sessions.turnRunning": "Turn running",
   "sessions.backgroundRunning": "Background tasks running",
   "sessions.unreadCompletion": "Unread completion",
+  "sessions.stateFinished": "Finished",
+  "sessions.stateError": "Last turn ended with an error",
   "sessions.newChatFallback": "New chat",
   "sessions.deleteConversation": "Delete conversation",
   "sessions.delete": "Delete",
@@ -1013,10 +1182,9 @@ export const messagesEn: Record<string, string> = {
   "chat.archived.notice":
     "This conversation is archived. Take it out of the archive to keep working in it.",
   "chat.archived.unarchive": "Unarchive",
-  "chat.subagentReadOnly.notice":
-    "Read-only transcript of subagent {name}. Prompts go to the parent chat.",
-  "chat.subagentReadOnly.noticeUnnamed":
-    "Read-only subagent transcript. Prompts go to the parent chat.",
+  "chat.subagentReadOnly.notice": "Read-only transcript of subagent {name}.",
+  "chat.subagentReadOnly.noticeUnnamed": "Read-only subagent transcript.",
+  "chat.subagentReadOnly.model": "Effective model: {model}",
   "chat.subagentReadOnly.openParent": "Open parent chat",
   "chat.subagentTitle": "Subagent {name}",
   "chat.subagentTitleUnnamed": "Subagent transcript",
@@ -1050,6 +1218,11 @@ export const messagesEn: Record<string, string> = {
   "chat.transcriptEarlier.failed": "Earlier messages did not load.",
   "chat.transcriptEarlier.retry": "Retry",
   "chat.contextTitle": "Context",
+  "chat.contextCompactAt": "Compact at {percent}%",
+  "chat.contextCompactNow": "Compact now",
+  "chat.contextCompacting": "Compacting…",
+  "chat.contextCompactError": "Could not compact context",
+  "chat.contextCompactNothing": "Nothing to compact yet",
   "chat.contextClose": "Close",
   "chat.contextCloseBreakdown": "Close context breakdown",
   "chat.contextEmpty": "No context usage yet",
@@ -1214,17 +1387,30 @@ export const messagesEn: Record<string, string> = {
   "composer.env.localThisOrigin": "Local (this origin)",
   "composer.env.groupEnvironment": "Environment",
   "composer.env.groupRemote": "Remote",
-  "composer.env.addFormTitle": "Add a remote",
-  "composer.env.addRemote": "+ Add remote…",
+  "composer.env.addFormTitle": "Connect to a server",
+  "composer.env.addRemote": "Connect to…",
   "composer.env.namePlaceholder": "name",
   "composer.env.tokenPlaceholder": "bearer token (empty if none)",
   "composer.env.connect": "Connect",
   "composer.env.cancel": "Cancel",
+  "composer.env.enterToken": "Enter token",
+  "composer.env.hint.down": "Does not answer.",
+  "composer.env.hint.agentToken":
+    "Refuses the token. It takes the token of its httpserver.auth_token.",
+  "composer.env.hint.relayToken":
+    "The relay refuses the token. It takes its client token, swarm.auth_token.",
+  "composer.env.hint.configToken":
+    "The token of this entry in httpserver.remotes is refused.",
+  "composer.env.hint.cors":
+    "Blocked by CORS. Allow {origin} in swarm.cors.allowed_origins (relay) or httpserver.cors.allowed_origins (coddy serve).",
+  "composer.env.relay": "relay",
+  "composer.env.nodeOffline": "offline",
   "composer.folderModal.title": "Open folder",
   "composer.folderModal.close": "Close folder browser",
   "composer.folderModal.pathLabel": "Folder path",
   "composer.folderModal.pathPlaceholder": "Path",
   "composer.folderModal.drivesPlaceholder": "This PC",
+  "composer.folderModal.showHidden": "Show hidden",
   "composer.folderModal.noSubfolders": "No subfolders",
   "composer.folderModal.noDrives": "No drives",
   "composer.folderModal.cannotList": "Cannot list {path}",
@@ -1238,8 +1424,16 @@ export const messagesEn: Record<string, string> = {
   "composer.folderModal.open": "Open",
   "composer.folderModal.go": "Go",
 
-  "env.banner.unreachable":
-    "Remote {name} is unreachable or unauthorized — check that it is running, that {cors} allows this origin, and that the token is correct.",
+  "env.banner.down":
+    "{name} does not answer. Check that it is running and that its address is right.",
+  "env.banner.unauthorizedAgent":
+    "{name} refuses the token. Enter the token its {agentToken} names for this environment.",
+  "env.banner.unauthorizedRelay":
+    "The relay {name} refuses the token. It takes its client token, {relayToken}.",
+  "env.banner.corsRelay":
+    "{name} answers, but the browser keeps the answer from this page. Add {origin} to {relayCors} on the relay.",
+  "env.banner.corsEither":
+    "{name} answers, but the browser keeps the answer from this page. Add {origin} to {relayCors} if it is a relay, or to {agentCors} if it is a coddy serve.",
   "env.banner.switchLocal": "Switch to Local",
 
   "prompts.questions": "Questions",
@@ -1382,6 +1576,8 @@ export const messagesEn: Record<string, string> = {
   "messages.editMessage": "Edit message",
   "messages.attachedFiles": "Attached files",
   "messages.openAttachmentImage": "Open {fileName} enlarged",
+  "messages.toolImages": "Pictures the call showed the model",
+  "messages.openToolImage": "Open {fileName} enlarged",
   "messages.systemLabel": "System",
   "messages.refresh": "Refresh",
   "messages.retryLastMessage": "Retry the last message",
@@ -1411,6 +1607,7 @@ export const messagesEn: Record<string, string> = {
   "tool.name.list_dir": "browsing a directory",
   "tool.name.mkdir": "creating a directory",
   "tool.name.touch": "creating a file",
+  "tool.name.worktree_create": "creating a worktree",
   "tool.name.mv": "moving a path",
   "tool.name.rm": "removing a path",
   "tool.name.rmdir": "removing a directory",
@@ -1571,6 +1768,7 @@ export const messagesEn: Record<string, string> = {
   "messages.spawnAgentDetails": "Agent details",
   "messages.spawnAgentPrompt": "Agent prompt",
   "messages.spawnAgentTimeout": "Timeout {seconds}s",
+  "messages.spawnAgentReasoning": "Reasoning: {reasoning}",
   "messages.spawnAgentTimeoutHint": "Maximum agent execution time",
   "messages.toolDetailsAriaLabel": "Tool call details",
   "messages.toolResultAriaLabel": "Tool result",
@@ -1602,8 +1800,6 @@ export const messagesEn: Record<string, string> = {
   "messages.toolQuestionOwnAnswer": "an answer of their own",
   "messages.toolQuestionMirrorHint":
     "Answer using the Questions card in this chat. This row only mirrors the tool state.",
-  "messages.toolBgTaskOpen": "Open in Tasks",
-  "messages.toolBgTaskStop": "Stop",
   "messages.fileType.image": "Image",
   "messages.fileType.video": "Video",
   "messages.fileType.audio": "Audio",
@@ -1625,6 +1821,10 @@ export const messagesEn: Record<string, string> = {
   "workspace.worktreeInactiveTitle":
     "Open branch switches in a dedicated worktree",
   "workspace.recent": "Recent",
+  "workspace.filterRecent": "Filter recent folders",
+  "workspace.filterBranches": "Filter branches",
+  "workspace.noRecentMatch": "No recent folders match",
+  "workspace.noBranchesMatch": "No branches match",
   "workspace.openFolder": "Open folder…",
   "workspace.noBranches": "No branches",
 
@@ -1710,6 +1910,7 @@ export const messagesEn: Record<string, string> = {
   "docs.ask.selectionTitle":
     "Start a chat with the selected text quoted and its section attached",
   "swarm.title": "Swarm",
+  "swarm.close": "Close the swarm map",
   "swarm.summary.relays.one": "{count} relay",
   "swarm.summary.relays.other": "{count} relays",
   "swarm.summary.agents.one": "{count} agent",
@@ -1723,6 +1924,15 @@ export const messagesEn: Record<string, string> = {
   "swarm.graph.legend": "What the lines mean",
   "swarm.graph.tierNodes": "{tier}: {names}.",
   "swarm.graph.enter": "Open {node} through this relay",
+  "swarm.graph.enterRelay": "Connect to the relay {node}",
+  "swarm.graph.enterClient": "Open the local machine",
+  "swarm.layout.label": "Graph layout",
+  "swarm.layout.tree": "Tree layout",
+  "swarm.layout.graph": "Graph layout",
+  "swarm.viewport.zoomIn": "Zoom in",
+  "swarm.viewport.zoomOut": "Zoom out",
+  "swarm.viewport.fit": "Fit graph",
+  "swarm.tier.client": "this machine",
   "swarm.graph.hereIs": "You are working on {node}, reached through {route}.",
   "swarm.graph.busy": "Work is running on {names}.",
   "swarm.graph.waitingOn": "Waiting for an answer on {names}.",
@@ -1745,14 +1955,16 @@ export const messagesEn: Record<string, string> = {
   "swarm.state.offline": "offline",
   "swarm.state.noRoute": "no route",
   "swarm.search.placeholder": "Search by task, folder, node or address",
-  "swarm.results.label": "Sessions matching the search",
+  "swarm.results.label": "Search results",
+  "swarm.results.nodes": "Nodes",
+  "swarm.results.sessions": "Sessions",
   "swarm.empty.noSwarm": "No swarm here.",
   "swarm.empty.looking": "Looking…",
-  "swarm.empty.noMatches": "No sessions match.",
+  "swarm.empty.noMatches": "Nothing matches the search.",
   "swarm.empty.noNodes": "No nodes have joined yet.",
   "swarm.error.notRelay": "This environment is not a swarm relay.",
   "swarm.error.needsToken":
-    "This relay needs a token. Add it with Connect in the environment menu.",
+    "This relay needs a token. Enter it with Connect to… in the environment menu.",
   "swarm.session.working": "working",
   "swarm.session.waiting": "waiting",
 
@@ -1807,4 +2019,17 @@ export const messagesEn: Record<string, string> = {
   "status.waitingStuck": "Still no response from the server",
   "status.turnTokens.one": "{shown} token",
   "status.turnTokens.other": "{shown} tokens",
+  "messages.toolArtifacts": "Shared files",
+  "messages.downloadArtifact": "Download {fileName}",
+  "messages.downloadArtifactButton": "Download",
+  "messages.artifactDownloading": "Downloading…",
+  "messages.artifactUnavailable": "Download unavailable",
+  "messages.openArtifactImage": "Open {fileName}",
+  "messages.artifactActions": "Actions for {fileName}",
+  "messages.artifactMention": "Mention source",
+  "messages.artifactCopyName": "Copy name",
+  "messages.artifactCopyRelative": "Copy relative path",
+  "messages.artifactCopyAbsolute": "Copy absolute path",
+  "messages.artifactReveal": "Reveal on server",
+  "messages.artifactRevealUnavailable": "Reveal is unavailable for this remote or headless server",
 };

@@ -38,6 +38,9 @@ type CatalogEntry struct {
 	TimeoutSeconds  int      `json:"timeout_seconds,omitempty"`
 	MaxTurns        int      `json:"max_turns,omitempty"`
 	Background      bool     `json:"background,omitempty"`
+	// Spawns is the spawn allowlist the definition declared. A project
+	// definition's declaration is shown but the runtime ignores it.
+	Spawns []string `json:"spawns,omitempty"`
 	// RoleBytes is the size of the role body, never the body itself: an
 	// unapproved file's instructions must not travel to a client that is
 	// about to render them.
@@ -76,6 +79,7 @@ func BuildCatalog(defs []*Definition, policy, workspace string, store *TrustStor
 			TimeoutSeconds:  d.TimeoutSeconds,
 			MaxTurns:        d.MaxTurns,
 			Background:      d.Background,
+			Spawns:          cloneStrings(d.Spawns),
 			RoleBytes:       len(d.Role),
 		})
 	}
@@ -144,6 +148,9 @@ func WriteListing(w io.Writer, entries []CatalogEntry) {
 		}
 		if e.Mode != "" {
 			flags = append(flags, "mode="+e.Mode)
+		}
+		if len(e.Spawns) > 0 {
+			flags = append(flags, "spawns="+strings.Join(e.Spawns, ","))
 		}
 		path := e.Path
 		if e.Builtin {

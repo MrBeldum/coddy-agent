@@ -140,7 +140,10 @@ func TestAnthropicReplaysSignedThinkingBlockBeforeToolUse(t *testing.T) {
 			ToolCalls:          []ToolCall{{ID: "t1", Name: "read", InputJSON: "{}"}},
 		},
 	}
-	_, conv := p.splitMessages(msgs)
+	_, conv, err := p.splitMessages(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
 	b, err := json.Marshal(conv)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +171,10 @@ func TestAnthropicOmitsThinkingBlockWhenDisabled(t *testing.T) {
 	msgs := []Message{
 		{Role: RoleAssistant, Content: "hi", Reasoning: "x", ReasoningSignature: "sig", ToolCalls: []ToolCall{{ID: "t1", Name: "read", InputJSON: "{}"}}},
 	}
-	_, conv := p.splitMessages(msgs)
+	_, conv, err := p.splitMessages(msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
 	b, _ := json.Marshal(conv)
 	if strings.Contains(string(b), `"type":"thinking"`) {
 		t.Errorf("thinking block must be omitted when thinking disabled: %s", string(b))

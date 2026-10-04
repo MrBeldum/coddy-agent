@@ -30,6 +30,12 @@ type ImagePart struct {
 	// ThumbnailPath is the absolute path of the persisted, bounded PNG preview
 	// used by transcript clients. Providers never receive this file directly.
 	ThumbnailPath string `json:"thumbnail_path,omitempty"`
+	// MIMEType and Size describe the picture a part carries. A picture a tool
+	// call showed the model is kept as its file (FilePath) with no DataURL,
+	// and the agent builds the data URL from that file when a request goes
+	// out, so the history holds no second, base64 copy of it.
+	MIMEType string `json:"mime_type,omitempty"`
+	Size     int    `json:"size,omitempty"`
 }
 
 // Message is a single turn in a conversation.
@@ -40,7 +46,10 @@ type Message struct {
 	// supported for RoleUser; ignored on other roles and by providers that do
 	// not support vision.
 	ImageParts []ImagePart `json:"image_parts,omitempty"`
-	Reasoning  string      `json:"reasoning,omitempty"`
+	// Artifacts are downloadable session-owned files published by a completed
+	// share_file call. They are metadata only and never provider prompt content.
+	Artifacts []Artifact `json:"artifacts,omitempty"`
+	Reasoning string     `json:"reasoning,omitempty"`
 	// ReasoningSignature is the provider signature for the reasoning block (Anthropic extended
 	// thinking). It is replayed unmodified with the exact Reasoning text on later requests when
 	// thinking is enabled and the turn has tool calls; otherwise the Anthropic API rejects it.
@@ -71,6 +80,15 @@ type Message struct {
 	// finished notify_on_finish task started a turn with (excluded from what
 	// the provider is sent; the Content still is).
 	BackgroundWake *BackgroundWake `json:"background_wake,omitempty"`
+}
+
+type Artifact struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	SHA256             string `json:"sha256"`
+	Size               int64  `json:"size"`
+	SourcePath         string `json:"source_path,omitempty"`
+	SourceRelativePath string `json:"source_relative_path,omitempty"`
 }
 
 // PlanDocumentSnapshot is a persisted design plan row in the session transcript.

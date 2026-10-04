@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
-import { PHONE_MAX_WIDTH_PX } from "./shellBreakpoint";
+import { PHONE_MAX_WIDTH_PX, SHELL_STACK_MAX_WIDTH_PX } from "./shellBreakpoint";
 
 // jsdom does no layout, so the phone layout is pinned here by its rules; the
 // live check at 360-430px (docs/surfaces/web-ui.md, Phone layout) measures it.
@@ -217,4 +217,32 @@ test("Android resizes the layout for the on-screen keyboard, so the docked compo
   expect(meta).not.toBeNull();
   expect(meta![1]).toMatch(/width=device-width/);
   expect(meta![1]).toMatch(/interactive-widget=resizes-content/);
+});
+
+// The alert about an environment that does not answer is fixed at the top of
+// the page. On the stacked shell the rail is a top bar fixed there too, above
+// it, so the alert sat behind the bar and only its button showed (issue #401).
+describe("the environment banner on the stacked shell", () => {
+  const stacked = mediaBlocks(
+    new RegExp(`^@media\\s*\\(max-width:\\s*${SHELL_STACK_MAX_WIDTH_PX}px\\)\\s*$`),
+  );
+
+  test("hangs under the top bar rather than behind it", () => {
+    expectDecl(declarations(stacked, ".env-health-banner"), "top", /^var\(--coddy-mobile-bar-h\)$/);
+  });
+
+  test("moves everything the top inset places down by its own height", () => {
+    // On :root, so a dialog portalled into <body> (the folder browser) is
+    // placed by the same inset as the drawers inside .shell.
+    expectDecl(
+      declarations(stacked, ":root"),
+      "--coddy-mobile-top-inset",
+      /var\(--coddy-mobile-bar-h\)\s*\+\s*var\(--coddy-env-banner-h,\s*0px\)/,
+    );
+    expectDecl(
+      declarations(stacked, ":root"),
+      "--coddy-mobile-bar-h",
+      /^calc\(78px \+ env\(safe-area-inset-top, 0px\)\)$/,
+    );
+  });
 });

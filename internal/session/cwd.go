@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
 )
 
 // EffectiveSessionCWD resolves the filesystem working directory for a new session.
@@ -33,6 +35,18 @@ func EffectiveSessionCWD(clientCWD, defaultCWD string) (string, error) {
 // catalog follow the new cwd. The target must be an existing directory. A
 // switch to another spelling of the same workspace only stores the spelling.
 func (m *Manager) SetSessionWorkspace(ctx context.Context, st *State, dir string) error {
+	return m.setSessionWorkspace(ctx, st, dir, false)
+}
+
+// SetSessionWorkspaceDuringTurn moves a session whose prompt turn lock is
+// already held by the caller. Its configured MCP clients are refreshed under
+// that lock before the next model step, so old project servers are not offered
+// in the new workspace.
+func (m *Manager) SetSessionWorkspaceDuringTurn(ctx context.Context, st *State, dir string) error {
+	return m.setSessionWorkspace(ctx, st, dir, true)
+}
+
+func (m *Manager) setSessionWorkspace(ctx context.Context, st *State, dir string, turnOwned bool) error {
 	abs, err := ValidateWorkspaceDir(dir)
 	if err != nil {
 		return err
@@ -42,7 +56,7 @@ func (m *Manager) SetSessionWorkspace(ctx context.Context, st *State, dir string
 	if SameWorkspacePath(prevCWD, abs) {
 		return nil
 	}
-	m.reloadWorkspaceScopedState(ctx, st)
+	m.reloadWorkspaceScopedState(ctx, st, turnOwned)
 	return nil
 }
 
@@ -61,33 +75,66 @@ func ValidateWorkspaceDir(dir string) (string, error) {
 	return abs, nil
 }
 
+// RecoverManagedWorktreeCWD returns the repository root for a missing path
+// below a managed <repo>/.coddy/worktrees/<name> directory. It never recovers
+// arbitrary missing directories: the repository root must exist and be the
+// main checkout of a Git repository.
+func RecoverManagedWorktreeCWD(dir string) (string, bool) {
+	abs, err := filepath.Abs(strings.TrimSpace(dir))
+	if err != nil {
+		return "", false
+	}
+	abs = filepath.Clean(abs)
+	if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		return "", false
+	}
+
+	for child, parent := abs, filepath.Dir(abs); child != parent; child, parent = parent, filepath.Dir(parent) {
+		if filepath.Base(parent) != "worktrees" || filepath.Base(filepath.Dir(parent)) != ".coddy" {
+			continue
+		}
+		repo := filepath.Dir(filepath.Dir(parent))
+		info, err := os.Stat(repo)
+		if err != nil || !info.IsDir() {
+			return "", false
+		}
+		if CanonicalWorkspacePath(gitws.MainCheckoutRoot(repo)) != CanonicalWorkspacePath(repo) {
+			return "", false
+		}
+		return repo, true
+	}
+	return "", false
+}
+
 // ReloadSessionWorkspace re-derives workspace-scoped state (configured MCP
 // servers, skills, project rules, SessionStart hook context) after the
 // workspace's files changed under the same cwd - an in-place branch checkout.
 // The MCP re-dial is a fresh trust evaluation: a declaration the checkout
 // replaced is approved again or stays cold.
 func (m *Manager) ReloadSessionWorkspace(ctx context.Context, st *State) {
-	m.reloadWorkspaceScopedState(ctx, st)
+	m.reloadWorkspaceScopedState(ctx, st, false)
 }
 
 // reloadWorkspaceScopedState re-derives everything a session's workspace
-// decides. The MCP re-dial goes through the same pending + prompt-turn-lock
-// path a settings save uses, so it serializes against a turn in flight and a
-// config reload; a turn holding the lock drains the parked reload on release.
-func (m *Manager) reloadWorkspaceScopedState(ctx context.Context, st *State) {
+// decides. External switches acquire the turn lock or park the MCP reload;
+// a worktree_create call already owns that lock and refreshes its MCP clients
+// before the next model step.
+func (m *Manager) reloadWorkspaceScopedState(ctx context.Context, st *State, turnOwned bool) {
 	cwd := st.GetCWD()
 	cfg := m.activeCfg()
 
-	st.markMCPReloadPending()
-	if unlock, err := m.acquirePromptTurnLock(st.GetID(), st); err == nil {
-		applied := true
-		if st.takeMCPReloadPending() {
-			applied = m.applyConfiguredMCPReload(ctx, st)
+	if turnOwned {
+		dialCtx, cancel := context.WithTimeout(ctx, mcpReloadTimeout)
+		if !m.applyConfiguredMCPReload(dialCtx, st) {
+			m.dropStaleConfiguredMCPClients(st)
 		}
-		unlock()
-		if applied {
-			m.drainPendingMCPReload(st.GetID(), st)
-		}
+		cancel()
+	} else {
+		// A directory selection must make local skills available to the
+		// composer immediately, but it is not an agent turn and must not
+		// execute a workspace-provided MCP process. Reconcile configured MCP
+		// servers under the next turn lock instead, where trust is evaluated.
+		st.markMCPReloadPending()
 	}
 
 	loadedSkills, err := m.loadSkills(cwd, cfg)

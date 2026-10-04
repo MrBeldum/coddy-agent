@@ -16,10 +16,10 @@ Every field is optional unless marked **required**; an empty `config.yaml` (or n
 
 Agent sessions expose a typed configuration tool family with staged, uci-like semantics:
 
-- `config_get` reads a dotted path from the active YAML file. Secret-shaped fields (including `api_key_command` and any key ending in `_api_key`, such as `tools.websearch.brave_api_key`), MCP environment values, and HTTP header values are returned as `<redacted>`.
+- `config_get` reads a dotted path from the active YAML file. Secret-shaped fields (including `api_key_command` and any key ending in `_api_key`, such as `tools.websearch.brave_api_key`) and environment and header values (an `env` or `headers` entry, a `default_headers` value) are returned as `<redacted>`; the MCP server list of the HTTP API shows the values of both mcp.json files the same way.
 - `config_set` **stages** UCI-style commands (`set`, `add_list`, `del_list`, `delete`) without touching the file. Unknown schema paths and commands that would make the config invalid are rejected at staging time. Echoed command lists mask secret-shaped values as `<redacted>`; the staged store keeps the original values.
 - `config_changes` lists the staged commands that a commit would apply (secrets redacted).
-- `config_commit` applies the staged batch: validates, snapshots the previous file to `config.yaml.prev` (an empty document when the config file did not exist yet, so the first commit stays reversible), writes atomically, and hot-reloads skills, rules, built-in tools, and configured MCP servers. Because a commit can start MCP processes and change the permission policy itself, it prompts for tool permission in both `ask` and `accept_edits` modes - only `tools.permission_mode: bypass` skips the dialog - and the prompt lists the staged commands with secrets redacted. The agent is additionally instructed to ask the user to confirm saving first. If runtime reload fails, the file is restored and the staged commands are kept; if even that restore fails, the staged list stays consumed so a blind retry cannot replay it.
+- `config_commit` applies the staged batch: validates, snapshots the previous file to `config.yaml.prev` (an empty document when the config file did not exist yet, so the first commit stays reversible), writes atomically, and hot-reloads skills, rules, built-in tools, and the MCP trust policy. Because a commit can start MCP processes (a changed `mcp.project_trust`) and change the permission policy itself, it prompts for tool permission in both `ask` and `accept_edits` modes - only `tools.permission_mode: bypass` skips the dialog - and the prompt lists the staged commands with secrets redacted. The agent is additionally instructed to ask the user to confirm saving first. If runtime reload fails, the file is restored and the staged commands are kept; if even that restore fails, the staged list stays consumed so a blind retry cannot replay it.
 - `config_revert` discards staged commands (all of them, or those under one path).
 - `config_rollback` restores the pre-commit snapshot over the active file (swapping the two, so a second rollback undoes the first) and hot-reloads. It carries the same permission policy as `config_commit`, and the agent warns the user before calling it.
 
@@ -28,15 +28,15 @@ Commands and paths are dotted like OpenWrt's `uci` CLI, with a selector for name
 | Command | Meaning |
 |---|---|
 | `set agent.max_turns=40` | Set a mapping field |
-| `set mcp_servers[name=context7]={"command":"npx"}` | Select a sequence object by scalar field; append it when setting if absent |
+| `set providers[name=openrouter]={"type":"openai"}` | Select a sequence object by scalar field; append it when setting if absent |
 | `add_list skills.dirs=/opt/skills` | Append a sequence entry |
 | `del_list skills.dirs=/opt/skills` | Remove a matching sequence entry |
-| `delete mcp_servers[name=context7]` | Delete a field or entry |
+| `delete providers[name=openrouter]` | Delete a field or entry |
 | `skills.dirs.0` (path form) | Sequence index |
 
 The root path (`.` or `/`) is read-only. Values are JSON for objects and arrays; string-typed fields take the literal text. Staged commands persist in the session bundle, so they survive restarts and HTTP permission resumes.
 
-The bundled `/configure-coddy` skill teaches the agent this syntax, the confirm-then-commit workflow, and the safe discovery/install workflow for MCP servers and skills; it also carries the agent-facing catalog of configuration areas and must be updated together with this reference on any schema change. Process-level listener changes may still require restarting the relevant command; the hot reload is specifically guaranteed for the current session's agent configuration, skills, rules, built-in tools, and global MCP clients.
+The bundled `/configure-coddy` skill teaches the agent this syntax, the confirm-then-commit workflow, and the safe discovery/install workflow for MCP servers and skills; it also carries the agent-facing catalog of configuration areas and must be updated together with this reference on any schema change. Process-level listener changes may still require restarting the relevant command; the hot reload is specifically guaranteed for the current session's agent configuration, skills, rules, built-in tools, and the MCP trust policy. MCP servers are not part of this file (see [`mcp`](#mcp)).
 
 ## Field reference
 
@@ -45,16 +45,16 @@ Generated from `internal/config/config.schema.json` (the schema embedded into th
 <!-- docsgen:config:start -->
 ### `providers`
 
-API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores).
+API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores); a row of type "codex" signs in with ChatGPT and reads no key.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `providers` | list of objects |  | API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores). |
+| `providers` | list of objects |  | API credentials and transport selection for upstream LLM vendors. When api_key is empty, the runtime reads the NAME_API_KEY environment variable (NAME is the provider name in uppercase with hyphens mapped to underscores); a row of type "codex" signs in with ChatGPT and reads no key. |
 | `providers[].name` | string |  | Logical id used as the first segment of models[].model. ASCII letters, digits, hyphen, underscore; must start with a letter. |
 | `providers[].type` | string, one of `openai`, `anthropic`, `neuraldeep`, `codex`, `devin` |  | Wire protocol for this provider. Use "openai" for configurable OpenAI-compatible endpoints (OpenAI, DeepSeek, Groq, Ollama, llama.cpp, LM Studio), "anthropic" for Anthropic, "neuraldeep" for NeuralDeep's OpenAI-compatible API at one of its two official deployments (selected with api_base), "codex" for ChatGPT OAuth against the official Codex backend (Responses API), or "devin" for a Devin (Cognition) account signed in through the browser or the Devin CLI, served by the Devin API server; see https://coddy.dev/docs/features/devin. |
 | `providers[].api_base` | string |  | Optional base URL override. For type "openai" include /v1 (e.g. http://localhost:11434/v1); for type "anthropic" an Anthropic-compatible gateway (default https://api.anthropic.com). For type "neuraldeep" it selects the deployment: https://api.neuraldeep.ru/v1 (Russia, the default) or https://api.neuraldeep.tech/v1 (the international mirror); any other value falls back to the default. Ignored for types "codex" and "devin", which always use their official endpoints. |
-| `providers[].api_key` | string |  | Provider secret. A literal key, a "${ENV}" reference expanded at load time, or empty to read NAME_API_KEY at LLM call time. Resolution order: api_key -> api_key_command stdout -> NAME_API_KEY. For type "devin" it is a Devin session token and, when set, wins over the browser login and the Devin CLI login. |
-| `providers[].api_key_command` | string |  | Optional credential-helper command. When api_key is empty it runs via the detected host shell (pwsh, powershell, or cmd on Windows; bash or sh elsewhere) and the trimmed stdout is used as the key. On failure resolution falls back to NAME_API_KEY. |
+| `providers[].api_key` | string |  | Provider secret. A literal key, a "${ENV}" reference expanded at load time, or empty to read NAME_API_KEY at LLM call time. Resolution order: api_key -> api_key_command stdout -> NAME_API_KEY. For type "devin" it is a Devin session token and, when set, wins over the browser login and the Devin CLI login. Ignored for type "codex", which signs in with ChatGPT. |
+| `providers[].api_key_command` | string |  | Optional credential-helper command. When api_key is empty it runs via the detected host shell (pwsh, powershell, or cmd on Windows; bash or sh elsewhere) and the trimmed stdout is used as the key. On failure resolution falls back to NAME_API_KEY. Never run for type "codex", which takes no key. |
 | `providers[].proxy` | string | inherit | inherit (the default, the same as leaving the key out), none, or a proxy URL: http://, https://, socks5:// or socks5h://. inherit follows the proxy the environment of the Coddy process names - HTTPS_PROXY, HTTP_PROXY and NO_PROXY, never for a loopback address; ALL_PROXY is not read. none connects directly and ignores those variables. A proxy URL sends every request of this row through that proxy, NO_PROXY and loopback included; with SOCKS the proxy resolves host names. The setting covers every request of the provider: its completions, its model list, its account usage and its sign-in. |
 | `providers[].timeout_ms` | integer | 0 | Optional bound on each LLM HTTP request to this provider, including the streamed body read. 0 (the default) sets no client timeout, so slow prompt processing on large contexts is never cut short. |
 | `providers[].usage_limits_panel` | boolean or null | true | Show this provider's account usage panel (the console footer line and /usage, the usage section and banner in the web UI) and read the provider's usage endpoint for it (GET /v1/limits for type neuraldeep, the Codex backend's usage endpoint for type codex, the seat-management status RPC for type devin). Omit or true keeps the panel on; false hides it and stops those reads for this row. Only providers whose type has a usage source are affected. |
@@ -70,7 +70,7 @@ Named model entries the agent and UI can select.
 | `models[].max_tokens` | integer |  | Upper bound on completion tokens per assistant message. A codex model never sends it (the Codex backend rejects max_output_tokens), so there it bounds nothing, and coddy -t and --dry-run warn about such a value. |
 | `models[].temperature` | number |  | Sampling temperature (0 = deterministic; higher = more random). |
 | `models[].max_context_tokens` | integer | 0 | Context window of the model in tokens: what the web UI context ring, the console context percentage and the automatic compaction trigger measure against. 0 reads it from the provider's model listing when the provider reports one (the NeuralDeep hub, vLLM, OpenRouter, LM Studio), else 128000. |
-| `models[].multimodal` | boolean | false | Model accepts image/file inputs in addition to text; the UI shows a file attachment button for this model. |
+| `models[].multimodal` | boolean | false | Model accepts image/file inputs in addition to text; the UI shows a file attachment button for this model, and read shows it the picture in a PNG, JPEG, GIF or WebP file instead of refusing it as binary. |
 | `models[].reasoning_levels` | list of strings or null |  | Override the reasoning levels offered for this model. Omit to auto-detect from the model id (gpt-5* -> minimal,low,medium,high; OpenAI o-series, gpt-oss*, qwen3*, and Claude extended-thinking models -> low,medium,high). An explicit empty list hides the selector. Settings fills this field from GET /coddy/config/reasoning-levels behind its Fetch reasoning levels button. |
 | `models[].reasoning_default` | string |  | Reasoning level pre-selected for new chats; must be one of the resolved levels, otherwise ignored. |
 | `models[].stream` | boolean or null | true | Transport used to talk to this model. Omit (or true) to stream over SSE. false issues one blocking completion request and delivers the whole answer at once, for servers or proxies that handle event streams badly. Rejected for providers of type codex, whose backend is streaming-only. |
@@ -83,16 +83,16 @@ Defaults for the main agent loop (model id and safety caps).
 |-----|------|---------|-------------|
 | `agent.queue_mode` | string, one of `steer`, `after_turn` |  | Preferred queue mode for Enter during a running turn: steer joins the next ReAct step, after_turn starts a new turn after the current answer. When absent, interactive surfaces ask on first use. |
 | `agent.model` | string |  | Optional default models[].model id. Interactive surfaces (web UI, console) pick a model per session; unattended calls that name no model (coddy -p, coddy acp, API requests without a model selector) need it set - they report 'no model configured' when it is empty. |
-| `agent.max_turns` | integer | 0 | Cap on the ReAct steps (LLM calls) of one prompt turn. 0, the default, sets no cap; a turn that reaches a cap set here ends with a notice that names it. |
+| `agent.max_turns` | integer | 165 | Cap on the ReAct steps (LLM calls) of one prompt turn. Defaults to 165; set 0 to disable the cap. A turn that reaches the cap ends with a notice that names it. |
 | `agent.llm_retry_max` | integer or null | 3 | Extra attempts shared by transport retries, empty-answer recovery and first-token re-issues until tool progress or a new follow-up. 0 disables these retries. Loop guards, Stop hooks, fallback models and quota-reset waits have separate limits. |
 | `agent.llm_retry_base_ms` | integer | 1000 | Initial backoff between LLM retries, in milliseconds. A server-provided pause (Retry-After-Ms / Retry-After headers, "Limit resets at" / "retry in Ns" body phrases) overrides the exponential backoff, capped at 60s. |
 | `agent.llm_min_interval_ms` | integer | 0 | Minimum gap between consecutive LLM calls in milliseconds, retry attempts included (0 disables pacing; e.g. 12000 on strict free tiers). |
 | `agent.llm_first_token_timeout_ms` | integer or null | 90000 | How long a streamed LLM call may stay silent before the turn cancels it (the API hang guard). An explicit 0 disables the guard; blocking (stream: false) transports are never guarded. |
 | `agent.llm_stream_idle_timeout_ms` | integer or null | 300000 | How long a streamed LLM response may send nothing after its first bytes before the stream is cut as stalled (the mid-answer hang guard): the text already delivered is kept and the turn ends with the stall named. An explicit 0 disables the guard; the wait for the first byte belongs to llm_first_token_timeout_ms, and blocking (stream: false) transports are never guarded. |
 | `agent.loop_guard` | boolean or null | true | Runaway-loop protection: cut a streamed response that degenerates into repeating itself, and block a tool called over and over with identical arguments. |
-| `agent.loop_tool_repeat_limit` | integer or null | 3 | Consecutive identical tool calls (same name, same canonical arguments) before the loop guard steps in. 0 disables the tool-repeat check. |
+| `agent.loop_tool_repeat_limit` | integer or null | 2 | Consecutive identical tool calls in successive ReAct responses (same name, same canonical arguments) before the loop guard steps in. 0 disables the tool-repeat check. |
 | `agent.loop_stream_repeat_cycles` | integer or null | 5 | Identical back-to-back output cycles inside one streamed response before the stream is cut. 0 disables the stream check. |
-| `agent.loop_nudge_max` | integer or null | 2 | How many times one turn may be nudged back on track before the loop guard stops it with a notice. |
+| `agent.loop_nudge_max` | integer or null | 1 | How many times one turn may be nudged back on track before the loop guard stops it with a notice. |
 | `agent.wait_for_limit_reset` | boolean | false | Wait for a hit usage limit to lift and re-issue the call, instead of ending the turn with the provider's error. Applies to a top-level turn whose provider names a pause beyond the retry budget (a 429 with Retry-After or "Limit resets at"); the turn lock and the client stream stay open while it waits, so it is off by default. |
 | `agent.wait_for_limit_reset_max_ms` | integer or null | 14400000 | Longest time one turn spends waiting for limits in total, in milliseconds, the retry wrapper's own sleeps on a limit included; a pause that would exceed it ends the turn at once with the error. An explicit 0 never waits. |
 
@@ -109,11 +109,11 @@ Override the built-in system prompt templates (Go text/template).
 
 ### `instructions`
 
-Files read from the session working directory and appended to the system prompt (AGENTS.md convention). The agent home's own AGENTS.md and DESIGN.md are read on top of this list whenever they exist, ahead of the project's pair, and are not named here. See https://coddy.dev/docs/features/rules.
+Files the operator adds to the system prompt (AGENTS.md convention), after the documents every session reads anyway: the AGENTS.md and DESIGN.md of the agent home, then those of the session folder, and the nested ones of a folder a tool enters, none of which is named here or can be turned off. A file already in the prompt is not read twice. See https://coddy.dev/docs/features/rules.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `instructions.files` | list of strings | ["AGENTS.md","DESIGN.md"] | Instruction files, read in the order listed. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. |
+| `instructions.files` | list of strings | [] | Extra instruction files, appended after the AGENTS.md and DESIGN.md documents in the order listed; empty by default. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. An entry naming a document the prompt already carries is skipped. |
 
 ### `skills`
 
@@ -121,39 +121,18 @@ Directories scanned for skills (SKILL.md and root .md/.mdc files).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `skills.dirs` | list of strings | ["~/.agents/skills","${CODDY_HOME}/skills","${CWD}/.coddy/skills"] | Search paths; later entries win on name conflicts. Defaults (lowest to highest priority): ~/.agents/skills, ${CODDY_HOME}/skills, ${CWD}/.coddy/skills. ${CODDY_HOME} expands when the file is loaded; ${CWD} stays in the entry and expands per session against that session's workspace. |
-| `skills.sources` | list of strings |  | Remote skill sources installed on demand with `coddy skills sync` (never fetched automatically). Each entry is a GitHub repo (owner/repo[@ref]), a git URL, or an http(s) URL to an agents-standard marketplace.json. Materialized into ${CODDY_HOME}/skills. EvilFreelancer/rpa-skills, the marketplace the bundled rpa-* skills are published from, is always in effect as a system source and is not listed here. See https://coddy.dev/docs/features/skills. |
+| `skills.dirs` | list of strings | [] | Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included). |
+| `skills.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for the project's .coddy/marketplaces.json, which travels with the checkout: "ask" (default) leaves its sources and marketplaces out of every sync until the operator approves that exact entry for that workspace; "allow" treats them like the operator's own ${CODDY_HOME}/marketplaces.json; "deny" never uses them (they are listed as switched off). What they install goes to ${CODDY_HOME}/skills. The project's skill folders (.coddy/skills, .agents/skills) are not affected. Skill marketplaces are not declared in config.yaml: they live in ${CODDY_HOME}/marketplaces.json and the project's .coddy/marketplaces.json, and an old skills.sources list is moved into the home file on load. See https://coddy.dev/docs/features/skills#project-marketplaces-and-trust. |
 | `skills.auto_discovery` | boolean or null | true | Offer the model-driven load_skill tool so the agent pulls a catalogued skill's full instructions into a turn on its own when the request matches, instead of requiring an explicit /name. Defaults to true. |
 
 ### `rules`
 
-Discovery of rule files from ${CODDY_HOME}/rules (the operator's own, applied in every workspace) and from one project folder under the session CWD, the first of .coddy/rules, .agents/rules, .cursor/rules, .claude/rules, .codex/rules that holds a rule file, plus the AGENTS.md and DESIGN.md of a folder a tool enters; .mdc files are Cursor rules, .md files Claude Code rules. See https://coddy.dev/docs/features/rules.
+Discovery of rule files from ${CODDY_HOME}/rules (the operator's own, applied in every workspace) and from one project folder under the session CWD, the first of .coddy/rules, .agents/rules, .cursor/rules, .claude/rules, .codex/rules that holds a rule file; .mdc files are Cursor rules, .md files Claude Code rules. The AGENTS.md and DESIGN.md documents are not rules in this sense and none of these settings turns them off. See https://coddy.dev/docs/features/rules.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `rules.auto_discover` | boolean or null | true | Scan the session CWD rule roots automatically. |
-| `rules.systems` | list of strings | [] | Restrict which rule systems are loaded: user (${CODDY_HOME}/rules), coddy, agents-dir (.agents/rules), cursor, claude, codex, agents (nested AGENTS.md and DESIGN.md). Empty means all. A project folder left out drops out of the chain; of the ones admitted, the first that holds a rule file is read. |
-
-### `mcp_servers`
-
-Model Context Protocol servers connected for every new session.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `mcp_servers` | list of objects |  | Model Context Protocol servers connected for every new session. |
-| `mcp_servers[].type` | string, one of `stdio`, `http`, `sse` |  | Transport. "stdio" (default when empty; url-only entries default to "http") runs a local command; "http" speaks streamable HTTP to url (with automatic legacy-SSE fallback); "sse" forces the legacy HTTP+SSE transport. |
-| `mcp_servers[].name` | string |  | Stable id referenced by the agent; must be unique in this list. |
-| `mcp_servers[].command` | string |  | Executable for stdio transport (leave empty when using an http url). ${CWD} expands to the session cwd. |
-| `mcp_servers[].args` | list of strings |  | Argv passed after command for stdio servers. ${CWD} expands to the session cwd. |
-| `mcp_servers[].env` | list of objects |  | Extra environment variables for the stdio child process. |
-| `mcp_servers[].env[].name` | string |  | Environment variable name. |
-| `mcp_servers[].env[].value` | string |  | Environment variable value. ${CWD} expands to the session cwd. |
-| `mcp_servers[].url` | string |  | HTTP(S) endpoint when type is "http". ${CWD} expands to the session cwd. |
-| `mcp_servers[].headers` | list of objects |  | Optional headers sent with MCP HTTP requests. ${CWD} in a value expands to the session cwd. |
-| `mcp_servers[].headers[].name` | string |  | HTTP header name. |
-| `mcp_servers[].headers[].value` | string |  | HTTP header value. |
-| `mcp_servers[].disabled` | boolean |  | Skip connecting this server without removing its definition. |
-| `mcp_servers[].disabled_tools` | list of strings |  | Tool names of this server hidden from the agent. |
+| `rules.auto_discover` | boolean or null | true | Scan the rule folders automatically: ${CODDY_HOME}/rules and the project folder of the session CWD. The AGENTS.md and DESIGN.md documents are read either way. |
+| `rules.systems` | list of strings | [] | Restrict which rule systems are loaded: user (${CODDY_HOME}/rules), coddy, agents-dir (.agents/rules), cursor, claude, codex. Empty means all. A project folder left out drops out of the chain; of the ones admitted, the first that holds a rule file is read. agents, which used to switch the nested AGENTS.md files, no longer affects them (they are always read); it is still accepted, and a list holding only agents loads no rule folder. |
 
 ### `mcp`
 
@@ -162,6 +141,7 @@ MCP settings that are not tied to a single server entry.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `mcp.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for the project-local <cwd>/.coddy/mcp.json, which travels with the checkout: "ask" keeps its servers cold until the operator approves that exact declaration for that workspace; "allow" starts them automatically (trusted workspaces only); "deny" never loads them. |
+| `mcp.idle_timeout_seconds` | integer or null | 300 | Seconds an MCP server that no session holds any more keeps running before Coddy stops it: a project server once the last session of its workspace let it go, a server an ACP client sent once the last session that sent it closed. A session that takes the server in the meantime finds it running. The global servers that coddy serve, the console and coddy acp start with the process are not affected, and a server switched off, no longer approved, removed or declared differently stops at once. 0 stops a server as soon as the last session lets it go. |
 
 ### `tools`
 
@@ -212,8 +192,8 @@ User-defined child agents the model can delegate to with spawn_agent. Definition
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `subagents.enable` | boolean or null | true | Register the spawn_agent tool and list the subagent catalog in the system prompt. |
-| `subagents.dirs` | list of strings | ["${CODDY_HOME}/agents","${CWD}/.claude/agents","${CWD}/.coddy/agents"] | Definition directories, lowest priority first; later entries override earlier ones by name. ${CODDY_HOME} and ${CWD} expand. Directories inside the workspace are project scope and follow project_trust. |
-| `subagents.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for definitions found inside the workspace, which travel with the checkout: "ask" loads them but refuses to spawn one until the operator approved that exact file for that workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust with the session workspace as cwd); "allow" treats them like the operator's own files; "deny" never reads them. |
+| `subagents.dirs` | list of strings | [] | Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy. |
+| `subagents.project_trust` | string, one of `ask`, `allow`, `deny` | ask | Trust policy for definitions found inside the workspace, which travel with the checkout: "ask" loads them but refuses to spawn one until the operator approved that exact file for that workspace (the shield in Settings -> Subagents, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust with the session workspace as cwd); "allow" treats them like the operator's own files; "deny" never reads them. |
 | `subagents.max_concurrent` | integer | 4 | How many subagent runs the whole process may have in flight at once, whatever session started them. Starting past the limit is refused, not queued. 0 uses the default. |
 | `subagents.max_depth` | integer or null | 1 | How deep spawning may nest: 1 lets a session spawn subagents that cannot spawn further; 0 forbids spawning everywhere. Omit for the default. |
 | `subagents.default_timeout_seconds` | integer | 1800 | Hard limit for one run whose definition and call give no timeout. Capped by tools.background.max_timeout_seconds. 0 uses the default. |
@@ -264,6 +244,7 @@ Summarizes older conversation history so long sessions keep fitting the model co
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `compaction.enable` | boolean or null | true | Master switch for compaction (manual command and automatic trigger). Defaults to true. |
+| `compaction.auto_enable` | boolean or null | true | Enable automatic compaction at threshold_percent. Set false to keep manual /compact and the Context popover action available without automatic compaction. Defaults to true. |
 | `compaction.threshold_percent` | integer | 80 | Auto-compaction fires when the estimated context usage reaches this percent of the effective model's context window (1..100): its max_context_tokens, else the window its provider's model listing reports, else 128000 - the window the web UI context ring shows. |
 | `compaction.keep_recent_turns` | integer or null | 2 | How many most recent user turns (each with the agent replies and tool activity after it) stay verbatim; only history before that boundary is summarized. 0 summarizes the whole window. When the window holds no more user turns than this, a compaction keeps fewer: the automatic trigger down to the prompt being answered, the manual command down to none. |
 | `compaction.model` | string | "" | Optional models[].model used for the summarization call. Empty uses the session's effective model. |
@@ -315,9 +296,10 @@ OpenAI-compatible HTTP API defaults (used only by binaries built with -tags http
 | `httpserver.cors` | object |  | Cross-origin access so a browser UI on another origin can call this API (e.g. the bundled UI pointed at a remote server). Bearer auth still applies. |
 | `httpserver.cors.enable` | boolean | false | Handle CORS preflight and emit Access-Control-* headers for allowed origins. |
 | `httpserver.cors.allowed_origins` | list of strings | [] | Exact origins permitted to call the API, e.g. "http://localhost:5173". A single "*" allows any origin. |
-| `httpserver.remotes` | list of objects | [] | Remote coddy serve servers offered in the UI environment selector. Tokens are not stored here; the UI keeps them client-side per remote. |
-| `httpserver.remotes[].name` | string |  | Display label for the remote. |
-| `httpserver.remotes[].url` | string |  | Base URL of the remote coddy serve server, e.g. "https://box.example:12345". |
+| `httpserver.remotes` | list of objects | [] | Remote coddy serve servers and swarm relays offered in the UI environment selector and resolved by `coddy --remote <name>`. An entry may carry the token to present; without one the UI keeps the token in the browser per remote and the console reads --remote-token or CODDY_REMOTE_TOKEN. |
+| `httpserver.remotes[].name` | string |  | Display label for the remote. Empty: the web UI shows the name the remote reports (a relay's swarm.name, else the host name it runs on; an agent's host name), else its address. |
+| `httpserver.remotes[].url` | string |  | Base URL of the remote coddy serve server or relay, e.g. "https://box.example:12345". |
+| `httpserver.remotes[].token` | string |  | Bearer token to present to this remote: a relay's client token (swarm.auth_token) or a server's httpserver.auth_token, usually a ${ENV} reference. Optional and opt-in: every browser that reads this configuration receives it, and coddy --remote <name> uses it when --remote-token is not given. A node mounted under a relay (<url>/swarm/nodes/<name>) takes the relay's token. |
 
 ### `swarm`
 
@@ -328,7 +310,7 @@ Stateless relay that nodes register into and that chains into other relays. The 
 | `swarm.enable` | boolean | false | Run the swarm relay in this process. Independent of swarm.join, which is how an agent registers into a parent relay. |
 | `swarm.host` | string | "" | Bind address for the relay when the CLI does not pass --swarm-host. Empty falls back to 0.0.0.0. |
 | `swarm.port` | integer | 0 | Listen port for the relay. 0 falls back to 12346. |
-| `swarm.name` | string | "" | Label for this relay in topology views and in a child's node path. |
+| `swarm.name` | string | "" | Label for this relay in topology views, in /swarm/info and in a child's node path. Empty: the host name it runs on. |
 | `swarm.auth_token` | string | "" | Bearer credential clients present to this relay. A relay reaches every node with that node's own credential, so an unauthenticated relay bound off loopback is a fleet-wide open door and the server refuses to start unless allow_insecure is set. Never echoed back. |
 | `swarm.pairing_tokens` | list of strings | [] | Credentials a node must present to register. Empty closes registration unless insecure_open_registration is set. Never echoed back. |
 | `swarm.allow_insecure` | boolean | false | Permit binding off loopback without a client token. |
@@ -412,7 +394,7 @@ Messenger bot adapters (used only by binaries built with -tags gateway or -tags 
 
 List of LLM backends (`[]config.ProviderConfig`, `internal/config/providers.go`).
 
-Key resolution order: `api_key` → `api_key_command` stdout → `NAME_API_KEY` env var.
+Key resolution order: `api_key` → `api_key_command` stdout → `NAME_API_KEY` env var. A `codex` row signs in with ChatGPT and reads none of them.
 
 ```yaml
 providers:
@@ -454,7 +436,7 @@ coddy providers logout codex   # removes the Coddy-managed credential (leaves th
 
 A successful login also publishes the subscription catalog into `config.yaml`, the way `coddy providers login neuraldeep` publishes its tier models (the Settings button stores the credential only): it adds the `codex` provider row when it is missing, one `models[]` entry per catalog model Codex lists (the ids Codex hides from its own picker, such as `gpt-reserve` and `codex-auto-review`, are left out), and `agent.model` when nothing is set yet - Codex's own top-ranked model. Nothing already in the file is rewritten: an existing provider row, an already listed model, and a chosen `agent.model` survive untouched, so a repeated login is a no-op. `--no-config` stores only the credential. Entries carry no `max_tokens`, because the Codex backend rejects `max_output_tokens`. A running `coddy serve` keeps its loaded config, so restart it to pick the new models up.
 
-Both paths use the same storage; the provider name is the argument, so `coddy providers login <name>` targets a specific codex row when `config.yaml` defines several (a row under a name other than `codex` either exists in `config.yaml` or is created by the login with `--type codex`). Each codex row keeps a login of its own; the Codex CLI login stands in only for the only codex row, or the row named `codex` among several ([Several profiles of one provider type](../getting-started/configuration.md#several-profiles-of-one-provider-type)). Coddy uses the official device authorization flow and stores refreshable credentials at `$CODDY_HOME/providers/<provider-name>/codex-auth.json` with restrictive file permissions; tokens never enter `config.yaml`. `api_key`, `api_key_command`, and `api_base` are ignored for Codex, while `proxy` applies to OAuth and provider requests. A Codex model has no output cap Coddy can set: the backend answers `Unsupported parameter` to `max_output_tokens`, so `models[].max_tokens` on a codex model bounds nothing. It is still accepted - the settings form seeds it on every model row - but `coddy -t`, `--dry-run` and the startup log of `coddy serve` warn about it, and a `max_tokens` sent on `POST /v1/chat/completions` for a codex model is refused with `400`. `max_context_tokens` is a different thing: the window the context ring and automatic compaction measure against, not a limit the provider enforces. The model picker reads the catalog from the official Codex backend with the saved token. If no Coddy-managed credential exists, Coddy remains compatible with a Codex CLI login in `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Codex requests always target the official backend; the process-level `CODDY_CODEX_BASE_URL` is the only override (tests and self-hosted gateways), so a settings document can never redirect an OAuth token on its own.
+Both paths use the same storage; the provider name is the argument, so `coddy providers login <name>` targets a specific codex row when `config.yaml` defines several (a row under a name other than `codex` either exists in `config.yaml` or is created by the login with `--type codex`). Each codex row keeps a login of its own; the Codex CLI login stands in only for the only codex row, or the row named `codex` among several ([Several profiles of one provider type](../getting-started/configuration.md#several-profiles-of-one-provider-type)). Coddy uses the official device authorization flow and stores refreshable credentials at `$CODDY_HOME/providers/<provider-name>/codex-auth.json` with restrictive file permissions; tokens never enter `config.yaml`. `api_key`, `api_key_command`, and `api_base` are ignored for Codex (an `api_key_command` left on a codex row never runs), while `proxy` applies to OAuth and provider requests. A Codex model has no output cap Coddy can set: the backend answers `Unsupported parameter` to `max_output_tokens`, so `models[].max_tokens` on a codex model bounds nothing. It is still accepted - the settings form seeds it on every model row - but `coddy -t`, `--dry-run` and the startup log of `coddy serve` warn about it, and a `max_tokens` sent on `POST /v1/chat/completions` for a codex model is refused with `400`. `max_context_tokens` is a different thing: the window the context ring and automatic compaction measure against, not a limit the provider enforces. Left unset on a codex model, it is the window the Codex catalog reports for the model, `context_window` (272000 for every model it serves today) ([The context window](../features/compaction.md#the-context-window)). The model picker reads the catalog from the official Codex backend with the saved token. The backend offers each model only to Codex releases from the model's `minimal_client_version` on, since an older Codex binary cannot run it; Coddy runs every model through its own loop and tools, so it asks as Codex release 0.999.0, far above the releases the gates name, and lists every model the account is offered, the newest included, whichever Codex CLI is installed, if any. The models Codex hides from its own picker stay out of the list. If no Coddy-managed credential exists, Coddy remains compatible with a Codex CLI login in `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). Codex requests always target the official backend; the process-level `CODDY_CODEX_BASE_URL` is the only override (tests and self-hosted gateways), so a settings document can never redirect an OAuth token on its own.
 
 Codex is only a model backend: the agent keeps Coddy's own system prompt, tool catalog, permissions, and ReAct loop, and the ChatGPT credential is used solely to authenticate the Responses calls (`features/codex_auth.feature` pins this on both the HTTP and ACP surfaces).
 
@@ -496,7 +478,7 @@ System prompt template overrides (`config.Prompts`, `internal/config/prompts.go`
 
 ### `instructions`
 
-Instruction files appended to the prompt (`config.Instructions`, `internal/config/instructions.go`). The default list is the operator's own `${CODDY_HOME}/AGENTS.md`, read in every workspace, followed by the project's `AGENTS.md`; writing a list replaces it. See [rules.md](../features/rules.md#your-own-instructions-and-rules).
+Instruction files the operator adds to the prompt (`config.Instructions`, `internal/config/instructions.go`). The list is empty by default and only adds: the `AGENTS.md` and `DESIGN.md` of the agent home, of the session folder and of the folders a tool enters are read whether or not it names them, and its files come after them, in the order listed. An entry naming a file the prompt already carries, such as the session folder's own `AGENTS.md`, is skipped. See [rules.md](../features/rules.md#agentsmd-and-designmd).
 
 ### `skills`
 
@@ -506,31 +488,19 @@ Skill discovery (`config.Skills`, `internal/config/skills.go`).
 
 Rules discovery (`config.Rules`, `internal/config/rules.go`), from the workspace folders and from the operator's own `${CODDY_HOME}/rules`. See [rules.md](../features/rules.md).
 
-### `mcp_servers`
-
-MCP servers connected for every new session (`[]config.MCPServerConfig`, `internal/config/mcp_servers.go`).
-
-```yaml
-mcp_servers:
-  - name: filesystem
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
-    disabled_tools: ["write_file"]
-```
-
-Servers can also be declared in Cursor-compatible mcp.json files: the user-global
-`${CODDY_HOME}/mcp.json` (`~/.coddy/mcp.json` by default, like Cursor's
-`~/.cursor/mcp.json`; together with this `mcp_servers` list it forms the "global"
-scope) and the project-local `<workspace>/.coddy/mcp.json` ("local" scope). Each file holds a single
-`mcpServers` object keyed by server name (`env` and `headers` are JSON objects;
-per-tool switches use `disabledTools`). Later levels override earlier ones by
-name: `mcp_servers` < `${CODDY_HOME}/mcp.json` < `./.coddy/mcp.json`. Entries from the
-project-local file need a workspace approval before they are started - see
-[`mcp`](#mcp) and `docs/features/mcp.md`.
-
 ### `mcp`
 
 MCP settings that are not tied to a single server entry (`config.MCP`, `internal/config/mcp.go`).
+
+The servers themselves are not declared in `config.yaml`. They live in two Cursor-compatible
+files, a single `mcpServers` object keyed by server name (`env` and `headers` are JSON
+objects, per-tool switches use `disabledTools`): the user-global `${CODDY_HOME}/mcp.json`
+(`~/.coddy/mcp.json` by default, like Cursor's `~/.cursor/mcp.json`, the "global" scope) and
+the project-local `<workspace>/.coddy/mcp.json` (the "local" scope), which wins a name over
+the global file and whose entries need a workspace approval before they are started. An old
+`mcp_servers` list in `config.yaml` is moved into `${CODDY_HOME}/mcp.json` on the next load,
+with a `config.yaml.bak-<time>` copy of the file kept, and `coddy -t` reports it as a warning.
+See [mcp.md](../features/mcp.md).
 
 Added for [issue #80](https://github.com/coddy-project/coddy-agent/issues/80).
 Approvals are recorded in `~/.coddy/mcp-trust.json`, keyed by the canonical workspace path
@@ -635,7 +605,7 @@ These control config discovery itself, not individual fields (see [Configuration
 | `CODDY_HOME` | `--home` | Agent state directory (default `~/.coddy`). |
 | `CODDY_CWD` | `--cwd` | Default session working directory. |
 | `CODDY_CONFIG` | `--config` | Explicit path to `config.yaml`. |
-| `CODDY_SWARM_TOKEN` | `--auth-token` (swarm) | Client credential for `coddy serve` (see [`swarm`](#swarm)). |
-| `CODDY_SWARM_PAIRING_TOKEN` | `--pairing-token` | Registration credential for `coddy serve` (see [`swarm`](#swarm)). |
+| `CODDY_SWARM_TOKEN` | `--swarm-auth-token` | Client credential of the relay `coddy serve` runs (see [`swarm`](#swarm)). |
+| `CODDY_SWARM_PAIRING_TOKEN` | `--swarm-pairing-token` | Registration credential of that relay (see [`swarm`](#swarm)). |
 | `NAME_API_KEY` | - | Per-provider API key fallback (see [`providers`](#providers)). |
 | `TELEGRAM_BOT_TOKEN` | - | Telegram bot token fallback (see [`gateways.telegram`](#gatewaystelegram)). |

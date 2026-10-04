@@ -183,6 +183,8 @@ export function toolCallTargetText(context: PermissionToolCallContext): string {
     }
     case "mv":
       return stringArg(args, "src");
+    case "worktree_create":
+      return stringArg(args, "branch");
     case "spawn_agent":
       return stringArg(args, "agent");
     case "load_skill":

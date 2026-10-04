@@ -3,6 +3,7 @@ import { pickRicherQuestionToolArgs } from "./questionPromptSessionStore";
 import { sessionMessageFiles } from "./sessionMessageFiles";
 import { normalizeTodoPlanSnapshot } from "./todoToolPreview";
 import { pickRicherToolArgs } from "./toolCallArgs";
+import { parseToolArtifacts } from "./toolArtifacts";
 import {
   partialTurnAssistantItemId,
   partialTurnThinkingItemId,
@@ -33,6 +34,7 @@ export type ToolCallListRow = {
   resultPreview?: string;
   resultPreviewTruncated?: boolean;
   planSnapshot?: unknown;
+  artifacts?: unknown;
 };
 
 type ToolCallItem = Extract<TranscriptItem, { type: "tool_call" }>;
@@ -250,6 +252,10 @@ export function transcriptItemsFromMessages(p: {
     if (role === "tool") {
       const id = (m.tool_call_id || "").trim();
       if (!id) return;
+      // The pictures the call showed the model stay on its result; a tool
+      // row's text is never read for attachment notes.
+      const images = sessionMessageFiles(m.files, "");
+      const artifacts = parseToolArtifacts(m.artifacts);
       const idx = toolIdx.get(id);
       if (idx === undefined) {
         const it: ToolCallItem = {
@@ -258,6 +264,8 @@ export function transcriptItemsFromMessages(p: {
           toolCallId: id,
           status: "completed",
           resultText: m.content || "",
+          ...(images.length > 0 ? { images } : {}),
+          ...(artifacts.length > 0 ? { artifacts } : {}),
         };
         toolIdx.set(id, next.length);
         next.push(it);
@@ -268,6 +276,8 @@ export function transcriptItemsFromMessages(p: {
         ...cur,
         status: "completed",
         resultText: m.content || "",
+        ...(images.length > 0 ? { images } : {}),
+        ...(artifacts.length > 0 ? { artifacts } : {}),
       };
     }
   });
@@ -314,6 +324,8 @@ export function applyToolCallRows(
     if (row.resultPreviewTruncated === true) merged.resultWasTruncated = true;
     const todoPlan = normalizeTodoPlanSnapshot(row.planSnapshot);
     if (todoPlan !== undefined) merged.todoPlan = todoPlan;
+    const artifacts = parseToolArtifacts(row.artifacts);
+    if (artifacts.length > 0) merged.artifacts = artifacts;
     const st = parseRFC3339ms(row.startedAt);
     const fin = parseRFC3339ms(row.finishedAt);
     if (st != null && fin != null && fin >= st) {

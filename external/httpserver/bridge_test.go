@@ -5,6 +5,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -91,6 +92,169 @@ func TestRequestQuestionSSECompletesWhenPosted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got == nil || len(got.Answers) != 1 || len(got.Answers[0]) != 1 || got.Answers[0][0] != "y" {
+		t.Fatalf("unexpected result %#v", got)
+	}
+}
+
+func TestRequestQuestionNotifiesPendingLifecycle(t *testing.T) {
+	rec := &syncBuffer{}
+	sender := NewSender(&config.Config{}, rec, true, "agent-model")
+	transitions := make(chan struct {
+		sessionID string
+		pending   bool
+	}, 2)
+	sender.SetQuestionPendingCallback(func(sessionID string, pending bool) {
+		transitions <- struct {
+			sessionID string
+			pending   bool
+		}{sessionID: sessionID, pending: pending}
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sender.RequestQuestion(context.Background(), acp.QuestionRequestParams{
+			SessionID: "s-pending",
+			RequestID: "r-pending",
+			Questions: []acp.QuestionPrompt{{Question: "private question", Options: []acp.QuestionOption{{Label: "yes"}}}},
+		})
+		done <- err
+	}()
+
+	select {
+	case transition := <-transitions:
+		if transition.sessionID != "s-pending" || !transition.pending {
+			t.Fatalf("first question transition = %+v, want pending", transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("question pending transition was not reported")
+	}
+	if !QuestionPending("s-pending") {
+		t.Fatal("question wait was not registered")
+	}
+	if !CompleteQuestionAnswer("s-pending", "r-pending", &acp.QuestionResult{Answers: [][]string{{"yes"}}}) {
+		t.Fatal("CompleteQuestionAnswer failed")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case transition := <-transitions:
+		if transition.sessionID != "s-pending" || transition.pending {
+			t.Fatalf("second question transition = %+v, want settled", transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("question settled transition was not reported")
+	}
+}
+
+// deadResponseWriter stands in for a client that went away mid-turn: every
+// write reports the broken pipe a real socket returns.
+type deadResponseWriter struct{}
+
+func (deadResponseWriter) Header() http.Header { return http.Header{} }
+func (deadResponseWriter) WriteHeader(int)     {}
+func (deadResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write tcp: broken pipe")
+}
+
+// The answer to a question arrives through POST /coddy/sessions/{id}/question,
+// not through the response stream. A client socket that died after the turn
+// detached must not fail the question: the frame still reached the composer
+// relay, and whoever watches it can still answer.
+func TestRequestQuestionWaitsWhenClientSocketIsDead(t *testing.T) {
+	relay := newComposerStreamRelay()
+	sender := NewSender(&config.Config{}, &teeSSEWriter{ResponseWriter: deadResponseWriter{}, relay: relay}, true, "agent-model")
+	done := make(chan error, 1)
+	var got *acp.QuestionResult
+	go func() {
+		r, err := sender.RequestQuestion(context.Background(), acp.QuestionRequestParams{
+			SessionID: "s1",
+			RequestID: "r-dead",
+			Questions: []acp.QuestionPrompt{{Question: "x", Options: []acp.QuestionOption{{Label: "y"}}}},
+		})
+		got = r
+		done <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	seen := false
+	for time.Now().Before(deadline) {
+		relay.mu.Lock()
+		for _, f := range relay.frames {
+			if strings.HasPrefix(string(f.data), "event: question") {
+				seen = true
+			}
+		}
+		relay.mu.Unlock()
+		if seen {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !seen {
+		t.Fatal("the question frame never reached the relay")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("RequestQuestion returned %v on a dead socket instead of waiting for the answer", err)
+	default:
+	}
+	if ok := CompleteQuestionAnswer("s1", "r-dead", &acp.QuestionResult{Answers: [][]string{{"y"}}}); !ok {
+		t.Fatal("nobody waited for the answer")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got.Answers) != 1 || got.Answers[0][0] != "y" {
+		t.Fatalf("unexpected result %#v", got)
+	}
+}
+
+// A dead client socket must not reject a permission prompt either: the relay
+// carries the frame and POST .../permission answers it.
+func TestRequestPermissionWaitsWhenClientSocketIsDead(t *testing.T) {
+	relay := newComposerStreamRelay()
+	sender := NewSender(&config.Config{}, &teeSSEWriter{ResponseWriter: deadResponseWriter{}, relay: relay}, true, "agent-model")
+	done := make(chan error, 1)
+	var got *acp.PermissionResult
+	go func() {
+		r, err := sender.RequestPermission(context.Background(), acp.PermissionRequestParams{
+			SessionID: "s1",
+			ToolCall:  acp.PermissionToolCall{ToolCallID: "call_dead", Title: "Run: run_command"},
+			Options:   []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
+		})
+		got = r
+		done <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	seen := false
+	for time.Now().Before(deadline) {
+		relay.mu.Lock()
+		for _, f := range relay.frames {
+			if strings.HasPrefix(string(f.data), "event: permission") {
+				seen = true
+			}
+		}
+		relay.mu.Unlock()
+		if seen {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if !seen {
+		t.Fatal("the permission frame never reached the relay")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("RequestPermission returned %v on a dead socket instead of waiting for the answer", err)
+	default:
+	}
+	if ok := CompletePermissionAnswer("s1", "call_dead", &acp.PermissionResult{Outcome: "selected", OptionID: "allow"}); !ok {
+		t.Fatal("nobody waited for the answer")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.OptionID != "allow" {
 		t.Fatalf("unexpected result %#v", got)
 	}
 }

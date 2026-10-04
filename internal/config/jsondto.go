@@ -15,7 +15,6 @@ type ConfigJSON struct {
 	Instructions InstructionsJSON `json:"instructions,omitempty"`
 	Skills       SkillsJSON       `json:"skills,omitempty"`
 	Rules        RulesJSON        `json:"rules,omitempty"`
-	MCPServers   []MCPServerJSON  `json:"mcp_servers,omitempty"`
 	MCP          MCPJSON          `json:"mcp,omitempty"`
 	Tools        ToolsJSON        `json:"tools,omitempty"`
 	Subagents    SubagentsJSON    `json:"subagents,omitempty"`
@@ -109,13 +108,13 @@ type ModelJSON struct {
 
 // AgentJSON mirrors Agent for JSON APIs. Pointer fields keep the unset/explicit
 // distinction where an explicit 0 means something different from "unset":
-// loop-guard counters, llm_retry_max (0 disables retries),
+// max_turns (0 disables the cap), loop-guard counters, llm_retry_max (0 disables retries),
 // llm_first_token_timeout_ms (0 disables the silence guard) and
 // llm_stream_idle_timeout_ms (0 disables the stall guard).
 type AgentJSON struct {
 	QueueMode              string `json:"queue_mode,omitempty"`
 	Model                  string `json:"model"`
-	MaxTurns               int    `json:"max_turns,omitempty"`
+	MaxTurns               *int   `json:"max_turns,omitempty"`
 	LLMRetryMax            *int   `json:"llm_retry_max,omitempty"`
 	LLMRetryBaseMS         int    `json:"llm_retry_base_ms,omitempty"`
 	LLMMinIntervalMS       int    `json:"llm_min_interval_ms,omitempty"`
@@ -140,7 +139,7 @@ type PromptsJSON struct {
 // SkillsJSON mirrors Skills for JSON APIs.
 type SkillsJSON struct {
 	Dirs          []string `json:"dirs,omitempty"`
-	Sources       []string `json:"sources,omitempty"`
+	ProjectTrust  string   `json:"project_trust,omitempty"`
 	AutoDiscovery *bool    `json:"auto_discovery,omitempty"`
 }
 
@@ -155,35 +154,11 @@ type UIJSON struct {
 	Enabled *bool `json:"enable,omitempty"`
 }
 
-// MCPServerJSON mirrors MCPServerConfig for JSON APIs.
-type MCPServerJSON struct {
-	Type          string           `json:"type,omitempty"`
-	Name          string           `json:"name"`
-	Command       string           `json:"command,omitempty"`
-	Args          []string         `json:"args,omitempty"`
-	Env           []EnvVarJSON     `json:"env,omitempty"`
-	URL           string           `json:"url,omitempty"`
-	Headers       []HTTPHeaderJSON `json:"headers,omitempty"`
-	Disabled      bool             `json:"disabled,omitempty"`
-	DisabledTools []string         `json:"disabled_tools,omitempty"`
-}
-
-// EnvVarJSON mirrors EnvVarConfig.
-type EnvVarJSON struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-// HTTPHeaderJSON mirrors HTTPHeaderConfig.
-type HTTPHeaderJSON struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
 // ToolsJSON mirrors Tools for JSON APIs.
 // MCPJSON mirrors MCP for JSON APIs.
 type MCPJSON struct {
-	ProjectTrust string `json:"project_trust,omitempty"`
+	ProjectTrust       string `json:"project_trust,omitempty"`
+	IdleTimeoutSeconds *int   `json:"idle_timeout_seconds,omitempty"`
 }
 
 type ToolsJSON struct {
@@ -284,6 +259,7 @@ type SessionsJSON struct {
 // distinction (enabled defaults to true, keep_recent_turns to 2).
 type CompactionJSON struct {
 	Enabled          *bool              `json:"enable,omitempty"`
+	AutoEnabled      *bool              `json:"auto_enable,omitempty"`
 	ThresholdPercent int                `json:"threshold_percent,omitempty"`
 	KeepRecentTurns  *int               `json:"keep_recent_turns,omitempty"`
 	Model            string             `json:"model,omitempty"`
@@ -356,10 +332,14 @@ type HTTPCORSJSON struct {
 	AllowedOrigins []string `json:"allowed_origins,omitempty"`
 }
 
-// HTTPRemoteJSON mirrors HTTPRemote.
+// HTTPRemoteJSON mirrors HTTPRemote. Token travels both ways, like a provider's
+// api_key: it is a credential for another server that the page itself presents
+// when it switches to that remote, not one that grants access to this server,
+// which is what the write-only fields are. config_get still redacts it.
 type HTTPRemoteJSON struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Token string `json:"token,omitempty"`
 }
 
 // SwarmJSON mirrors SwarmConfig. Every credential is write-only: reading the
@@ -477,7 +457,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Agent = AgentJSON{
 		QueueMode:              c.Agent.QueueMode,
 		Model:                  c.Agent.Model,
-		MaxTurns:               c.Agent.MaxTurns,
+		MaxTurns:               intPtr(c.Agent.MaxTurns),
 		LLMRetryMax:            cloneIntPtr(c.Agent.LLMRetryMax),
 		LLMRetryBaseMS:         c.Agent.LLMRetryBaseMS,
 		LLMMinIntervalMS:       c.Agent.LLMMinIntervalMS,
@@ -496,29 +476,14 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Instructions = InstructionsJSON{Files: append([]string(nil), c.Instructions.Files...)}
 	out.Skills = SkillsJSON{
 		Dirs:          append([]string(nil), c.Skills.Dirs...),
-		Sources:       append([]string(nil), c.Skills.Sources...),
+		ProjectTrust:  c.Skills.ProjectTrust,
 		AutoDiscovery: cloneBoolPtr(c.Skills.AutoDiscovery),
 	}
 	out.Rules = RulesJSON{
 		AutoDiscover: cloneBoolPtr(c.Rules.AutoDiscover),
 		Systems:      append([]string(nil), c.Rules.Systems...),
 	}
-	for _, s := range c.MCPServers {
-		mj := MCPServerJSON{
-			Type: s.Type, Name: s.Name, Command: s.Command,
-			Args: append([]string(nil), s.Args...), URL: s.URL,
-			Disabled:      s.Disabled,
-			DisabledTools: append([]string(nil), s.DisabledTools...),
-		}
-		for _, e := range s.Env {
-			mj.Env = append(mj.Env, EnvVarJSON(e))
-		}
-		for _, h := range s.Headers {
-			mj.Headers = append(mj.Headers, HTTPHeaderJSON(h))
-		}
-		out.MCPServers = append(out.MCPServers, mj)
-	}
-	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust()}
+	out.MCP = MCPJSON{ProjectTrust: c.MCP.ResolvedProjectTrust(), IdleTimeoutSeconds: cloneIntPtr(c.MCP.IdleTimeoutSeconds)}
 	out.Tools = ToolsJSON{
 		PermissionMode:    c.Tools.ResolvedPermMode(),
 		CommandAllowlist:  append([]string(nil), c.Tools.CommandAllowlist...),
@@ -563,6 +528,7 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	out.Sessions = SessionsJSON{Dir: c.Sessions.Dir}
 	out.Compaction = CompactionJSON{
 		Enabled:          cloneBoolPtr(c.Compaction.Enabled),
+		AutoEnabled:      cloneBoolPtr(c.Compaction.AutoEnabled),
 		ThresholdPercent: c.Compaction.ThresholdPercent,
 		KeepRecentTurns:  cloneIntPtr(c.Compaction.KeepRecentTurns),
 		Model:            c.Compaction.Model,
@@ -706,7 +672,6 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	cfg.Agent = Agent{
 		QueueMode:              j.Agent.QueueMode,
 		Model:                  j.Agent.Model,
-		MaxTurns:               j.Agent.MaxTurns,
 		LLMRetryMax:            cloneIntPtr(j.Agent.LLMRetryMax),
 		LLMRetryBaseMS:         j.Agent.LLMRetryBaseMS,
 		LLMMinIntervalMS:       j.Agent.LLMMinIntervalMS,
@@ -719,35 +684,24 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 		WaitForLimitReset:      j.Agent.WaitForLimitReset,
 		WaitForLimitResetMaxMS: cloneIntPtr(j.Agent.WaitForLimitResetMaxMS),
 	}
+	if j.Agent.MaxTurns != nil {
+		cfg.Agent.MaxTurns = *j.Agent.MaxTurns
+		cfg.Agent.maxTurnsSet = true
+	}
 	cfg.Prompts = Prompts{
 		Dir: j.Prompts.Dir, AgentPrompt: j.Prompts.AgentPrompt, PlanPrompt: j.Prompts.PlanPrompt, AskPrompt: j.Prompts.AskPrompt,
 	}
 	cfg.Instructions = Instructions{Files: append([]string(nil), j.Instructions.Files...)}
 	cfg.Skills = Skills{
 		Dirs:          append([]string(nil), j.Skills.Dirs...),
-		Sources:       append([]string(nil), j.Skills.Sources...),
+		ProjectTrust:  j.Skills.ProjectTrust,
 		AutoDiscovery: cloneBoolPtr(j.Skills.AutoDiscovery),
 	}
 	cfg.Rules = Rules{
 		AutoDiscover: cloneBoolPtr(j.Rules.AutoDiscover),
 		Systems:      append([]string(nil), j.Rules.Systems...),
 	}
-	for _, s := range j.MCPServers {
-		mc := MCPServerConfig{
-			Type: s.Type, Name: s.Name, Command: s.Command,
-			Args: append([]string(nil), s.Args...), URL: s.URL,
-			Disabled:      s.Disabled,
-			DisabledTools: append([]string(nil), s.DisabledTools...),
-		}
-		for _, e := range s.Env {
-			mc.Env = append(mc.Env, EnvVarConfig(e))
-		}
-		for _, h := range s.Headers {
-			mc.Headers = append(mc.Headers, HTTPHeaderConfig(h))
-		}
-		cfg.MCPServers = append(cfg.MCPServers, mc)
-	}
-	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust}
+	cfg.MCP = MCP{ProjectTrust: j.MCP.ProjectTrust, IdleTimeoutSeconds: cloneIntPtr(j.MCP.IdleTimeoutSeconds)}
 	cfg.Tools = Tools{
 		PermissionMode:    j.Tools.PermissionMode,
 		CommandAllowlist:  append([]string(nil), j.Tools.CommandAllowlist...),
@@ -794,6 +748,7 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	cfg.Sessions = Sessions{Dir: j.Sessions.Dir}
 	cfg.Compaction = Compaction{
 		Enabled:          cloneBoolPtr(j.Compaction.Enabled),
+		AutoEnabled:      cloneBoolPtr(j.Compaction.AutoEnabled),
 		ThresholdPercent: j.Compaction.ThresholdPercent,
 		KeepRecentTurns:  cloneIntPtr(j.Compaction.KeepRecentTurns),
 		Model:            j.Compaction.Model,

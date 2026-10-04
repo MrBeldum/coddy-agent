@@ -779,3 +779,61 @@ func TestExportSessionWritesRenderedDocument(t *testing.T) {
 		t.Fatalf("written entries = %d", len(back.Entries))
 	}
 }
+
+// A read that showed the model a picture keeps the picture in the export: the
+// call names the copy the model was shown, in every format.
+func TestExportNamesThePicturesAToolCallShowedTheModel(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: "look"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "r1", Name: "read", InputJSON: `{"path":"shot.png"}`}}},
+		{Role: llm.RoleTool, ToolCallID: "r1", Content: "shot.png: PNG image", ImageParts: []llm.ImagePart{
+			{Name: "shot.png", MIMEType: "image/png", FilePath: "/home/u/.coddy/sessions/s/assets/shot-1a2b3c4d5e6f7a8b.png"},
+		}},
+		{Role: llm.RoleAssistant, Content: "red"},
+	}
+	doc := BuildExportDocument(ExportInput{SessionID: "s", Messages: msgs})
+	var call *ExportToolCall
+	for i := range doc.Entries {
+		for j := range doc.Entries[i].ToolCalls {
+			if doc.Entries[i].ToolCalls[j].ID == "r1" {
+				call = &doc.Entries[i].ToolCalls[j]
+			}
+		}
+	}
+	if call == nil || len(call.Pictures) != 1 || call.Pictures[0].Name != "shot.png" || !strings.HasSuffix(call.Pictures[0].Path, "shot-1a2b3c4d5e6f7a8b.png") {
+		t.Fatalf("the read's call = %+v, want the picture named with its copy", call)
+	}
+	for format, body := range map[string][]byte{"markdown": renderExportMarkdown(doc), "html": renderExportHTML(doc)} {
+		if !strings.Contains(string(body), "Pictures") || !strings.Contains(string(body), "shot-1a2b3c4d5e6f7a8b.png") {
+			t.Errorf("the %s export does not name the picture:\n%s", format, body)
+		}
+	}
+}
+
+// A session directory that moved keeps the paths its messages recorded where
+// it was before; the export names the copies where they are now, in the
+// assets of the directory it reads, for a prompt's attachments and a read's
+// pictures alike. A path outside any assets directory is left as recorded.
+func TestExportNamesTheCopiesWhereTheSessionDirectoryIsNow(t *testing.T) {
+	old := filepath.Join(string(filepath.Separator), "old", "sessions", "s", "assets")
+	now := filepath.Join(t.TempDir(), "s")
+	elsewhere := filepath.Join(string(filepath.Separator), "work", "diagram.png")
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Content: "look", ImageParts: []llm.ImagePart{
+			{Name: "photo.png", FilePath: filepath.Join(old, "photo.png")},
+			{Name: "diagram.png", FilePath: elsewhere},
+		}},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "r1", Name: "read", InputJSON: `{"path":"shot.png"}`}}},
+		{Role: llm.RoleTool, ToolCallID: "r1", Content: "shot.png: PNG image", ImageParts: []llm.ImagePart{
+			{Name: "shot.png", MIMEType: "image/png", FilePath: filepath.Join(old, "shot-1a2b3c4d5e6f7a8b.png")},
+		}},
+	}
+	doc := BuildExportDocument(ExportInput{SessionID: "s", SessionDir: now, Messages: msgs})
+	atts := doc.Entries[0].Attachments
+	if len(atts) != 2 || atts[0].Path != filepath.Join(AssetsPath(now), "photo.png") || atts[1].Path != elsewhere {
+		t.Errorf("attachments = %+v, want photo.png under %s and diagram.png as recorded", atts, AssetsPath(now))
+	}
+	if pics := doc.Entries[1].ToolCalls[0].Pictures; len(pics) != 1 || pics[0].Path != filepath.Join(AssetsPath(now), "shot-1a2b3c4d5e6f7a8b.png") {
+		t.Errorf("pictures = %+v, want the copy under %s", pics, AssetsPath(now))
+	}
+}

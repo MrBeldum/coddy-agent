@@ -3,6 +3,8 @@
 package httpserver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,12 +16,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/bgtask"
+	"github.com/EvilFreelancer/coddy-agent/internal/gitws"
 	"github.com/EvilFreelancer/coddy-agent/internal/llm"
+	"github.com/EvilFreelancer/coddy-agent/internal/platform"
 	"github.com/EvilFreelancer/coddy-agent/internal/prompts"
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/todo"
@@ -39,6 +44,30 @@ func describeClampWords(s string, maxWords int) string {
 		return strings.Join(w, " ")
 	}
 	return strings.Join(w[:maxWords], " ")
+}
+
+// repoRootCache memoizes gitws.MainCheckoutRoot per session cwd for a short
+// window: the sessions list is polled while History is open, and a
+// `git rev-parse` spawn per distinct cwd per request is measurable for
+// folders outside git.
+var repoRootCache sync.Map // string cwd -> repoRootCacheEntry
+
+type repoRootCacheEntry struct {
+	root    string
+	expires time.Time
+}
+
+// sessionRepoRoot reports the main checkout a session's cwd belongs to, or ""
+// for a folder outside git.
+func sessionRepoRoot(cwd string) string {
+	if v, ok := repoRootCache.Load(cwd); ok {
+		if ent, ok := v.(repoRootCacheEntry); ok && time.Now().Before(ent.expires) {
+			return ent.root
+		}
+	}
+	root := gitws.MainCheckoutRoot(cwd)
+	repoRootCache.Store(cwd, repoRootCacheEntry{root: root, expires: time.Now().Add(30 * time.Second)})
+	return root
 }
 
 func describeStripLineNoise(s string) string {
@@ -158,6 +187,7 @@ func describePickPhraseFromLLM(llmRaw string, userWords []string) string {
 }
 
 func (s *Server) registerCoddyRoutes() {
+	s.mux.HandleFunc("GET /coddy/info", s.coddyInfoGet)
 	s.mux.HandleFunc("GET /coddy/workspace/files", s.coddyWorkspaceFilesGet)
 	s.mux.HandleFunc("GET /coddy/workspace/context", s.coddyWorkspaceContextGet)
 	s.mux.HandleFunc("GET /coddy/workspace/folders", s.coddyWorkspaceFoldersGet)
@@ -176,6 +206,9 @@ func (s *Server) registerCoddyRoutes() {
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/activity", s.coddySessionActivityGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/messages", s.coddySessionMessagesGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}", s.coddySessionAssetGet)
+	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}", s.coddySessionArtifactGet)
+	s.mux.HandleFunc("GET /coddy/sessions/{id}/artifacts/{artifactID}/preview", s.coddySessionArtifactPreviewGet)
+	s.mux.HandleFunc("POST /coddy/sessions/{id}/artifacts/{artifactID}/reveal", s.coddySessionArtifactRevealPost)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/assets/{name}/thumbnail", s.coddySessionAssetThumbnailGet)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/composer-stream", s.coddySessionComposerStream)
 	s.mux.HandleFunc("GET /coddy/sessions/{id}/tool-calls", s.coddyToolCallsList)
@@ -202,6 +235,151 @@ func (s *Server) registerCoddyRoutes() {
 	s.registerRewindRoute()
 	s.registerSkillsManagementRoutes()
 	s.registerMCPManagementRoutes()
+}
+
+// coddySessionArtifactGet streams only a manifest-registered immutable artifact.
+func (s *Server) coddySessionArtifactGet(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Range") != "" || r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":{"message":"artifact ranges are not supported"}}`, http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	a, path, err := session.ReadArtifact(st.GetPersistedSessionDir(), artifactID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.ReplaceAll(strings.ReplaceAll(a.Name, "\r", "_"), "\n", "_")
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", "attachment; filename*=UTF-8''"+url.PathEscape(name))
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("stream session artifact", "error", err)
+	}
+}
+
+// coddySessionArtifactPreviewGet serves only a verified image artifact inline.
+// Non-image files remain download-only through the artifact route.
+func (s *Server) coddySessionArtifactPreviewGet(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	a, path, err := session.ReadArtifact(st.GetPersistedSessionDir(), artifactID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil || hex.EncodeToString(h.Sum(nil)) != a.SHA256 {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	buf := make([]byte, 512)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		http.NotFound(w, r)
+		return
+	}
+	mimeType := http.DetectContentType(buf[:n])
+	if !strings.HasPrefix(mimeType, "image/") {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	if _, err := io.Copy(w, f); err != nil {
+		s.log.Warn("stream session artifact preview", "error", err)
+	}
+}
+
+// coddySessionArtifactRevealPost asks the host desktop to reveal only the
+// verified source path stored for this session artifact. The client supplies
+// neither a path nor a command.
+func (s *Server) coddySessionArtifactRevealPost(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(r.PathValue("id"))
+	artifactID := strings.TrimSpace(r.PathValue("artifactID"))
+	if artifactID == "" || filepath.Base(artifactID) != artifactID {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.coddyEnsureLoaded(w, r, id)
+	if st == nil {
+		return
+	}
+	path, err := session.ArtifactSourcePath(st.GetPersistedSessionDir(), st.GetCWD(), artifactID)
+	if err != nil {
+		if errors.Is(err, session.ErrArtifactSourceUnavailable) {
+			http.Error(w, `{"error":{"message":"artifact source is unavailable"}}`, http.StatusGone)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if err := platform.RevealFile(path); err != nil {
+		if errors.Is(err, platform.ErrRevealHeadless) || errors.Is(err, platform.ErrRevealUnsupported) {
+			http.Error(w, `{"error":{"message":"artifact reveal is unavailable on this server"}}`, http.StatusServiceUnavailable)
+			return
+		}
+		s.log.Warn("reveal session artifact", "error", err)
+		http.Error(w, `{"error":{"message":"artifact reveal could not be started"}}`, http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) coddySessionCancelGeneration(w http.ResponseWriter, r *http.Request) {
@@ -422,17 +600,41 @@ func (s *Server) coddyDescribePost(w http.ResponseWriter, r *http.Request) {
 }
 
 type coddyToolCallRow struct {
-	ToolCallID             string          `json:"toolCallId"`
-	Name                   string          `json:"name,omitempty"`
-	Kind                   string          `json:"kind,omitempty"`
-	Status                 string          `json:"status,omitempty"`
-	StartedAt              string          `json:"startedAt,omitempty"`
-	FinishedAt             string          `json:"finishedAt,omitempty"`
-	ArgsPreview            string          `json:"argsPreview,omitempty"`
-	ResultPreview          string          `json:"resultPreview,omitempty"`
-	ResultPreviewTruncated bool            `json:"resultPreviewTruncated,omitempty"`
-	ResultTotalLines       int             `json:"resultTotalLines,omitempty"`
-	PlanSnapshot           []acp.PlanEntry `json:"planSnapshot,omitempty"`
+	ToolCallID             string                   `json:"toolCallId"`
+	Name                   string                   `json:"name,omitempty"`
+	Kind                   string                   `json:"kind,omitempty"`
+	Status                 string                   `json:"status,omitempty"`
+	StartedAt              string                   `json:"startedAt,omitempty"`
+	FinishedAt             string                   `json:"finishedAt,omitempty"`
+	ArgsPreview            string                   `json:"argsPreview,omitempty"`
+	ResultPreview          string                   `json:"resultPreview,omitempty"`
+	ResultPreviewTruncated bool                     `json:"resultPreviewTruncated,omitempty"`
+	ResultTotalLines       int                      `json:"resultTotalLines,omitempty"`
+	PlanSnapshot           []acp.PlanEntry          `json:"planSnapshot,omitempty"`
+	Artifacts              []map[string]interface{} `json:"artifacts,omitempty"`
+}
+
+func artifactDTOs(sessionID string, artifacts []llm.Artifact) []map[string]interface{} {
+	if sessionID == "" || len(artifacts) == 0 {
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(artifacts))
+	for _, a := range artifacts {
+		if a.ID == "" {
+			continue
+		}
+		row := map[string]interface{}{"id": a.ID, "name": a.Name, "sha256": a.SHA256, "size": a.Size, "sourcePath": a.SourcePath, "relativePath": a.SourceRelativePath, "url": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID), "revealUrl": "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/reveal"}
+		if artifactImageName(a.Name) {
+			row["previewUrl"] = "/coddy/sessions/" + url.PathEscape(sessionID) + "/artifacts/" + url.PathEscape(a.ID) + "/preview"
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func artifactImageName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".jpg") || strings.HasSuffix(lower, ".jpeg") || strings.HasSuffix(lower, ".gif") || strings.HasSuffix(lower, ".webp") || strings.HasSuffix(lower, ".bmp")
 }
 
 func previewText(s string, max int) string {
@@ -596,6 +798,7 @@ func (s *Server) coddyToolCallsList(w http.ResponseWriter, r *http.Request) {
 			}
 			ordered[i].row.Status = "completed"
 			coddyApplyResultPreview(&ordered[i].row, m.Content)
+			ordered[i].row.Artifacts = artifactDTOs(id, m.Artifacts)
 		}
 	}
 
@@ -660,6 +863,12 @@ func (s *Server) coddyToolCallGet(w http.ResponseWriter, r *http.Request) {
 		"meta":       meta,
 		"args":       args,
 		"result":     full,
+	}
+	for _, m := range st.GetMessages() {
+		if m.Role == llm.RoleTool && m.ToolCallID == toolCallID {
+			payload["artifacts"] = artifactDTOs(id, m.Artifacts)
+			break
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -834,18 +1043,37 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"message":"order must be \"asc\" or \"desc\""}}`, http.StatusBadRequest)
 		return
 	}
-	rows, err := fs.ListSnapshotsWith(session.ListOptions{
+	listOpts := session.ListOptions{
 		CWD:                  strings.TrimSpace(r.URL.Query().Get("cwd")),
 		IncludeSchedulerRuns: includeScheduler,
 		IncludeSubagents:     includeSubagents,
 		Archived:             archived,
 		Tags:                 session.ParseTagList(r.URL.Query().Get("tags")),
 		Origin:               origin,
-	})
+	}
+	rows, err := fs.ListSnapshotsWith(listOpts)
 	if err != nil {
 		s.log.Error("coddy sessions list", "error", err)
 		http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
 		return
+	}
+	// The rail badge is global to History, not to the page or any filter the
+	// reader currently has open. Active child sessions contribute even though
+	// History itself keeps their rows hidden.
+	historyRows := rows
+	if !isNormalHistoryList(listOpts) || !listOpts.IncludeSubagents {
+		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{IncludeSubagents: true})
+		if err != nil {
+			s.log.Error("coddy sessions active count", "error", err)
+			http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	activeCount := 0
+	for _, row := range historyRows {
+		if s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(fs.SessionPath(row.SessionID)) {
+			activeCount++
+		}
 	}
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		rows, err = fs.FilterSnapshotListForSearch(rows, q)
@@ -872,16 +1100,23 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 			return total
 		}
 	}
+	if sortKey == session.SortMessages {
+		// A message sort compares every candidate, so legacy/stale count
+		// metadata is enriched before the whole-list sort. Default History
+		// never calls this and therefore never opens transcripts for counts.
+		fs.EnrichMessageCounts(rows)
+	}
 	session.SortSessionList(rows, sortKey, sortOrder, tokensOf)
 
 	limit, offset := parseLimitCursor(r.URL.Query())
 	start := offset
 	if start >= len(rows) {
 		out := map[string]interface{}{
-			"object":     "coddy.session_list",
-			"sessions":   []interface{}{},
-			"nextCursor": nil,
-			"hasMore":    false,
+			"object":       "coddy.session_list",
+			"sessions":     []interface{}{},
+			"nextCursor":   nil,
+			"hasMore":      false,
+			"active_count": activeCount,
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
@@ -894,12 +1129,18 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 	slice := rows[start:end]
 	includeActivity := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_activity")), "true")
 	includeStats := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_stats")), "true")
+	if includeStats {
+		// Statistics are emitted for page rows only, so legacy/stale transcript
+		// counts are decoded only after sorting and paging have selected them.
+		fs.EnrichMessageCounts(slice)
+	}
 	// One walk of the task pool for the whole listing, rather than one per row.
 	var backgroundRunning map[string]int
 	if includeActivity {
 		backgroundRunning = bgtask.Default().RunningCountsBySession()
 	}
 	sessions := make([]map[string]interface{}, 0, len(slice))
+	repoRoots := make(map[string]string)
 	for _, row := range slice {
 		ent := map[string]interface{}{
 			"id": row.SessionID,
@@ -912,6 +1153,14 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		}
 		if row.CWD != "" {
 			ent["cwd"] = row.CWD
+			root, seen := repoRoots[row.CWD]
+			if !seen {
+				root = sessionRepoRoot(row.CWD)
+				repoRoots[row.CWD] = root
+			}
+			if root != "" {
+				ent["repoRoot"] = root
+			}
 		}
 		if len(row.Tags) > 0 {
 			ent["tags"] = row.Tags
@@ -953,12 +1202,14 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		if includeActivity {
 			dir := fs.SessionPath(row.SessionID)
 			turnActive := s.mgr.SessionTurnActiveInProcess(row.SessionID) || session.TurnLockHeld(dir)
-			actSeq, readSeq, _ := fs.ReadDiskActivity(row.SessionID)
+			actSeq, readSeq, lastErrorSeq, _ := fs.ReadDiskActivity(row.SessionID)
 			ent["turnActive"] = turnActive
 			ent["activitySeq"] = actSeq
 			ent["readActivitySeq"] = readSeq
+			ent["lastErrorSeq"] = lastErrorSeq
 			ent["unreadComplete"] = actSeq > readSeq && !turnActive
 			ent["permissionPending"] = session.PendingPermissionHeld(dir)
+			ent["questionPending"] = QuestionPending(row.SessionID)
 			// Detached work outlives the turn that started it, so a session
 			// with no turn in flight is still not idle while a task runs.
 			// The count is the pool's own, which already leaves out the
@@ -973,13 +1224,26 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		nextCursor = strconv.Itoa(end)
 	}
 	out := map[string]interface{}{
-		"object":     "coddy.session_list",
-		"sessions":   sessions,
-		"nextCursor": nextCursor,
-		"hasMore":    end < len(rows),
+		"object":       "coddy.session_list",
+		"sessions":     sessions,
+		"nextCursor":   nextCursor,
+		"hasMore":      end < len(rows),
+		"active_count": activeCount,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// isNormalHistoryList reports whether opts are the unfiltered working History
+// scope used by active_count. Keeping it here makes the single-scan path
+// explicit without changing the badge semantics for filtered requests.
+func isNormalHistoryList(opts session.ListOptions) bool {
+	return strings.TrimSpace(opts.CWD) == "" &&
+		!opts.IncludeSchedulerRuns &&
+		!opts.IncludeSubagents &&
+		opts.Archived == session.ArchiveExclude &&
+		len(opts.Tags) == 0 &&
+		opts.Origin == session.OriginAny
 }
 
 // coddySessionTokenUsage reads the provider token totals a session accumulated.
@@ -1018,7 +1282,7 @@ func (s *Server) coddySessionActivityGet(w http.ResponseWriter, r *http.Request)
 	}
 	dir := fs.SessionPath(id)
 	turnActive := s.mgr.SessionTurnActiveInProcess(id) || session.TurnLockHeld(dir)
-	actSeq, readSeq, err := fs.ReadDiskActivity(id)
+	actSeq, readSeq, lastErrorSeq, err := fs.ReadDiskActivity(id)
 	if err != nil {
 		s.log.Error("coddy session activity", "error", err)
 		http.Error(w, `{"error":{"message":"read failed"}}`, http.StatusInternalServerError)
@@ -1030,7 +1294,9 @@ func (s *Server) coddySessionActivityGet(w http.ResponseWriter, r *http.Request)
 		"turnActive":      turnActive,
 		"activitySeq":     actSeq,
 		"readActivitySeq": readSeq,
+		"lastErrorSeq":    lastErrorSeq,
 		"unreadComplete":  actSeq > readSeq && !turnActive,
+		"questionPending": QuestionPending(id),
 	}
 	s.addTurnProgress(out, id)
 	w.Header().Set("Content-Type", "application/json")
@@ -1073,20 +1339,26 @@ func llmMsgsToCoddyOpenAI(msgs []llm.Message) []map[string]interface{} {
 	return llmMsgsToCoddyOpenAIForSession("", "", msgs)
 }
 
-// isAssetOf reports whether path is a regular file directly inside assetsDir.
-// Symlinks do not count: the address the transcript hands out promises bytes of
-// this session's bundle, and a link planted in that directory - the agent can
-// write there, and the prompt tells it where - would make it serve whatever it
-// points at.
-func isAssetOf(assetsDir, path string) bool {
-	if assetsDir == "" || path == "" {
-		return false
-	}
-	if filepath.Dir(path) != filepath.Clean(assetsDir) {
-		return false
-	}
+// isRegularFile reports whether path is a regular file, a link not followed.
+func isRegularFile(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// recordedAsset is the name under assetsDir of the copy a part recorded at
+// path: its base name, when path was in this assets directory or in the one
+// the bundle had before it moved. A path anywhere else names no copy: its base
+// name would either answer 404 or, worse, name a different file that happens
+// to share it.
+func recordedAsset(assetsDir, path string) string {
+	if assetsDir == "" || path == "" {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	if dir != filepath.Clean(assetsDir) && filepath.Base(dir) != filepath.Base(session.AssetsPath("")) {
+		return ""
+	}
+	return filepath.Base(path)
 }
 
 func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Message) []map[string]interface{} {
@@ -1104,6 +1376,9 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 		}
 		if m.Role == llm.RoleTool && m.ToolCallID != "" {
 			item["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.Artifacts) > 0 {
+			item["artifacts"] = artifactDTOs(sessionID, m.Artifacts)
 		}
 		if len(m.ToolCalls) > 0 {
 			tc := make([]map[string]interface{}, 0, len(m.ToolCalls))
@@ -1132,7 +1407,9 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 			// Nobody typed this message: a woken turn opened with it.
 			item["background_wake"] = m.BackgroundWake
 		}
-		if m.Role == llm.RoleUser && len(m.ImageParts) > 0 {
+		// A prompt's attachments, and the pictures a tool call showed the
+		// model (read on an image file), which stay on that call's result.
+		if (m.Role == llm.RoleUser || m.Role == llm.RoleTool) && len(m.ImageParts) > 0 {
 			files := make([]map[string]interface{}, 0, len(m.ImageParts))
 			for _, part := range m.ImageParts {
 				name := strings.TrimSpace(part.Name)
@@ -1143,19 +1420,20 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 					"name":      name,
 					"mime_type": imagePartMIMEType(part),
 				}
-				if sessionID != "" && part.FilePath != "" && part.ThumbnailPath != "" {
-					assetName := filepath.Base(part.FilePath)
-					file["preview_url"] = "/coddy/sessions/" + url.PathEscape(sessionID) +
-						"/assets/" + url.PathEscape(assetName) + "/thumbnail"
-				}
-				// The full-size original, for a preview card to open enlarged.
-				// The address is a name under this session's assets directory,
-				// so a part saved anywhere else gets none: its base name would
-				// either 404 or, worse, name a different file that happens to
-				// share it.
-				if sessionID != "" && assetsDir != "" && isAssetOf(assetsDir, part.FilePath) {
-					file["url"] = "/coddy/sessions/" + url.PathEscape(sessionID) +
-						"/assets/" + url.PathEscape(filepath.Base(part.FilePath))
+				// Both addresses are names under this session's assets directory,
+				// given only for a regular file there, so a card never loads a
+				// missing one. Symlinks do not count: the address promises bytes
+				// of this session's bundle, and a link planted in that directory -
+				// the agent can write there, and the prompt tells it where - would
+				// make it serve whatever it points at.
+				if asset := recordedAsset(assetsDir, part.FilePath); sessionID != "" && asset != "" {
+					if part.ThumbnailPath != "" && isRegularFile(session.ThumbnailPathInAssets(assetsDir, asset)) {
+						file["preview_url"] = session.AssetThumbnailRoute(sessionID, asset)
+					}
+					// The full-size original, for a preview card to open enlarged.
+					if isRegularFile(filepath.Join(assetsDir, asset)) {
+						file["url"] = session.AssetRoute(sessionID, asset)
+					}
 				}
 				files = append(files, file)
 			}
@@ -1179,6 +1457,9 @@ func llmMsgsToCoddyOpenAIForSession(sessionID, assetsDir string, msgs []llm.Mess
 }
 
 func imagePartMIMEType(part llm.ImagePart) string {
+	if part.MIMEType != "" {
+		return part.MIMEType
+	}
 	if strings.HasPrefix(part.DataURL, "data:") {
 		end := strings.IndexAny(part.DataURL[5:], ";,")
 		if end >= 0 {
@@ -1377,12 +1658,41 @@ func writePageQueryError(w http.ResponseWriter, err error) {
 	http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
 }
 
+// messageMCPActivationRequested recognizes the single transcript read the
+// SPA uses when it selects a session. Activation is deliberately unavailable
+// to older or rebased history reads and requires the session header to bind the request
+// to the selected chat rather than merely its URL path.
+func messageMCPActivationRequested(r *http.Request, id string) (bool, error) {
+	q := r.URL.Query()
+	raw, present := q["activate_mcp"]
+	if !present {
+		return false, nil
+	}
+	if len(raw) != 1 || raw[0] != "1" {
+		return false, errors.New("activate_mcp must be 1")
+	}
+	for _, name := range []string{"before", "from"} {
+		if _, paged := q[name]; paged {
+			return false, errors.New("activate_mcp is only valid on an initial transcript read")
+		}
+	}
+	if strings.TrimSpace(r.Header.Get("X-Coddy-Session-ID")) != id {
+		return false, errors.New("activate_mcp requires X-Coddy-Session-ID matching the path id")
+	}
+	return true, nil
+}
+
 func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
+	activateMCP, err := messageMCPActivationRequested(r, id)
+	if err != nil {
+		writePageQueryError(w, err)
+		return
+	}
 	query, err := messagePageQuery(r)
 	if err != nil {
 		writePageQueryError(w, err)
@@ -1391,6 +1701,12 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 	st := s.coddyEnsureLoaded(w, r, id)
 	if st == nil {
 		return
+	}
+	if activateMCP {
+		if err := s.mgr.ActivateDeferredMCP(r.Context(), id); err != nil {
+			s.log.Warn("deferred MCP activation did not start with transcript read",
+				"session", id, "error", err)
+		}
 	}
 	msgs, rev := st.MessagesWithRev()
 	page := session.PageMessages(msgs, query)
@@ -1440,7 +1756,9 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 			out["settings"] = snap
 		}
 	}
-	if u := page.UILog(msgs, st.GetUILog()); len(u) > 0 {
+	// A session saved before only the agent's own settings changes were
+	// noted keeps the notices of the operator's: they are not shown.
+	if u := page.UILog(msgs, session.VisibleUILog(msgs, st.GetUILog())); len(u) > 0 {
 		rows := make([]map[string]interface{}, 0, len(u))
 		for _, e := range u {
 			rows = append(rows, map[string]interface{}{
@@ -1565,15 +1883,21 @@ func (s *Server) coddySessionPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.MarkActivityRead {
-		st.MarkActivityReadSynced()
 		did = true
+		if fs != nil {
+			activitySeq, readActivitySeq, lastErrorSeq, err := fs.MarkSessionActivityRead(id, st)
+			if err != nil {
+				s.log.Warn("patch session meta activity", "id", id, "error", err)
+				st.MarkActivityReadSynced()
+			} else {
+				st.RestoreActivityFromSnapshot(activitySeq, readActivitySeq, lastErrorSeq)
+			}
+		} else {
+			st.MarkActivityReadSynced()
+		}
 		resp["activitySeq"] = st.GetActivitySeq()
 		resp["readActivitySeq"] = st.GetReadActivitySeq()
-		if fs != nil {
-			if err := fs.PatchSessionMetaActivitySync(st); err != nil {
-				s.log.Warn("patch session meta activity", "id", id, "error", err)
-			}
-		}
+		resp["lastErrorSeq"] = st.GetLastErrorSeq()
 	}
 	// The same folding and the same limit the agent's session_describe writes
 	// through: a title is a row of a list whichever surface typed it, and two

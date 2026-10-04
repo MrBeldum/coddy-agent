@@ -57,6 +57,23 @@ afterEach(() => {
 });
 
 describe("WorkspaceChips", () => {
+  it("shows the parent project and the worktree branch", () => {
+    renderChips({
+      context: {
+        ...gitCtx,
+        path: "/repos/coddy-agent/.coddy/worktrees/feature-login",
+        name: "feature-login",
+        branch: "feature/login",
+        is_worktree: true,
+      },
+    });
+    expect(screen.getByTestId("composer-workspace-chip").textContent).toContain(
+      "coddy-agent",
+    );
+    expect(screen.getByTestId("composer-branch-chip").textContent).toContain(
+      "feature/login",
+    );
+  });
   it("renders nothing without a context", () => {
     const { container } = renderChips({ context: null });
     expect(container.querySelector(".composer-context-chips")).toBeNull();
@@ -107,6 +124,44 @@ describe("WorkspaceChips", () => {
     expect(props.onPickBranch).toHaveBeenCalledWith("feature/login", true);
   });
 
+  it("filters branches locally and explains an empty result", () => {
+    renderChips({
+      context: {
+        ...gitCtx,
+        branches: ["main", "feature/login", "fix/typo"],
+      },
+    });
+    fireEvent.click(screen.getByTestId("composer-branch-chip"));
+    fireEvent.change(screen.getByTestId("workspace-branch-filter"), {
+      target: { value: "login" },
+    });
+
+    expect(
+      screen.getByTestId("workspace-branch-row-feature/login"),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("workspace-branch-row-main")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("workspace-branch-filter"), {
+      target: { value: "missing" },
+    });
+    expect(screen.getByTestId("workspace-branch-empty")).toHaveTextContent(
+      "No branches match",
+    );
+  });
+
+  it("resets a branch filter when the menu closes", () => {
+    renderChips();
+    fireEvent.click(screen.getByTestId("composer-branch-chip"));
+    fireEvent.change(screen.getByTestId("workspace-branch-filter"), {
+      target: { value: "login" },
+    });
+    fireEvent.click(screen.getByTestId("composer-branch-chip"));
+    fireEvent.click(screen.getByTestId("composer-branch-chip"));
+
+    expect(screen.getByTestId("workspace-branch-filter")).toHaveValue("");
+    expect(screen.getByTestId("workspace-branch-row-main")).toBeTruthy();
+  });
+
   it("locks every control once the conversation started", () => {
     renderChips({ locked: true });
     expect(
@@ -134,6 +189,25 @@ describe("WorkspaceChips", () => {
     const current = screen.getByTestId("workspace-recent-row-coddy-agent");
     expect(current.className).toContain("is-selected");
     expect(screen.getByTestId("workspace-recent-row-other")).toBeTruthy();
+  });
+
+  it("filters recent folders locally and explains an empty result", () => {
+    pushWorkspaceRecent({ path: "/repos/other", name: "other" });
+    renderChips();
+    fireEvent.click(screen.getByTestId("composer-workspace-chip"));
+    fireEvent.change(screen.getByTestId("workspace-recent-filter"), {
+      target: { value: "other" },
+    });
+
+    expect(screen.getByTestId("workspace-recent-row-other")).toBeTruthy();
+    expect(screen.queryByTestId("workspace-recent-row-coddy-agent")).toBeNull();
+
+    fireEvent.change(screen.getByTestId("workspace-recent-filter"), {
+      target: { value: "missing" },
+    });
+    expect(screen.getByTestId("workspace-recent-empty")).toHaveTextContent(
+      "No recent folders match",
+    );
   });
 
   it("localizes workspace controls in Russian", () => {

@@ -14,6 +14,8 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +23,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -321,7 +324,7 @@ func TestOpenAPISpecPathsAndVersion(t *testing.T) {
 	if !ok {
 		t.Fatal("missing paths map")
 	}
-	for _, must := range []string{"/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/responses/{id}", "/coddy/sessions", "/coddy/describe", "/coddy/enhance-prompt", "/coddy/slash-commands", "/coddy/workspace/files", "/coddy/workspace/context", "/coddy/workspace/folders", "/coddy/config/schema", "/coddy/config", "/coddy/config/validate", "/coddy/config/reasoning-levels", "/coddy/providers/{name}/models", "/coddy/providers/{name}/codex-auth", "/coddy/providers/{name}/codex-auth/device", "/coddy/providers/{name}/codex-auth/device/{loginID}", "/coddy/sessions/{id}/messages", "/coddy/sessions/{id}/assets/{name}/thumbnail", "/coddy/sessions/{id}/composer-stream", "/coddy/events", "/coddy/sessions/{id}/question", "/coddy/sessions/{id}/permission", "/coddy/sessions/{id}/cancel", "/coddy/sessions/{id}/workspace", "/coddy/sessions/{id}/rewind", "/coddy/sessions/{id}/queue", "/coddy/sessions/{id}/queue/{message_id}", "/coddy/subagents", "/coddy/subagents/{name}/trust", "/coddy/subagents/{name}/untrust", "/coddy/auth/me", "/coddy/auth/login", "/coddy/auth/logout", "/coddy/docs", "/coddy/docs/page", "/coddy/docs/search"} {
+	for _, must := range []string{"/v1/models", "/v1/chat/completions", "/v1/responses", "/v1/responses/{id}", "/coddy/sessions", "/coddy/describe", "/coddy/enhance-prompt", "/coddy/slash-commands", "/coddy/workspace/files", "/coddy/workspace/context", "/coddy/workspace/folders", "/coddy/config/schema", "/coddy/config", "/coddy/config/validate", "/coddy/config/reasoning-levels", "/coddy/providers/{name}/models", "/coddy/providers/{name}/codex-auth", "/coddy/providers/{name}/codex-auth/device", "/coddy/providers/{name}/codex-auth/device/{loginID}", "/coddy/sessions/{id}/messages", "/coddy/sessions/{id}/assets/{name}/thumbnail", "/coddy/sessions/{id}/composer-stream", "/coddy/events", "/coddy/sessions/{id}/question", "/coddy/sessions/{id}/permission", "/coddy/sessions/{id}/cancel", "/coddy/sessions/{id}/workspace", "/coddy/sessions/{id}/rewind", "/coddy/sessions/{id}/queue", "/coddy/sessions/{id}/queue/{message_id}", "/coddy/subagents", "/coddy/subagents/{name}/trust", "/coddy/subagents/{name}/untrust", "/coddy/auth/me", "/coddy/auth/login", "/coddy/auth/logout", "/coddy/docs", "/coddy/docs/page", "/coddy/docs/search", "/coddy/info"} {
 		if _, ok := paths[must]; !ok {
 			t.Fatalf("paths missing key %s", must)
 		}
@@ -937,6 +940,84 @@ func TestCoddySessionsList(t *testing.T) {
 	}
 }
 
+func TestCoddySessionsListReportsGlobalActiveCount(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	runner := func(_ context.Context, _ *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
+		close(started)
+		<-release
+		return string(acp.StopReasonEndTurn), nil
+	}
+	mgr, srv, _ := testHTTPServerPersistWithRunner(t, runner)
+	ctx := context.Background()
+	active, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	patch, err := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(archived.SessionID), strings.NewReader(`{"archived":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch.Header.Set("Content-Type", "application/json")
+	patched, err := http.DefaultClient.Do(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patched.StatusCode != http.StatusOK {
+		body, _ := ioReadAllClose(patched.Body)
+		t.Fatalf("archive session: status %d body %s", patched.StatusCode, body)
+	}
+	_ = patched.Body.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = mgr.HandleSessionPrompt(context.Background(), acp.SessionPromptParams{
+			SessionID: active.SessionID,
+			Prompt:    []acp.ContentBlock{{Type: "text", Text: "hold"}},
+		})
+	}()
+	<-started
+	t.Cleanup(func() {
+		close(release)
+		wg.Wait()
+	})
+
+	res, err := http.Get(ts.URL + "/coddy/sessions?limit=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ioReadAllClose(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", res.StatusCode, body)
+	}
+	var got struct {
+		ActiveCount int `json:"active_count"`
+		Sessions    []struct {
+			ID string `json:"id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ActiveCount != 1 {
+		t.Fatalf("active_count = %d, want 1: %s", got.ActiveCount, body)
+	}
+	if len(got.Sessions) != 1 || got.Sessions[0].ID != active.SessionID {
+		t.Fatalf("limit=1 sessions = %+v, want only active session %s", got.Sessions, active.SessionID)
+	}
+}
+
 func TestCoddySessionActivityGet(t *testing.T) {
 	mgr, srv, _ := testHTTPServerPersist(t)
 	ctx := context.Background()
@@ -951,7 +1032,6 @@ func TestCoddySessionActivityGet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -972,6 +1052,7 @@ func TestCoddySessionActivityGet(t *testing.T) {
 		TurnActive      bool   `json:"turnActive"`
 		ActivitySeq     uint64 `json:"activitySeq"`
 		ReadActivitySeq uint64 `json:"readActivitySeq"`
+		LastErrorSeq    uint64 `json:"lastErrorSeq"`
 		UnreadComplete  bool   `json:"unreadComplete"`
 	}
 	if err := json.Unmarshal(b, &parsed); err != nil {
@@ -985,6 +1066,9 @@ func TestCoddySessionActivityGet(t *testing.T) {
 	}
 	if parsed.ActivitySeq < 1 {
 		t.Fatalf("want activitySeq>=1 got %d", parsed.ActivitySeq)
+	}
+	if parsed.LastErrorSeq != 0 {
+		t.Fatalf("successful turn lastErrorSeq = %d, want 0", parsed.LastErrorSeq)
 	}
 	if !parsed.UnreadComplete {
 		t.Fatal("expected unreadComplete true after a completed turn with read cursor at zero")
@@ -1057,6 +1141,161 @@ func TestCoddySessionPatchMarkActivityRead(t *testing.T) {
 	}
 }
 
+func TestCoddySessionPatchMarkActivityReadMergesNewerDiskActivity(t *testing.T) {
+	mgr, srv, sessRoot := testHTTPServerPersist(t)
+	store := &session.FileStore{Root: sessRoot}
+	ctx := context.Background()
+	res, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := res.SessionID
+	if _, err := mgr.HandleSessionPrompt(ctx, acp.SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAt := snap.Meta.UpdatedAt
+	snap.Meta.ActivitySeq = 7
+	snap.Meta.ReadActivitySeq = 2
+	snap.Meta.LastErrorSeq = 7
+	metaPath := filepath.Join(store.SessionPath(sid), "session.json")
+	metaBytes, err := json.MarshalIndent(snap.Meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	metaBytes = append(metaBytes, '\n')
+	if err := os.WriteFile(metaPath, metaBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(sid), strings.NewReader(`{"markActivityRead":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Coddy-Session-ID", sid)
+	resHTTP, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ioReadAllClose(resHTTP.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resHTTP.StatusCode != http.StatusOK {
+		t.Fatalf("status %d %s", resHTTP.StatusCode, body)
+	}
+	var parsed struct {
+		ActivitySeq     uint64 `json:"activitySeq"`
+		ReadActivitySeq uint64 `json:"readActivitySeq"`
+		LastErrorSeq    uint64 `json:"lastErrorSeq"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ActivitySeq != 7 || parsed.ReadActivitySeq != 7 || parsed.LastErrorSeq != 7 {
+		t.Fatalf("PATCH returned stale activity counters: %+v", parsed)
+	}
+	snap, err = store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Meta.ActivitySeq != 7 || snap.Meta.ReadActivitySeq != 7 || snap.Meta.LastErrorSeq != 7 {
+		t.Fatalf("PATCH changed disk activity counters incorrectly: %+v", snap.Meta)
+	}
+	if snap.Meta.UpdatedAt != updatedAt {
+		t.Fatalf("PATCH changed updatedAt: before %q after %q", updatedAt, snap.Meta.UpdatedAt)
+	}
+}
+
+func TestCoddySessionPatchMarkActivityReadDoesNotRestoreStaleDiskActivity(t *testing.T) {
+	mgr, srv, sessRoot := testHTTPServerPersist(t)
+	store := &session.FileStore{Root: sessRoot}
+	ctx := context.Background()
+	res, err := mgr.HandleSessionNew(ctx, acp.SessionNewParams{CWD: "/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := res.SessionID
+	if _, err := mgr.HandleSessionPrompt(ctx, acp.SessionPromptParams{
+		SessionID: sid,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	live := mgr.SessionByID(sid)
+	if live == nil {
+		t.Fatal("session was not retained by manager")
+	}
+	live.RestoreActivityFromSnapshot(9, 6, 9)
+	snap, err := store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Meta.ActivitySeq = 4
+	snap.Meta.ReadActivitySeq = 1
+	snap.Meta.LastErrorSeq = 4
+	metaPath := filepath.Join(store.SessionPath(sid), "session.json")
+	metaBytes, err := json.MarshalIndent(snap.Meta, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, append(metaBytes, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/coddy/sessions/"+url.PathEscape(sid), strings.NewReader(`{"markActivityRead":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Coddy-Session-ID", sid)
+	resHTTP, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := ioReadAllClose(resHTTP.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resHTTP.StatusCode != http.StatusOK {
+		t.Fatalf("status %d %s", resHTTP.StatusCode, body)
+	}
+	var parsed struct {
+		ActivitySeq     uint64 `json:"activitySeq"`
+		ReadActivitySeq uint64 `json:"readActivitySeq"`
+		LastErrorSeq    uint64 `json:"lastErrorSeq"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ActivitySeq != 9 || parsed.ReadActivitySeq != 9 || parsed.LastErrorSeq != 9 {
+		t.Fatalf("PATCH restored stale disk activity in response: %+v", parsed)
+	}
+	if got := [3]uint64{live.GetActivitySeq(), live.GetReadActivitySeq(), live.GetLastErrorSeq()}; got != [3]uint64{9, 9, 9} {
+		t.Fatalf("PATCH restored stale disk activity in memory: %v", got)
+	}
+	snap, err = store.ReadSnapshot(sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Meta.ActivitySeq != 9 || snap.Meta.ReadActivitySeq != 9 || snap.Meta.LastErrorSeq != 9 {
+		t.Fatalf("PATCH left stale disk activity: %+v", snap.Meta)
+	}
+}
+
 func TestCoddySessionsListIncludeActivity(t *testing.T) {
 	mgr, srv, _ := testHTTPServerPersist(t)
 	ctx := context.Background()
@@ -1071,6 +1310,8 @@ func TestCoddySessionsListIncludeActivity(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	registerQuestionWait(sid, "q-list")
+	defer unregisterQuestionWait(sid, "q-list")
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -1107,6 +1348,14 @@ func TestCoddySessionsListIncludeActivity(t *testing.T) {
 	}
 	if _, ok := hit["activitySeq"]; !ok {
 		t.Fatalf("missing activitySeq")
+	}
+	if value, ok := hit["lastErrorSeq"]; !ok {
+		t.Fatalf("missing lastErrorSeq")
+	} else if value != float64(0) {
+		t.Fatalf("successful turn lastErrorSeq = %v, want 0", value)
+	}
+	if value, ok := hit["questionPending"].(bool); !ok || !value {
+		t.Fatalf("questionPending = %v, want true", hit["questionPending"])
 	}
 	if _, ok := hit["backgroundRunning"]; !ok {
 		t.Fatalf("missing backgroundRunning in %+v", hit)
@@ -1338,6 +1587,55 @@ func TestCoddyMessagesIncludesUILogAfterAgentError(t *testing.T) {
 	}
 	if !strings.Contains(body.UILog[0].Message, "forced LLM failure") {
 		t.Fatalf("message %q", body.UILog[0].Message)
+	}
+}
+
+// A session saved before only the agent's own settings changes were noted
+// holds a notice of every change: the model and the mode `coddy -p` started it
+// with, a command. A reload of its transcript shows none of them and keeps
+// every other row.
+func TestCoddyMessagesHideTheOperatorsSettingsNotices(t *testing.T) {
+	mgr, srv, _ := testHTTPServerPersist(t)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	sid := "sess_legacy_notices_1"
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/responses", strings.NewReader(`{"model":"agent","input":"review this","stream":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Coddy-Session-ID", sid)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := ioReadAllClose(res.Body); res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /v1/responses: %d %s", res.StatusCode, b)
+	}
+	st := mgr.SessionByID(sid)
+	st.AppendUILogNotice(1, "Model: openai/gpt-4o for this session")
+	st.AppendUILogNotice(1, "Mode: agent for this session")
+	st.AppendUILogNotice(1, "Hook (Stop): the checks passed")
+
+	ms, err := http.Get(ts.URL + "/coddy/sessions/" + sid + "/messages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mb, err := ioReadAllClose(ms.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		UILog []struct {
+			Message string `json:"message"`
+		} `json:"uiLog"`
+	}
+	if err := json.Unmarshal(mb, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.UILog) != 1 || body.UILog[0].Message != "Hook (Stop): the checks passed" {
+		t.Fatalf("uiLog = %s, want only the hook's row", mb)
 	}
 }
 
@@ -1736,6 +2034,10 @@ func TestResponsesDirectPersistsAssistantModel(t *testing.T) {
 
 func TestCoddySlashCommandsGetPagingAndPrefix(t *testing.T) {
 	root := t.TempDir()
+	// The default skill folders are read beside skills.dirs, ~/.agents/skills
+	// among them: an empty home keeps the operator's skills out of the count.
+	t.Setenv("HOME", filepath.Join(root, "user-home"))
+	t.Setenv("USERPROFILE", filepath.Join(root, "user-home"))
 	home := filepath.Join(root, "home")
 	skillsDir := filepath.Join(root, "skills")
 	if err := os.MkdirAll(filepath.Join(home, "memory"), 0o755); err != nil {
@@ -2888,6 +3190,29 @@ func TestHTTPAuthHotReloadEnableRotateDisable(t *testing.T) {
 	}
 }
 
+// A server handed a configuration the manager has already replaced follows
+// the manager. The replacement was announced before the server subscribed and
+// nobody announces it again, so a token rotated while `coddy serve` was
+// starting the server from an older snapshot stayed unenforced until the next
+// save (issue #401).
+func TestHTTPAuthFollowsAConfigurationReplacedBeforeTheServerSubscribed(t *testing.T) {
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	handed := cfgWithAuth("old-token")
+	mgr := session.NewManager(handed, noopSender{}, runner, slog.Default(), "/tmp", nil)
+	mgr.ReplaceConfig(cfgWithAuth("new-token"))
+	srv := New(handed, mgr, slog.Default(), "/tmp")
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	if got := authGET(t, ts.URL+"/v1/models", "old-token"); got != http.StatusUnauthorized {
+		t.Fatalf("the replaced token: status %d want 401", got)
+	}
+	if got := authGET(t, ts.URL+"/v1/models", "new-token"); got != http.StatusOK {
+		t.Fatalf("the current token: status %d want 200", got)
+	}
+}
+
 func TestHTTPAuthExtraTokensEnableAuth(t *testing.T) {
 	srv, ts := authTestServer(t, cfgWithAuth(""))
 	srv.SetExtraAuthTokens([]string{"cli-token"})
@@ -3260,13 +3585,14 @@ func TestCompactEndpointSuccessCounts(t *testing.T) {
 }
 
 // TestCoddySkillsSourcesSyncDelete exercises the remote-skill management routes
-// without any network: add a source (persisted to config.yaml), an empty sync,
-// and delete of a pre-seeded remote skill.
+// without any network: add a source (declared in <home>/marketplaces.json), an
+// empty sync, and delete of a pre-seeded remote skill.
 func TestCoddySkillsSourcesSyncDelete(t *testing.T) {
+	offlineSystemSources(t)
 	home := t.TempDir()
 	t.Setenv("CODDY_HOME", home) // keep ManagedDir() inside the temp home
 	cfgPath := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("skills:\n  sources: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -3281,7 +3607,7 @@ func TestCoddySkillsSourcesSyncDelete(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
-	// Add a source; it should persist to config.yaml (no sync).
+	// Add a source; it should be declared in <home>/marketplaces.json (no sync).
 	addBody := `{"source":"owner/repo"}`
 	addReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/coddy/skills/sources", strings.NewReader(addBody))
 	addReq.Header.Set("Content-Type", "application/json")
@@ -3293,15 +3619,20 @@ func TestCoddySkillsSourcesSyncDelete(t *testing.T) {
 	if addRes.StatusCode != http.StatusOK {
 		t.Fatalf("add source status %d %s", addRes.StatusCode, ab)
 	}
-	data, _ := os.ReadFile(cfgPath)
+	data, _ := os.ReadFile(config.GlobalMarketplacesPath(home))
 	if !strings.Contains(string(data), "owner/repo") {
 		t.Fatalf("source not persisted: %s", data)
 	}
+	if cfgData, _ := os.ReadFile(cfgPath); strings.Contains(string(cfgData), "owner/repo") {
+		t.Fatalf("the source was written into config.yaml: %s", cfgData)
+	}
 
-	// Empty sync (no reachable sources fetched here beyond the one we just added,
-	// which would need network) — assert the endpoint responds with a result shape.
-	// Reset sources to empty so sync does no network and returns ok cleanly.
-	srv.activeCfg().Skills.Sources = nil
+	// Empty sync (the source just added would need network) - assert the
+	// endpoint responds with a result shape. Declare no sources again so sync
+	// does no network and returns ok cleanly.
+	if err := config.WriteMarketplacesFile(config.GlobalMarketplacesPath(home), config.MarketplacesFile{}); err != nil {
+		t.Fatal(err)
+	}
 	syncReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/coddy/skills/sync", nil)
 	syncRes, err := http.DefaultClient.Do(syncReq)
 	if err != nil {
@@ -3362,7 +3693,7 @@ func TestCoddySkillsNewRoutesEdgeCases(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODDY_HOME", home)
 	cfgPath := filepath.Join(home, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("skills:\n  sources: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -3426,6 +3757,104 @@ func TestCoddySkillsNewRoutesEdgeCases(t *testing.T) {
 	_, _ = ioReadAllClose(delRes.Body)
 	if delRes.StatusCode != http.StatusBadRequest {
 		t.Fatalf("delete source without query status %d, want 400", delRes.StatusCode)
+	}
+
+	post := func(path, body string) (int, []byte) {
+		t.Helper()
+		res, err := http.Post(ts.URL+path, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := ioReadAllClose(res.Body)
+		return res.StatusCode, b
+	}
+	// An unknown scope or kind is refused; nothing is written.
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/repo","scope":"nope"}`); status != http.StatusBadRequest {
+		t.Fatalf("add with an unknown scope = %d %s, want 400", status, b)
+	}
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/repo","kind":"nope"}`); status != http.StatusBadRequest {
+		t.Fatalf("add with an unknown kind = %d %s, want 400", status, b)
+	}
+	// Declaring a marketplace installs nothing, so asking to sync it as well
+	// is refused before anything is declared or fetched.
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/catalog","kind":"marketplace","sync":true}`); status != http.StatusBadRequest || !strings.Contains(string(b), "installs nothing") {
+		t.Fatalf("add a marketplace with sync = %d %s, want 400", status, b)
+	}
+	if file, _ := config.ReadMarketplacesFile(config.GlobalMarketplacesPath(home)); len(file.Marketplaces) != 0 {
+		t.Fatalf("the refused marketplace was declared: %+v", file)
+	}
+	// A trust request must name the entry, and the entry must be declared.
+	if status, _ := post("/coddy/skills/sources/trust", `{}`); status != http.StatusBadRequest {
+		t.Fatalf("trust without a key = %d, want 400", status)
+	}
+	if status, _ := post("/coddy/skills/sources/trust", `{"key":"owner/ghost"}`); status != http.StatusBadRequest {
+		t.Fatalf("trust of an undeclared entry = %d, want 400", status)
+	}
+	// An entry the checkout rewrote since it was listed is refused with 409,
+	// and one the operator adds to the project is approved by writing it.
+	if err := config.WriteMarketplacesFile(config.ProjectMarketplacesPath(home), config.MarketplacesFile{Sources: []string{"owner/project"}}); err != nil {
+		t.Fatal(err)
+	}
+	if status, b := post("/coddy/skills/sources/trust", `{"key":"owner/project","fingerprint":"sha256:shown-before"}`); status != http.StatusConflict {
+		t.Fatalf("trust of a rewritten entry = %d %s, want 409", status, b)
+	}
+	// Syncing an entry still awaiting approval is the caller's to fix: 400
+	// with the command that approves it, never a server error.
+	if status, b := post("/coddy/skills/sync?source=owner/project", ``); status != http.StatusBadRequest || !strings.Contains(string(b), "coddy plugin marketplace trust owner/project") {
+		t.Fatalf("sync of a held entry = %d %s, want 400 naming the approval", status, b)
+	}
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/local","scope":"local"}`); status != http.StatusOK {
+		t.Fatalf("add to the project = %d %s", status, b)
+	}
+	res3, err := http.Get(ts.URL + "/coddy/skills/sources")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lb, _ := ioReadAllClose(res3.Body)
+	var listed struct {
+		Entries []struct {
+			Source  string `json:"source"`
+			Origin  string `json:"origin"`
+			Trusted bool   `json:"trusted"`
+			Status  string `json:"status"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(lb, &listed); err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, e := range listed.Entries {
+		states[e.Source] = e.Origin + "/" + e.Status
+	}
+	if states["owner/project"] != "project/needs_approval" || states["owner/local"] != "project/ready" {
+		t.Fatalf("listed entries = %s", lb)
+	}
+
+	// The row's origin limits a removal to its file: removing your own
+	// entry leaves the project's checked-in copy alone.
+	if status, b := post("/coddy/skills/sources", `{"source":"owner/local"}`); status != http.StatusOK {
+		t.Fatalf("add to yours = %d %s", status, b)
+	}
+	delOrigin := func(query string) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/coddy/skills/sources?"+query, nil)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = ioReadAllClose(res.Body)
+		return res.StatusCode
+	}
+	if status := delOrigin("source=owner/local&origin=home"); status != http.StatusOK {
+		t.Fatalf("remove from yours = %d", status)
+	}
+	homeFile, _ := config.ReadMarketplacesFile(config.GlobalMarketplacesPath(home))
+	projectFile, _ := config.ReadMarketplacesFile(config.ProjectMarketplacesPath(home))
+	if len(homeFile.Sources) != 0 || !slices.Contains(projectFile.Sources, "owner/local") {
+		t.Fatalf("after removing from yours: home %+v, project %+v", homeFile, projectFile)
+	}
+	if status := delOrigin("source=owner/local&origin=elsewhere"); status != http.StatusBadRequest {
+		t.Fatalf("remove with an unknown origin = %d, want 400", status)
 	}
 }
 
@@ -3508,6 +3937,38 @@ func TestCoddySkillsDeleteAnyAndReadonly(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(skillsDir, "local")); !os.IsNotExist(err) {
 		t.Errorf("local skill dir should be gone: %v", err)
 	}
+
+	// Settings deletes a project skill of the folder a new chat picked before
+	// its session exists: no session header, the folder in the cwd query, the
+	// same workspace GET /coddy/skills?cwd= listed it for.
+	picked := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(picked, ".coddy", "skills", "picked-only"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "skills", "picked-only", "SKILL.md"), []byte("---\nname: picked-only\ndescription: d\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req3, _ := http.NewRequest(http.MethodDelete, ts.URL+"/coddy/skills/picked-only", nil)
+	dr3, err := http.DefaultClient.Do(req3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioReadAllClose(dr3.Body)
+	if dr3.StatusCode != http.StatusBadRequest {
+		t.Fatalf("delete of a project skill of another folder without cwd = %d, want 400", dr3.StatusCode)
+	}
+	req4, _ := http.NewRequest(http.MethodDelete, ts.URL+"/coddy/skills/picked-only?cwd="+url.QueryEscape(picked), nil)
+	dr4, err := http.DefaultClient.Do(req4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b4, _ := ioReadAllClose(dr4.Body)
+	if dr4.StatusCode != http.StatusOK {
+		t.Fatalf("delete with the picked folder = %d %s, want 200", dr4.StatusCode, b4)
+	}
+	if _, err := os.Stat(filepath.Join(picked, ".coddy", "skills", "picked-only")); !os.IsNotExist(err) {
+		t.Errorf("the project skill of the picked folder should be gone: %v", err)
+	}
 }
 
 // TestCoddyMCPRoutesEdgeCases covers error paths of the /coddy/mcp surface;
@@ -3516,15 +3977,14 @@ func TestCoddyMCPRoutesEdgeCases(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODDY_HOME", home)
 	cfgPath := filepath.Join(home, "config.yaml")
-	cfgYAML := `
-mcp_servers:
-  - name: broken
-    command: /nonexistent-mcp-binary
-  - name: remote
-    type: websocket
-    url: https://example.com/ws
-`
-	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	homeMCP := `{"mcpServers": {
+  "broken": {"command": "/nonexistent-mcp-binary"},
+  "remote": {"type": "websocket", "url": "https://example.com/ws"}
+}}`
+	if err := os.WriteFile(config.GlobalMCPJSONPath(home), []byte(homeMCP), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(cfgPath)
@@ -3558,19 +4018,18 @@ mcp_servers:
 	}
 
 	// The list reports both servers: broken stdio probes to an error status,
-	// the http entry is unsupported without probing. Config.yaml entries are
-	// global-scoped, config-owned, and read-only for edit/delete.
+	// the websocket entry is unsupported without probing. <home>/mcp.json
+	// entries are global-scoped and home-owned.
 	status, b := do(http.MethodGet, "/coddy/mcp", "")
 	if status != http.StatusOK {
 		t.Fatalf("GET /coddy/mcp status %d %s", status, b)
 	}
 	var list struct {
 		Items []struct {
-			Name     string `json:"name"`
-			Source   string `json:"source"`
-			Origin   string `json:"origin"`
-			Readonly bool   `json:"readonly"`
-			Status   string `json:"status"`
+			Name   string `json:"name"`
+			Source string `json:"source"`
+			Origin string `json:"origin"`
+			Status string `json:"status"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(b, &list); err != nil {
@@ -3581,8 +4040,8 @@ mcp_servers:
 	}
 	byName := map[string]string{}
 	for _, it := range list.Items {
-		if it.Source != "global" || it.Origin != "config" || !it.Readonly {
-			t.Errorf("server %q = %s/%s readonly=%v, want global/config readonly", it.Name, it.Source, it.Origin, it.Readonly)
+		if it.Source != "global" || it.Origin != "home" {
+			t.Errorf("server %q = %s/%s, want global/home", it.Name, it.Source, it.Origin)
 		}
 		byName[it.Name] = it.Status
 	}
@@ -3632,8 +4091,8 @@ mcp_servers:
 	for _, it := range list.Items {
 		if it.Name == "homer" {
 			foundHomer = true
-			if it.Source != "global" || it.Origin != "home" || it.Readonly {
-				t.Errorf("homer = %s/%s readonly=%v, want global/home editable", it.Source, it.Origin, it.Readonly)
+			if it.Source != "global" || it.Origin != "home" {
+				t.Errorf("homer = %s/%s, want global/home", it.Source, it.Origin)
 			}
 		}
 	}
@@ -3641,9 +4100,9 @@ mcp_servers:
 		t.Error("homer missing from list after scope=global PUT")
 	}
 
-	// Config-defined servers cannot be deleted over the API; mcp.json ones can.
-	if status, _ := do(http.MethodDelete, "/coddy/mcp/broken", ""); status != http.StatusBadRequest {
-		t.Errorf("DELETE config-sourced status %d, want 400", status)
+	// An unknown server cannot be deleted; a declared one can.
+	if status, _ := do(http.MethodDelete, "/coddy/mcp/ghost", ""); status != http.StatusBadRequest {
+		t.Errorf("DELETE unknown status %d, want 400", status)
 	}
 	if status, _ := do(http.MethodDelete, "/coddy/mcp/homer", ""); status != http.StatusOK {
 		t.Errorf("DELETE home-sourced status %d, want 200", status)
@@ -3955,6 +4414,14 @@ func TestCoddySubagentsCatalogAndTrustRoutes(t *testing.T) {
 	}
 	if status, _ := httpJSON(t, ts, http.MethodPost, "/coddy/subagents/reviewer/trust", `{"cwd":"rel"}`, nil); status != http.StatusBadRequest {
 		t.Fatalf("relative body cwd: status %d, want 400", status)
+	}
+	// An approval names the content the operator was shown: a file rewritten
+	// since (another digest) is refused and nothing is recorded.
+	if status, body := httpJSON(t, ts, http.MethodPost, "/coddy/subagents/reviewer/trust", fmt.Sprintf(`{"cwd":%q,"digest":"sha256:shown-before"}`, ws), nil); status != http.StatusConflict {
+		t.Fatalf("stale digest: status %d, want 409 (%v)", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(home, "subagents-trust.json")); !os.IsNotExist(err) {
+		t.Fatalf("a refused approval wrote a receipt: %v", err)
 	}
 
 	status, body = httpJSON(t, ts, http.MethodPost, "/coddy/subagents/reviewer/trust", fmt.Sprintf(`{"cwd":%q}`, ws), nil)
@@ -5006,10 +5473,20 @@ const testHomeEnv = "CODDY_TEST_HTTPSERVER_HOME"
 // that needs a home of its own still sets CODDY_HOME itself. HOME stays the
 // operator's on purpose: tests run git in temp repositories and need its
 // identity, so ~-paths such as the default ~/.agents/skills are not isolated.
+// CODEX_HOME and the Codex backend are isolated as well (see
+// TestTestsDoNotReachTheOperatorsCodexLogin).
 func TestMain(m *testing.M) {
 	if home := os.Getenv(testHomeEnv); home != "" {
-		// A helper process, or a run nested in one: the home is the parent's.
+		// A helper process, or a run nested in one: the home is the parent's,
+		// and so is the Codex backend, inherited as it is. CODEX_HOME is set
+		// again in any case, and a backend that is not a local one is replaced,
+		// so a marker left in the environment by hand does not open the way to
+		// the operator's Codex login either.
 		_ = os.Setenv("CODDY_HOME", home)
+		_ = os.Setenv("CODEX_HOME", filepath.Join(home, "codex-home"))
+		if base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL)); err != nil || !isLoopbackIP(base.Hostname()) {
+			_ = os.Setenv(llm.EnvCodexBaseURL, "http://127.0.0.1:1")
+		}
 		os.Exit(m.Run())
 	}
 	home, err := os.MkdirTemp("", "coddy-httpserver-home-")
@@ -5017,13 +5494,59 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "test home:", err)
 		os.Exit(1)
 	}
+	codexHome, err := os.MkdirTemp("", "coddy-httpserver-codex-home-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "test codex home:", err)
+		os.Exit(1)
+	}
+	codexBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no Codex backend in this test: point "+llm.EnvCodexBaseURL+" at a stand-in", http.StatusServiceUnavailable)
+	}))
 	_ = os.Setenv(testHomeEnv, home)
 	_ = os.Setenv("CODDY_HOME", home)
+	_ = os.Setenv("CODEX_HOME", codexHome)
+	_ = os.Setenv(llm.EnvCodexBaseURL, codexBackend.URL)
 	code := m.Run()
-	if err := os.RemoveAll(home); err != nil {
-		fmt.Fprintln(os.Stderr, "test home:", err)
+	codexBackend.Close()
+	for _, dir := range []string{home, codexHome} {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "test home:", err)
+		}
 	}
 	os.Exit(code)
+}
+
+// No test of this package may read the Codex CLI login of whoever runs the
+// tests, or send it to the real Codex backend: a codex model has its catalog
+// read for its context window whenever GET /v1/models is served or a turn
+// starts, with the CLI login standing in for the only codex row. TestMain
+// points CODEX_HOME at an empty directory under the temp dir and
+// CODDY_CODEX_BASE_URL at a local server that refuses every request; a test
+// with a Codex stand-in of its own still sets both itself.
+func TestTestsDoNotReachTheOperatorsCodexLogin(t *testing.T) {
+	tmp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHome, err := filepath.EvalSymlinks(os.Getenv("CODEX_HOME"))
+	if err != nil || !strings.HasPrefix(codexHome, tmp+string(filepath.Separator)) {
+		t.Fatalf("CODEX_HOME = %q (%v), want a directory of the run's own under %q", os.Getenv("CODEX_HOME"), err, tmp)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "auth.json")); err == nil {
+		t.Fatalf("CODEX_HOME %s holds a Codex CLI login", codexHome)
+	}
+	base, err := url.Parse(os.Getenv(llm.EnvCodexBaseURL))
+	if err != nil || !isLoopbackIP(base.Hostname()) {
+		t.Fatalf("%s = %q, want the local server TestMain started", llm.EnvCodexBaseURL, os.Getenv(llm.EnvCodexBaseURL))
+	}
+}
+
+// isLoopbackIP reports whether host is a loopback IP address; httptest binds
+// 127.0.0.1, or [::1] on a host without IPv4 loopback. Unlike isLoopbackHost,
+// which reads a listen address, an empty host is not one.
+func isLoopbackIP(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // A test of this package that loads a config without naming a home (the
@@ -5116,5 +5639,355 @@ func TestReplyForErrorMapsProviderStatus(t *testing.T) {
 				t.Fatalf("message = %s, want the error's text", gjson.Get(body, "error.message").Raw)
 			}
 		})
+	}
+}
+
+// TestListingCWDQueryEdges pins the cwd query of the read-only listings: a new
+// chat names the folder picked before its session exists with it, so it has to
+// be an absolute existing directory, it never overrides a session's own
+// workspace, and a route that changes a workspace (MCP) does not take it.
+func TestListingCWDQueryEdges(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	defaultCWD := filepath.Join(root, "launch")
+	picked := filepath.Join(root, "data")
+	for _, d := range []string{home, defaultCWD, filepath.Join(picked, ".coddy", "skills", "dat-local")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "skills", "dat-local", "SKILL.md"),
+		[]byte("---\nname: dat-local\ndescription: local\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(picked, ".coddy", "mcp.json"),
+		[]byte(`{"mcpServers":{"picked-only":{"command":"true"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(picked, "notes.txt")
+	if err := os.WriteFile(file, []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return string(acp.StopReasonEndTurn), nil
+	}
+	cfg := &config.Config{
+		Paths:  config.Paths{Home: home, CWD: defaultCWD},
+		Skills: config.Skills{Dirs: []string{"${CWD}/.coddy/skills"}},
+		Models: []config.ModelEntry{{Model: "openai/gpt-4o", MaxTokens: 100, Temperature: 0.2}},
+		Agent:  config.Agent{Model: "openai/gpt-4o"},
+	}
+	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), defaultCWD, nil)
+	srv := New(cfg, mgr, slog.Default(), defaultCWD)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	get := func(path, sid string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sid != "" {
+			req.Header.Set("X-Coddy-Session-ID", sid)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := ioReadAllClose(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode, string(b)
+	}
+	slash := "/coddy/slash-commands?page=1&page_size=200&cwd="
+
+	for name, cwd := range map[string]string{
+		"relative": "data",
+		"missing":  filepath.Join(root, "nope"),
+		"file":     file,
+	} {
+		if status, body := get(slash+url.QueryEscape(cwd), ""); status != http.StatusBadRequest {
+			t.Fatalf("%s cwd: status %d, want 400: %s", name, status, body)
+		}
+	}
+	if status, body := get(slash+url.QueryEscape(picked), ""); status != http.StatusOK || !strings.Contains(body, "dat-local") {
+		t.Fatalf("picked cwd: status %d body %s", status, body)
+	}
+	// The composer's highlight check resolves a mention against the same folder.
+	checkRes, err := http.Post(ts.URL+"/coddy/mentions/check?cwd="+url.QueryEscape(picked), "application/json",
+		strings.NewReader(`{"text":"look at @notes.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkBody, _ := ioReadAllClose(checkRes.Body)
+	if checkRes.StatusCode != http.StatusOK || !strings.Contains(string(checkBody), `"kind":"file"`) {
+		t.Fatalf("mentions/check with cwd: status %d body %s", checkRes.StatusCode, checkBody)
+	}
+
+	// A session anchored on the server default: a cwd next to its header is
+	// ignored, even an invalid one.
+	sid := fmt.Sprintf("sess_%x", time.Now().UnixNano())
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/coddy/sessions/"+sid+"/workspace",
+		strings.NewReader(fmt.Sprintf(`{"path":%q}`, defaultCWD)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioReadAllClose(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("anchor session: status %d", res.StatusCode)
+	}
+	if status, body := get(slash+url.QueryEscape(picked), sid); status != http.StatusOK || strings.Contains(body, "dat-local") {
+		t.Fatalf("session with cwd: status %d body %s", status, body)
+	}
+	if status, body := get(slash+"relative", sid); status != http.StatusOK {
+		t.Fatalf("session with a bad cwd: status %d body %s", status, body)
+	}
+	// The first send of a chat with no folder picked: the id is not on the
+	// server yet, so the folder next to it answers; without one it is a 404.
+	unknown := sid + "x"
+	if status, body := get(slash+url.QueryEscape(picked), unknown); status != http.StatusOK || !strings.Contains(body, "dat-local") {
+		t.Fatalf("unknown session with cwd: status %d body %s", status, body)
+	}
+	if status, body := get("/coddy/slash-commands?page=1&page_size=200", unknown); status != http.StatusNotFound {
+		t.Fatalf("unknown session without cwd: status %d body %s", status, body)
+	}
+	if status, body := get(slash+url.QueryEscape(picked), "bad id!"); status != http.StatusBadRequest {
+		t.Fatalf("malformed session with cwd: status %d body %s", status, body)
+	}
+
+	// The MCP routes change a workspace's declarations: cwd does not select it,
+	// while a session anchored there does.
+	if status, body := get("/coddy/mcp?cwd="+url.QueryEscape(picked), ""); status != http.StatusOK || strings.Contains(body, "picked-only") {
+		t.Fatalf("mcp with cwd: status %d body %s", status, body)
+	}
+	pickedSID := sid + "p"
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/coddy/sessions/"+pickedSID+"/workspace",
+		strings.NewReader(fmt.Sprintf(`{"path":%q}`, picked)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = ioReadAllClose(res.Body)
+	if status, body := get("/coddy/mcp", pickedSID); status != http.StatusOK || !strings.Contains(body, "picked-only") {
+		t.Fatalf("mcp of a session in the picked folder: status %d body %s", status, body)
+	}
+}
+
+// mcpValuesServer serves the MCP routes over a home whose mcp.json and project
+// mcp.json carry the given servers, the server's default workspace being the
+// home itself.
+func mcpValuesServer(t *testing.T, homeMCP, projectMCP string) (*httptest.Server, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("CODDY_HOME", home)
+	cfgPath := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_turns: 5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if homeMCP != "" {
+		if err := os.WriteFile(config.GlobalMCPJSONPath(home), []byte(homeMCP), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if projectMCP != "" {
+		if err := os.MkdirAll(filepath.Join(home, ".coddy"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(config.MCPJSONPath(home), []byte(projectMCP), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
+	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), home, nil)
+	ts := httptest.NewServer(New(cfg, mgr, slog.Default(), home).Handler())
+	t.Cleanup(ts.Close)
+	return ts, home
+}
+
+// Issue #376: the list of MCP servers names a server's environment variables
+// and headers but never returns their values, nor a value its probe error
+// carries: a token in either mcp.json, or in the environment a ${NAME}
+// reference reads, must not reach a client of the API.
+func TestCoddyMCPListNeverReturnsConfiguredValues(t *testing.T) {
+	t.Setenv("XR_MCP_URL_KEY", "tok-url-s3cr3t-5")
+	homeMCP := `{"mcpServers": {
+  "files": {"command": "/nonexistent-mcp-binary", "env": {"TOKEN": "tok-env-s3cr3t-1", "MODE": "${XR_MCP_MODE}"}},
+  "docs": {"url": "http://127.0.0.1:1/mcp?api_key=${XR_MCP_URL_KEY}", "headers": {"Authorization": "Bearer tok-hdr-s3cr3t-2"}}
+}}`
+	projectMCP := `{"mcpServers": {
+  "tracker": {"url": "https://tracker.example/mcp", "headers": {"X-Team": "tok-proj-s3cr3t-3"}, "env": {"KEY": "tok-proj-s3cr3t-4"}}
+}}`
+	ts, _ := mcpValuesServer(t, homeMCP, projectMCP)
+	res, err := http.Get(ts.URL + "/coddy/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := ioReadAllClose(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /coddy/mcp = %d %s", res.StatusCode, body)
+	}
+	for _, secret := range []string{"tok-env-s3cr3t-1", "tok-hdr-s3cr3t-2", "tok-proj-s3cr3t-3", "tok-proj-s3cr3t-4", "tok-url-s3cr3t-5"} {
+		if strings.Contains(string(body), secret) {
+			t.Fatalf("the list carries the configured value %q:\n%s", secret, body)
+		}
+	}
+	var list struct {
+		Items []struct {
+			Name    string            `json:"name"`
+			Env     map[string]string `json:"env"`
+			Headers map[string]string `json:"headers"`
+			Reads   []string          `json:"reads"`
+			URL     string            `json:"url"`
+			Error   string            `json:"error"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]int{}
+	for i, it := range list.Items {
+		rows[it.Name] = i
+		for k, v := range it.Env {
+			if v != config.RedactedValue {
+				t.Errorf("%s env %s = %q, want %q", it.Name, k, v, config.RedactedValue)
+			}
+		}
+		for k, v := range it.Headers {
+			if v != config.RedactedValue {
+				t.Errorf("%s header %s = %q, want %q", it.Name, k, v, config.RedactedValue)
+			}
+		}
+	}
+	files := list.Items[rows["files"]]
+	if len(files.Env) != 2 || files.Env["TOKEN"] == "" || !slices.Equal(files.Reads, []string{"XR_MCP_MODE"}) {
+		t.Fatalf("files = %+v, want both names kept and the variable it reads named", files)
+	}
+	docs := list.Items[rows["docs"]]
+	if docs.URL != "http://127.0.0.1:1/mcp?api_key=${XR_MCP_URL_KEY}" || !slices.Equal(docs.Reads, []string{"XR_MCP_URL_KEY"}) {
+		t.Fatalf("docs = %+v, want the URL as written and the variable it reads", docs)
+	}
+	if docs.Error == "" {
+		t.Fatal("the unreachable server reported no error, so its message was not checked")
+	}
+	tracker := list.Items[rows["tracker"]]
+	if tracker.Headers["X-Team"] == "" || tracker.Env["KEY"] == "" {
+		t.Fatalf("tracker = %+v, want the names of a held project server", tracker)
+	}
+}
+
+// An edit made from the list keeps what the client never saw: a value spelled
+// <redacted> keeps the one the file stores, a new value replaces it, a key
+// left out goes. A project entry keeps values only for the declaration the
+// client was shown (?fingerprint=): one the checkout rewrote since is refused
+// with 409 and nothing is written or approved.
+func TestCoddyMCPSaveKeepsRedactedValues(t *testing.T) {
+	homeMCP := `{"mcpServers": {"files": {"command": "files-server", "env": {"TOKEN": "tok-home-1", "OLD": "gone"}, "headers": {"X-Key": "tok-home-2"}}}}`
+	projectMCP := `{"mcpServers": {"tracker": {"command": "tracker-server", "env": {"KEY": "tok-proj-1"}}}}`
+	ts, home := mcpValuesServer(t, homeMCP, projectMCP)
+	put := func(path, body string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut, ts.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := ioReadAllClose(res.Body)
+		return res.StatusCode, string(b)
+	}
+	fingerprints := func() map[string]string {
+		t.Helper()
+		res, err := http.Get(ts.URL + "/coddy/mcp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := ioReadAllClose(res.Body)
+		var list struct {
+			Items []struct {
+				Name        string `json:"name"`
+				Fingerprint string `json:"fingerprint"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(body, &list); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, it := range list.Items {
+			out[it.Name] = it.Fingerprint
+		}
+		return out
+	}
+
+	// Your own entry: kept, replaced, added and removed in one save.
+	status, body := put("/coddy/mcp/files?scope=global",
+		`{"command": "files-server", "env": {"TOKEN": "<redacted>", "NEW": "fresh"}, "headers": {"X-Key": "<redacted>"}}`)
+	if status != http.StatusOK {
+		t.Fatalf("save of your entry = %d %s", status, body)
+	}
+	stored, err := config.ReadMCPJSONFile(config.GlobalMCPJSONPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := stored["files"]
+	if !maps.Equal(files.Env, map[string]string{"TOKEN": "tok-home-1", "NEW": "fresh"}) || files.Headers["X-Key"] != "tok-home-2" {
+		t.Fatalf("stored after the save = %+v", files)
+	}
+
+	// A placeholder for a value the file does not have is refused.
+	if status, body := put("/coddy/mcp/files?scope=global", `{"command": "files-server", "env": {"MISSING": "<redacted>"}}`); status != http.StatusBadRequest || !strings.Contains(body, "MISSING") {
+		t.Fatalf("keeping a value the file lacks = %d %s, want 400 naming it", status, body)
+	}
+
+	// A project entry keeps values only against the declaration shown.
+	keep := `{"command": "tracker-server", "env": {"KEY": "<redacted>"}}`
+	if status, body := put("/coddy/mcp/tracker?scope=local", keep); status != http.StatusBadRequest || !strings.Contains(body, "fingerprint") {
+		t.Fatalf("keeping a project value without the fingerprint = %d %s, want 400", status, body)
+	}
+	shown := fingerprints()["tracker"]
+	before, _ := os.ReadFile(config.MCPJSONPath(home))
+	if err := os.WriteFile(config.MCPJSONPath(home), []byte(`{"mcpServers": {"tracker": {"command": "tracker-server", "env": {"KEY": "rewritten-by-the-checkout"}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := put("/coddy/mcp/tracker?scope=local&fingerprint="+url.QueryEscape(shown), keep); status != http.StatusConflict {
+		t.Fatalf("keeping against a rewritten declaration = %d %s, want 409", status, body)
+	}
+	if after, _ := os.ReadFile(config.MCPJSONPath(home)); string(after) == string(before) || !strings.Contains(string(after), "rewritten-by-the-checkout") {
+		t.Fatalf("the refused save touched the file:\n%s", after)
+	}
+	if err := os.WriteFile(config.MCPJSONPath(home), before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := put("/coddy/mcp/tracker?scope=local&fingerprint="+url.QueryEscape(shown), keep); status != http.StatusOK {
+		t.Fatalf("keeping against the declaration shown = %d %s", status, body)
+	}
+	if after, _ := os.ReadFile(config.MCPJSONPath(home)); !strings.Contains(string(after), "tok-proj-1") {
+		t.Fatalf("the kept project value was lost:\n%s", after)
+	}
+	// The save approves the declaration as the file now holds it.
+	servers, err := config.LoadMCPJSONServers(config.MCPJSONPath(home))
+	if err != nil || len(servers) != 1 {
+		t.Fatalf("project servers = %+v, %v", servers, err)
+	}
+	if !mcp.NewTrustStore(home).Approved(home, servers[0]) {
+		t.Fatal("the saved project entry is not approved")
 	}
 }

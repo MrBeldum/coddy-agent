@@ -123,7 +123,7 @@ Android stops the processes of an app it considers idle. The wake lock keeps Ter
 
 ## 5. Drive the phone
 
-**The browser.** Open the relay, `http://192.168.1.10:12346/`. The page says the relay needs a token: open the environment chip in its header, **+ Add remote...**, and give it a name, the relay's address and the client token, then **Connect**. The swarm map shows `pixel` under the relay, marked as a node that dials out.
+**The browser.** Open the relay, `http://192.168.1.10:12346/`. The page says the relay needs a token: open the environment chip in its header, **Connect to…**, and give it a name, the relay's address and the client token, then **Connect**. The swarm map shows `pixel` under the relay, marked as a node that dials out.
 
 ![The swarm map of the relay with the phone as a node that dials out](../assets/swarm/android-node-map-dark-1280.png)
 

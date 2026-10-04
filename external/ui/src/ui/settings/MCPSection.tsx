@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Chevron } from "../components/Chevron";
-import { LegendWithHint } from "./FieldHint";
-import { IconSync } from "./icons";
+import { FieldHint, LegendWithHint } from "./FieldHint";
+import { IconShield, IconSync } from "./icons";
+import { liveSessionId } from "./marketplaces";
 import { IconTrash } from "./SchemaForm";
 import { Switch } from "./Switch";
 import { useT } from "../i18n/I18nProvider";
@@ -32,10 +33,27 @@ type MCPList = {
 /** A listing, or why there is none: the server's own message when it sent one. */
 type MCPListResult = { list: MCPList } | { error: string };
 
-async function fetchServers(refresh = false): Promise<MCPListResult> {
-  let res: Response;
-  try {
-    res = await fetch(`/coddy/mcp${refresh ? "?refresh=1" : ""}`);
+function sessionHeaders(sessionID: string, contentType = false): HeadersInit | undefined {
+  // A draft kept in the browser is no session of the server's: naming it
+  // would get a 404 instead of the server's default workspace.
+  const id = liveSessionId(sessionID) ?? "";
+  if (!id && !contentType) return undefined;
+  const headers: Record<string, string> = {};
+  if (id) headers["X-Coddy-Session-ID"] = id;
+  if (contentType) headers["Content-Type"] = "application/json";
+  return headers;
+}
+
+async function fetchServers(
+  sessionID: string,
+  refresh = false,
+): Promise<MCPListResult> {
+	let res: Response;
+	try {
+		const init: RequestInit = {};
+		const headers = sessionHeaders(sessionID);
+		if (headers) init.headers = headers;
+		res = await fetch(`/coddy/mcp${refresh ? "?refresh=1" : ""}`, init);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -62,22 +80,28 @@ async function fetchServers(refresh = false): Promise<MCPListResult> {
 }
 
 async function apiSend(
-  path: string,
-  method: "POST" | "PUT" | "DELETE",
-  body?: unknown,
-): Promise<{ ok: boolean; error?: string }> {
-  const init: RequestInit = { method };
-  if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
-    init.body = JSON.stringify(body);
+	sessionID: string,
+	path: string,
+	method: "POST" | "PUT" | "DELETE",
+	body?: unknown,
+): Promise<{ ok: boolean; error?: string; status?: number }> {
+	const init: RequestInit = { method };
+	const headers = sessionHeaders(sessionID, body !== undefined);
+	if (headers) init.headers = headers;
+	if (body !== undefined) {
+		init.body = JSON.stringify(body);
   }
   const res = await fetch(path, init);
   if (!res.ok) {
     try {
       const j = (await res.json()) as { error?: { message?: string } };
-      return { ok: false, error: j.error?.message || `HTTP ${res.status}` };
+      return {
+        ok: false,
+        error: j.error?.message || `HTTP ${res.status}`,
+        status: res.status,
+      };
     } catch {
-      return { ok: false, error: `HTTP ${res.status}` };
+      return { ok: false, error: `HTTP ${res.status}`, status: res.status };
     }
   }
   return { ok: true };
@@ -101,25 +125,6 @@ function IconPencil() {
   );
 }
 
-// Shield glyph for the workspace trust control on project-local rows.
-function IconShield() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M12 3l7 3v6c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V6Z" />
-      <path d="M9 12l2 2 4-4" />
-    </svg>
-  );
-}
 
 function statusTitle(row: MCPServerRow): string {
   switch (row.status) {
@@ -152,18 +157,26 @@ type EditorState = {
   text: string;
   isNew: boolean;
   scope: MCPScope;
+  /**
+   * Fingerprint of the listed declaration an edit started from. The save
+   * sends it back, so the server keeps the values the list hides only for
+   * that declaration and refuses (409) one the file rewrote since.
+   */
+  fingerprint?: string;
 };
 
 /**
  * MCPSection is the Settings -> MCP servers tab: the merged server list from
- * config.yaml, the global mcp.json of the agent home, and the local ./.coddy/mcp.json
- * in the Cursor style — status dot, scope badge, server switch, expandable
+ * the global mcp.json of the agent home and the local ./.coddy/mcp.json in
+ * the Cursor style — status dot, scope badge, server switch, expandable
  * per-tool switches, and a JSON editor for mcp.json entries of either scope.
- * All actions talk to /coddy/mcp* directly; nothing here touches the
- * settings document.
+ * The list never carries an env or header value, only "<redacted>" in its
+ * place, which a save sends back to keep the stored value. All actions talk
+ * to /coddy/mcp* directly; nothing here touches the settings document.
  */
-export function MCPSection() {
-  const { t } = useT();
+export function MCPSection(props: { activeSessionId?: string }) {
+	const { t } = useT();
+	const activeSessionId = props.activeSessionId ?? "";
   const [servers, setServers] = useState<MCPServerRow[]>([]);
   const [projectTrust, setProjectTrust] = useState<ProjectTrust>("ask");
   const [workspace, setWorkspace] = useState("");
@@ -176,6 +189,11 @@ export function MCPSection() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
+  // Generations order overlapping loads: only the latest fetch applies its
+  // result or error. A slow refresh finishing after a mutation's reload must
+  // neither overwrite the newer rows nor report its failure. Flags are still
+  // cleared unconditionally in finally - the call set them, so it clears them.
+  const loadSeq = useRef(0);
 
   // firstLoad guards the "Loading…" placeholder so refreshes never collapse
   // the list height (same pattern as the Skills tab). A listing that fails
@@ -183,21 +201,33 @@ export function MCPSection() {
   // an earlier load showed, instead of reading as "no servers configured".
   const loadServers = useCallback(
     async (firstLoad = false, refresh = false) => {
+      const seq = ++loadSeq.current;
       if (firstLoad) setLoading(true);
       if (refresh) setRefreshing(true);
-      const result = await fetchServers(refresh);
-      if ("list" in result) {
-        setServers(result.list.items);
-        setProjectTrust(result.list.projectTrust);
-        setWorkspace(result.list.workspace);
-        setLoadError(null);
-      } else {
-        setLoadError(translate("mcp.error.load", { message: result.error }));
+      try {
+			const result = await fetchServers(activeSessionId, refresh);
+        if (seq !== loadSeq.current) return;
+        if ("list" in result) {
+          setServers(result.list.items);
+          setProjectTrust(result.list.projectTrust);
+          setWorkspace(result.list.workspace);
+          setLoadError(null);
+        } else {
+          setLoadError(translate("mcp.error.load", { message: result.error }));
+        }
+      } catch (err) {
+        if (seq !== loadSeq.current) return;
+        setLoadError(
+          translate("mcp.error.load", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        if (firstLoad) setLoading(false);
+        if (refresh) setRefreshing(false);
       }
-      if (firstLoad) setLoading(false);
-      if (refresh) setRefreshing(false);
-    },
-    [],
+	},
+	[activeSessionId],
   );
 
   useEffect(() => {
@@ -208,16 +238,26 @@ export function MCPSection() {
     setBusy((p) => ({ ...p, [key]: true }));
     setError(null);
     void (async () => {
-      await fn();
-      setBusy((p) => ({ ...p, [key]: false }));
+      try {
+        await fn();
+      } catch (err) {
+        setError(
+          translate("mcp.error.request", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        setBusy((p) => ({ ...p, [key]: false }));
+      }
     })();
   };
 
   const onToggleServer = (row: MCPServerRow) => {
     withBusy(row.name, async () => {
-      const action = row.enabled ? "disable" : "enable";
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
+		const action = row.enabled ? "disable" : "enable";
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
         "POST",
       );
       if (!res.ok) {
@@ -231,9 +271,10 @@ export function MCPSection() {
 
   const onToggleTool = (row: MCPServerRow, tool: string, enabled: boolean) => {
     withBusy(`${row.name}__${tool}`, async () => {
-      const action = enabled ? "disable" : "enable";
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}/tools/${encodeURIComponent(tool)}/${action}`,
+		const action = enabled ? "disable" : "enable";
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}/tools/${encodeURIComponent(tool)}/${action}`,
         "POST",
       );
       if (!res.ok) {
@@ -249,7 +290,7 @@ export function MCPSection() {
   // MCP API, so it never joins the settings document Save all flow.
   const onProjectTrustChange = (next: ProjectTrust) => {
     withBusy("project-trust", async () => {
-      const res = await apiSend("/coddy/mcp/project-trust", "POST", {
+		const res = await apiSend(activeSessionId, "/coddy/mcp/project-trust", "POST", {
         policy: next,
       });
       if (!res.ok) {
@@ -266,8 +307,9 @@ export function MCPSection() {
       // An approval names the declaration the note showed by its fingerprint,
       // so the server refuses it (409) when the checkout rewrote the entry
       // between the listing and the click.
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}/${action}`,
         "POST",
         row.trusted ? undefined : { fingerprint: row.fingerprint ?? "" },
       );
@@ -282,8 +324,9 @@ export function MCPSection() {
 
   const onDelete = (row: MCPServerRow) => {
     withBusy(row.name, async () => {
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(row.name)}`,
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(row.name)}`,
         "DELETE",
       );
       if (!res.ok) {
@@ -313,6 +356,7 @@ export function MCPSection() {
       text: serverRowToEntryJson(row),
       isNew: false,
       scope: row.origin === "home" ? "global" : "local",
+      ...(row.fingerprint ? { fingerprint: row.fingerprint } : {}),
     });
   };
 
@@ -331,18 +375,35 @@ export function MCPSection() {
     setEditorBusy(true);
     setEditorError(null);
     void (async () => {
-      const res = await apiSend(
-        `/coddy/mcp/${encodeURIComponent(editor.name.trim())}?scope=${editor.scope}`,
-        "PUT",
-        entry,
-      );
-      if (!res.ok) {
-        setEditorError(res.error || translate("mcp.error.saveServer"));
-      } else {
-        setEditor(null);
-        await loadServers();
+      try {
+		const query = new URLSearchParams({ scope: editor.scope });
+		if (!editor.isNew && editor.fingerprint) {
+			query.set("fingerprint", editor.fingerprint);
+		}
+		const res = await apiSend(
+			activeSessionId,
+			`/coddy/mcp/${encodeURIComponent(editor.name.trim())}?${query.toString()}`,
+          "PUT",
+          entry,
+        );
+        if (res.status === 409) {
+          // The file holds another declaration than the one this edit
+          // started from: the editor text is stale, so it stays open with
+          // the reason and the list shows what the file holds now.
+          setEditorError(translate("mcp.error.saveChanged"));
+          await loadServers();
+        } else if (!res.ok) {
+          setEditorError(res.error || translate("mcp.error.saveServer"));
+        } else {
+          setEditor(null);
+          await loadServers();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setEditorError(`${translate("mcp.error.saveServer")}: ${message}`);
+      } finally {
+        setEditorBusy(false);
       }
-      setEditorBusy(false);
     })();
   };
 
@@ -353,9 +414,15 @@ export function MCPSection() {
           label={t("mcp.discovery.legend")}
           description={t("mcp.discovery.description")}
         />
-        <label className="settings-label" htmlFor="mcp-project-trust">
-          {t("mcp.discovery.projectServersLabel")}
-        </label>
+        <span className="settings-label settings-label-with-hint">
+          <label htmlFor="mcp-project-trust">
+            {t("mcp.discovery.projectServersLabel")}
+          </label>
+          <FieldHint
+            label={t("mcp.discovery.projectServersLabel")}
+            text={t("mcp.discovery.description")}
+          />
+        </span>
         <select
           id="mcp-project-trust"
           className="settings-input"
@@ -400,14 +467,24 @@ export function MCPSection() {
           </button>
         </div>
 
-        {error ? <p className="settings-error">{error}</p> : null}
+        {error ? (
+          <p className="settings-error" data-testid="mcp-request-error">
+            {error}
+          </p>
+        ) : null}
         {loadError ? (
           <p className="settings-error" data-testid="mcp-load-error">
             {loadError}
           </p>
         ) : null}
 
-        {editor && editor.isNew ? (
+        {/*
+          A new entry is edited above the list, and so is one whose row the
+          last reload no longer lists (deleted from its file while the card
+          was open), so its text and the reason of the refused save stay.
+        */}
+        {editor &&
+        (editor.isNew || !servers.some((r) => r.name === editor.name)) ? (
           <MCPEditorCard
             editor={editor}
             error={editorError}
@@ -429,7 +506,6 @@ export function MCPSection() {
           <ul className="mcp-list" data-testid="mcp-list">
             {servers.map((row) => {
               const isOpen = !!expanded[row.name];
-              const editable = !row.readonly;
               return (
                 <li
                   key={row.name}
@@ -458,6 +534,23 @@ export function MCPSection() {
                     >
                       <Chevron open={isOpen} />
                     </button>
+                    <Switch
+                      checked={row.enabled}
+                      disabled={!!busy[row.name]}
+                      onChange={() => onToggleServer(row)}
+                      title={
+                        row.enabled
+                          ? t("mcp.switch.enabledTitle")
+                          : t("mcp.switch.disabledTitle")
+                      }
+                      ariaLabel={t(
+                        row.enabled
+                          ? "mcp.switch.disableAria"
+                          : "mcp.switch.enableAria",
+                        { name: row.name },
+                      )}
+                      dataTestId={`mcp-toggle-${row.name}`}
+                    />
                     <span
                       className={`mcp-status-dot is-${row.status}`}
                       title={statusTitle(row)}
@@ -512,35 +605,13 @@ export function MCPSection() {
                         <IconShield />
                       </button>
                     ) : null}
-                    <Switch
-                      checked={row.enabled}
-                      disabled={!!busy[row.name]}
-                      onChange={() => onToggleServer(row)}
-                      title={
-                        row.enabled
-                          ? t("mcp.switch.enabledTitle")
-                          : t("mcp.switch.disabledTitle")
-                      }
-                      ariaLabel={t(
-                        row.enabled
-                          ? "mcp.switch.disableAria"
-                          : "mcp.switch.enableAria",
-                        { name: row.name },
-                      )}
-                      dataTestId={`mcp-toggle-${row.name}`}
-                    />
                     <button
                       type="button"
                       className="settings-btn settings-btn-icon"
-                      disabled={!editable}
                       onClick={() => openEdit(row)}
-                      title={
-                        editable
-                          ? t("mcp.edit.title", {
-                              origin: originLabel(row.origin, row.source_path),
-                            })
-                          : t("mcp.edit.readonlyTitle")
-                      }
+                      title={t("mcp.edit.title", {
+                        origin: originLabel(row.origin, row.source_path),
+                      })}
                       aria-label={t("mcp.edit.aria", { name: row.name })}
                       data-testid={`mcp-edit-${row.name}`}
                     >
@@ -549,15 +620,11 @@ export function MCPSection() {
                     <button
                       type="button"
                       className="settings-btn settings-btn-icon settings-btn-danger"
-                      disabled={!editable || !!busy[row.name]}
+                      disabled={!!busy[row.name]}
                       onClick={() => onDelete(row)}
-                      title={
-                        editable
-                          ? t("mcp.delete.title", {
-                              origin: originLabel(row.origin, row.source_path),
-                            })
-                          : t("mcp.delete.readonlyTitle")
-                      }
+                      title={t("mcp.delete.title", {
+                        origin: originLabel(row.origin, row.source_path),
+                      })}
                       aria-label={t("mcp.delete.aria", { name: row.name })}
                       data-testid={`mcp-delete-${row.name}`}
                     >
@@ -633,14 +700,6 @@ export function MCPSection() {
                             key={tool.name}
                             className={`mcp-tool-row${tool.enabled ? "" : " is-disabled"}`}
                           >
-                            <div className="mcp-tool-text">
-                              <div className="mcp-tool-name">{tool.name}</div>
-                              {tool.description ? (
-                                <div className="skills-list-item-desc">
-                                  {tool.description}
-                                </div>
-                              ) : null}
-                            </div>
                             <Switch
                               checked={tool.enabled}
                               disabled={
@@ -665,6 +724,14 @@ export function MCPSection() {
                               )}
                               dataTestId={`mcp-tool-toggle-${row.name}-${tool.name}`}
                             />
+                            <div className="mcp-tool-text">
+                              <div className="mcp-tool-name">{tool.name}</div>
+                              {tool.description ? (
+                                <div className="skills-list-item-desc">
+                                  {tool.description}
+                                </div>
+                              ) : null}
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -747,6 +814,14 @@ function MCPEditorCard(props: {
           path: editor.scope === "global" ? globalPath : "./.coddy/mcp.json",
         })}
       </p>
+      {editor.isNew ? null : (
+        <p
+          className="settings-field-desc"
+          data-testid="mcp-editor-values-hint"
+        >
+          {t("mcp.editor.valuesHint", { placeholder: "<redacted>" })}
+        </p>
+      )}
       {error ? <p className="settings-error">{error}</p> : null}
       <div className="mcp-editor-actions">
         <button

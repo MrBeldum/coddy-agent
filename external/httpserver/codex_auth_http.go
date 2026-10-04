@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"strings"
@@ -34,6 +35,10 @@ type codexAuthLoginResponse struct {
 	Status          string `json:"status,omitempty"`
 	Connected       bool   `json:"connected"`
 	Error           string `json:"error,omitempty"`
+}
+
+type codexDeviceStartRequest struct {
+	Proxy *string `json:"proxy"`
 }
 
 // cancelCodexAuthLogins stops every sign-in still waiting for confirmation.
@@ -120,7 +125,7 @@ func (s *Server) coddyProviderCodexAuthDelete(w http.ResponseWriter, r *http.Req
 	}
 	// The account the cached usage described is gone; a stale snapshot must
 	// not outlive the credential.
-	s.dropProviderUsage(name, "codex")
+	s.providerCredentialChanged(name, "codex")
 	status, err := s.codexAuthStatus(name)
 	if err != nil {
 		writeCoddyConfigErr(w, http.StatusInternalServerError, err.Error())
@@ -135,6 +140,15 @@ func (s *Server) coddyProviderCodexAuthDevicePost(w http.ResponseWriter, r *http
 	}
 	name, provider, ok := s.resolveCodexAuthProvider(w, r.PathValue("name"))
 	if !ok {
+		return
+	}
+	var body codexDeviceStartRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, neuralDeepDeviceStartBodyLimit)).Decode(&body); err != nil && err != io.EOF {
+		writeCoddyConfigErr(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	if err := applySignInProxy(&provider, body.Proxy); err != nil {
+		writeCoddyConfigErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	client, err := llm.HTTPClientForProviderProxy(provider.Proxy)
@@ -202,9 +216,6 @@ func (s *Server) coddyProviderCodexAuthDevicePost(w http.ResponseWriter, r *http
 			return s.persistCodexLogin(ctx, attempt, authPath, credential)
 		})
 		if err == nil {
-			// The account changed: any cached usage describes the previous
-			// sign-in and must be re-read.
-			s.dropProviderUsage(name, "codex")
 			return
 		}
 		s.codexAuthMu.Lock()
@@ -223,6 +234,23 @@ func (s *Server) coddyProviderCodexAuthDevicePost(w http.ResponseWriter, r *http
 	})
 }
 
+// applySignInProxy resolves the optional proxy a Settings form posts for a
+// device sign-in. A missing field keeps the resolved row's proxy. A present
+// empty string is deliberate: it clears a saved URL and follows the process
+// proxy. Parse through the same config helper that builds provider clients so
+// malformed URLs fail before the issuer or hub is contacted.
+func applySignInProxy(provider *config.ProviderConfig, override *string) error {
+	if override == nil {
+		return nil
+	}
+	setting := strings.TrimSpace(*override)
+	if _, _, err := config.ParseProxySetting(setting); err != nil {
+		return err
+	}
+	provider.Proxy = setting
+	return nil
+}
+
 // persistCodexLogin stores the credential a device login obtained and marks
 // the attempt completed, both under the attempt lock: a sign-out or a newer
 // login cancels attempts under the same lock, so the cancellation check here
@@ -237,6 +265,10 @@ func (s *Server) persistCodexLogin(ctx context.Context, attempt *codexAuthLoginA
 	if err := llm.SaveCodexAuthFile(authPath, credential); err != nil {
 		return err
 	}
+	// The account changed: what was cached under the previous sign-in is
+	// forgotten before the attempt reads as completed, so a client that saw
+	// it complete never gets the old usage or the fallback window.
+	s.providerCredentialChanged(attempt.ProviderName, "codex")
 	attempt.Status = "completed"
 	attempt.Connected = true
 	return nil

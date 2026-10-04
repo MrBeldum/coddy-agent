@@ -229,7 +229,7 @@ func UISchemaMap() map[string]interface{} {
 		"max_context_tokens": intProp("Context window (tokens)",
 			"The model's context window: what the composer context ring and automatic compaction measure against. 0 reads it from the provider's model listing when it reports one, else 128000."),
 		"multimodal": boolProp("Multimodal",
-			"When true, the model accepts image or file inputs in addition to text. The UI will offer file attachment for messages sent with this model."),
+			"When true, the model accepts image or file inputs in addition to text. The UI will offer file attachment for messages sent with this model, and read shows it the picture in a PNG, JPEG, GIF or WebP file."),
 		"reasoning_levels": map[string]interface{}{
 			"type":        "array",
 			"title":       "Reasoning levels",
@@ -245,56 +245,6 @@ func UISchemaMap() map[string]interface{} {
 			"Leave on to receive the answer token by token over SSE. Turn off to send one blocking request and wait for the whole answer, for servers or proxies that handle event streams badly; the transcript then fills in at once instead of typing out. Not available for codex models, whose backend is streaming-only.",
 			true),
 	}
-	envProps := map[string]interface{}{
-		"name":  strProp("Variable name", "Environment variable name passed to the MCP process."),
-		"value": strProp("Value", "Variable value."),
-	}
-	headerProps := map[string]interface{}{
-		"name":  strProp("Header name", "HTTP header name for MCP HTTP transports."),
-		"value": strProp("Header value", "HTTP header value."),
-	}
-	mcpProps := map[string]interface{}{
-		"type":    strProp("Server type", "stdio runs a local command; http speaks streamable HTTP to the url (with legacy-SSE fallback); sse forces the legacy HTTP+SSE transport."),
-		"name":    strProp("Server name", "Stable id referenced by the agent; must be unique in this list."),
-		"command": strProp("Command", "Executable for stdio transport (leave empty when using http url). ${CWD} expands to the session cwd."),
-		"args": map[string]interface{}{
-			"type":        "array",
-			"title":       "Arguments",
-			"description": "Argv passed after command for stdio MCP servers. ${CWD} expands to the session cwd.",
-			"items":       map[string]interface{}{"type": "string"},
-		},
-		"env": map[string]interface{}{
-			"type":        "array",
-			"title":       "Environment",
-			"description": "Extra environment variables for the stdio child process. ${CWD} in a value expands to the session cwd.",
-			"items": map[string]interface{}{
-				"type":                 "object",
-				"properties":           envProps,
-				"required":             []interface{}{"name", "value"},
-				"additionalProperties": false,
-			},
-		},
-		"url": strProp("MCP URL", "HTTP(S) endpoint when type selects an HTTP-based MCP server. ${CWD} expands to the session cwd."),
-		"headers": map[string]interface{}{
-			"type":        "array",
-			"title":       "HTTP headers",
-			"description": "Optional headers sent with MCP HTTP requests. ${CWD} in a value expands to the session cwd.",
-			"items": map[string]interface{}{
-				"type":                 "object",
-				"properties":           headerProps,
-				"required":             []interface{}{"name", "value"},
-				"additionalProperties": false,
-			},
-		},
-		"disabled": boolProp("Disabled", "Skip connecting this server without removing its definition."),
-		"disabled_tools": map[string]interface{}{
-			"type":        "array",
-			"title":       "Disabled tools",
-			"description": "Tool names of this server hidden from the agent.",
-			"items":       map[string]interface{}{"type": "string"},
-		},
-	}
-
 	isolationEnum := []string{string(IsolationIndividual), string(IsolationShared), string(IsolationAdmin)}
 	telegramUserGroupProps := map[string]interface{}{
 		"name": strProp("Group name", "Name referenced by access as group:<name>."),
@@ -521,13 +471,13 @@ func UISchemaMap() map[string]interface{} {
 				"dirs": map[string]interface{}{
 					"type":        "array",
 					"title":       "Definition directories",
-					"description": "Lowest priority first; later entries override earlier ones by name. ${CODDY_HOME} and ${CWD} expand. Directories inside the workspace are project scope and follow the trust policy.",
+					"description": "Extra definition directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/agents, the project's .agents/agents, ${CODDY_HOME}/agents, the project's .coddy/agents; then these entries in their order. A definition found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace. Directories inside the workspace are project scope and follow the trust policy.",
 					"items":       map[string]interface{}{"type": "string"},
 				},
 				"project_trust": map[string]interface{}{
 					"type":        "string",
 					"title":       "Project definitions",
-					"description": "Definitions found inside the workspace travel with the checkout. \"ask\": load them but refuse to spawn one until it is approved for this workspace on the machine running coddy (coddy agents trust there, or POST /coddy/subagents/{name}/trust). \"allow\": treat them like your own files. \"deny\": never read them.",
+					"description": "Definitions found inside the workspace travel with the checkout. \"ask\": load them but refuse to spawn one until it is approved for this workspace (the shield of its row in Definitions, coddy agents trust on the machine running coddy, or POST /coddy/subagents/{name}/trust). \"allow\": treat them like your own files. \"deny\": never read them.",
 					"enum":        []string{SubagentsProjectTrustAsk, SubagentsProjectTrustAllow, SubagentsProjectTrustDeny},
 				},
 				"max_concurrent":          intProp("Max concurrent", "How many subagent runs the whole process may have in flight at once (default 4). Extra spawns are refused, not queued."),
@@ -563,14 +513,6 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"enable", "files", "project_trust", "default_timeout_seconds", "stop_loop_limit", "max_output_chars"},
 			nil),
-		"mcp_servers": map[string]interface{}{
-			"type":        "array",
-			"title":       "MCP servers",
-			"description": "Model Context Protocol servers started or contacted for new sessions.",
-			"items": objectSchema("", "", mcpProps,
-				[]string{"type", "name", "command", "args", "env", "url", "headers", "disabled", "disabled_tools"},
-				[]string{"name"}),
-		},
 		// mcp.project_trust is deliberately absent here: it is edited in the
 		// MCP servers tab next to the servers it governs (POST
 		// /coddy/mcp/project-trust), not as a settings-document section. It
@@ -580,14 +522,14 @@ func UISchemaMap() map[string]interface{} {
 				"dirs": map[string]interface{}{
 					"type":        "array",
 					"title":       "Skill directories",
-					"description": "Search paths for skills. Defaults: ~/.agents/skills (global, shared with npx skills / npx skillsbd), ${CODDY_HOME}/skills (coddy-specific), ${CWD}/.coddy/skills (project-local). ${CODDY_HOME} expands when the file is loaded; ${CWD} stays in the entry and expands per session against that session's workspace.",
+					"description": "Extra skill directories, read after the four default folders and stronger than them. The defaults are always read, lowest priority first: ${HOME}/.agents/skills (shared with every agent, npx skills and npx skillsbd install there), the project's .agents/skills, ${CODDY_HOME}/skills (Coddy's own and installed skills), the project's .coddy/skills; then these entries in their order. A skill found in several directories is taken from the last one in this order, and a directory named twice is read at its last place. ${CODDY_HOME} expands when the file is loaded, ${HOME} and ~ to your home folder, ${CWD} and a relative path against the session's workspace (the folder a new chat picked included).",
 					"items":       map[string]interface{}{"type": "string"},
 				},
-				"sources": map[string]interface{}{
-					"type":        "array",
-					"title":       "Remote skill sources",
-					"description": "GitHub repos (owner/repo[@ref]), git URLs, or an http(s) URL to an agents-standard marketplace.json. Installed on demand via `coddy skills sync` or the Sync button; never fetched automatically. EvilFreelancer/rpa-skills, the marketplace the bundled rpa-* skills are published from, is always in effect as a system source and is not part of this list.",
-					"items":       map[string]interface{}{"type": "string"},
+				"project_trust": map[string]interface{}{
+					"type":        "string",
+					"title":       "Project marketplaces",
+					"description": "The project's .coddy/marketplaces.json travels with the checkout. \"ask\": leave its sources and marketplaces out of every sync until each entry is approved for this workspace (the shield of the marketplaces list, or coddy plugin marketplace trust). \"allow\": treat them like your own ~/.coddy/marketplaces.json. \"deny\": never use them; they are listed as switched off. What they install goes to ${CODDY_HOME}/skills; the project's skill folders are not affected.",
+					"enum":        []string{ProjectTrustAsk, ProjectTrustAllow, ProjectTrustDeny},
 				},
 				"auto_discovery": map[string]interface{}{
 					"type":        "boolean",
@@ -595,7 +537,7 @@ func UISchemaMap() map[string]interface{} {
 					"description": "Let the agent load a matching skill's full instructions on its own (model-driven load_skill tool), instead of only when you type /name. Defaults to on.",
 				},
 			},
-			[]string{"dirs", "sources", "auto_discovery"},
+			[]string{"dirs", "project_trust", "auto_discovery"},
 			nil),
 		"memory": objectSchema("Memory copilot", "Optional memory subagent (requires the memory build tag and a provider).",
 			map[string]interface{}{
@@ -639,12 +581,12 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"dir", "agent_prompt", "plan_prompt", "ask_prompt"},
 			nil),
-		"instructions": objectSchema("Instructions", "Files read from the session working directory and appended to the system prompt as project instructions (AGENTS.md-compatible).",
+		"instructions": objectSchema("Instructions", "Files you add to the system prompt as project instructions, after the AGENTS.md and DESIGN.md of the agent home, of the session folder and of the folders a tool enters, which are always read.",
 			map[string]interface{}{
 				"files": map[string]interface{}{
 					"type":        "array",
 					"title":       "Instruction files",
-					"description": "Instruction files, read in the order listed. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. Defaults to [\"AGENTS.md\", \"DESIGN.md\"]; the agent home has its own pair, read ahead of this list whenever it exists.",
+					"description": "Extra instruction files, appended after the AGENTS.md and DESIGN.md documents in the order listed; empty by default. ${CODDY_HOME}, ${CWD} and a leading ~ expand; an absolute entry is read as it stands, a relative one resolves against the session CWD. A file the prompt already carries is not read twice.",
 					"items":       map[string]interface{}{"type": "string"},
 				},
 			},
@@ -715,6 +657,7 @@ func UISchemaMap() map[string]interface{} {
 		"compaction": objectSchema("Context compaction", "Summarize older conversation history so long sessions keep fitting the model context window.",
 			map[string]interface{}{
 				"enable":            boolProp("Enabled", "Master switch for compaction (manual command and automatic trigger). Defaults to true."),
+				"auto_enable":       boolProp("Automatic compaction", "Enable the threshold trigger while keeping manual compaction available when off. Defaults to true."),
 				"threshold_percent": intProp("Auto threshold (%)", "Auto-compact when the estimated context reaches this percent of the model's context window (1..100, default 80): its max_context_tokens, else the window its provider reports, else 128000."),
 				"keep_recent_turns": intProp("Keep recent turns", "How many most recent user turns stay verbatim after compaction (default 2; 0 summarizes everything). With no more turns than that, automatic compaction still folds the older ones and keeps the prompt being answered."),
 				"model":             strProp("Summarizer model", "Optional models[].model for the summarization call; empty uses the session model."),
@@ -735,7 +678,7 @@ func UISchemaMap() map[string]interface{} {
 					[]string{"enable", "keep_recent", "min_result_bytes", "start_percent"},
 					nil),
 			},
-			[]string{"enable", "threshold_percent", "keep_recent_turns", "model", "result_eviction"},
+			[]string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "result_eviction"},
 			nil),
 		"gateways": objectSchema("Messenger gateways", "Telegram bot gateway (requires the gateway or gateway.telegram build tag).",
 			map[string]interface{}{
@@ -758,7 +701,7 @@ func UISchemaMap() map[string]interface{} {
 	rootOrder := []string{
 		"providers", "models",
 		"agent", "compaction", "memory",
-		"tools", "mcp_servers", "skills", "subagents", "hooks",
+		"tools", "skills", "subagents", "hooks",
 		"scheduler", "gateways",
 		"logger", "sessions", "prompts", "instructions",
 	}
@@ -791,8 +734,10 @@ func toIfaceOrder(keys []string) []interface{} {
 //
 //	httpserver - the surface the UI itself is served from; editing it there
 //	             would let the page cut its own connection.
-//	mcp        - edited in the MCP servers tab (POST /coddy/mcp/project-trust),
-//	             next to the servers the policy governs.
+//	mcp        - project_trust is edited in the MCP servers tab (POST
+//	             /coddy/mcp/project-trust), next to the servers the policy
+//	             governs; idle_timeout_seconds is set in the file and survives
+//	             every save of this form.
 //	swarm      - a relay's own deployment: bind address, credentials for a whole
 //	             fleet, and the parents this process joins. It is set in the file
 //	             or on the command line, not from a page one of its nodes serves.

@@ -56,7 +56,7 @@ The root carries its own `.gitignore` holding `*`, written when the first worktr
 
 The flip side of living inside the checkout is that the folder is an ignored path in the main working copy, so `git clean` reaches it. Measured on git 2.47: `-xdf` skips the worktrees themselves ("skipping repository") but does delete the `.gitignore`, which Coddy writes again with the next worktree; `-xdff` deletes the whole folder and leaves the entries behind as `prunable`. Run `git worktree list` before reaching for either, and `git worktree prune` after one went through.
 
-The same place is what the agent is told to use for a worktree it creates by hand (`internal/prompts/agent.md`), so a branch opened from the composer and a branch opened by a shell command land side by side. The web UI opens one through the worktree checkbox ([Web UI](../surfaces/web-ui.md#per-session-workspace-folder--branch--worktree-chips)); over HTTP it is `POST /coddy/sessions/{id}/workspace` with `{"branch":b,"worktree":true}` ([HTTP API](../reference/http-api.md)).
+The agent's `worktree_create` tool and the web composer's worktree checkbox use this same location. Both fetch `origin` and start a new feature branch from its fresh default branch - a branch that exists only on `origin` is checked out from it with tracking, an existing local branch is reused at its tip - and neither opens the default branch as a feature worktree. The tool moves an active session into the worktree, while the web picker remains available only before the first message. See [Git worktrees](worktrees.md) for the full flow and [HTTP API](../reference/http-api.md) for `POST /coddy/sessions/{id}/workspace`.
 
 ## One store, every surface
 

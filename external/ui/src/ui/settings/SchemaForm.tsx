@@ -67,7 +67,34 @@ export type JsonSchema = {
   pattern?: string;
   "x-coddy-property-order"?: string[];
   "x-coddy-provider-api-key-env-placeholder"?: boolean;
+  /**
+   * A credential the configuration document serves empty (a relay's tokens):
+   * drawn as a password field, kept on save when left empty, replaced when
+   * filled in.
+   */
+  writeOnly?: boolean;
+  /** The sibling field that says whether a writeOnly value is set. */
+  "x-coddy-configured"?: string;
+  /** The document is a relay's settings form (config.RelayUISchemaMap). */
+  "x-coddy-relay"?: boolean;
 };
+
+/**
+ * configuredCount reads the sibling flag a write-only field names: true or a
+ * count of values set (a relay's pairing tokens). Zero when nothing is set or
+ * nothing says.
+ */
+function configuredCount(
+  schema: JsonSchema,
+  parentObj: Record<string, unknown> | undefined,
+): number {
+  const flag = schema["x-coddy-configured"];
+  const v = flag && parentObj ? parentObj[flag] : undefined;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return Math.max(0, v);
+  }
+  return v === true ? 1 : 0;
+}
 
 function entriesInSchemaOrder(
   props: Record<string, JsonSchema>,
@@ -212,7 +239,7 @@ function SchemaField(props: {
     ? schema.description
     : schemaFieldDesc(i18nDomain, path, schema.description);
   const t = schema.type;
-  const { t: tr } = useT();
+  const { t: tr, tp } = useT();
 
   if (fieldOverride) {
     const override = fieldOverride({
@@ -293,9 +320,15 @@ function SchemaField(props: {
     const arr = Array.isArray(value) ? [...value] : [];
     const itemSchema = schema.items;
     const scalarItems = isScalarItem(itemSchema);
+    const setCount = schema.writeOnly ? configuredCount(schema, parentObj) : 0;
     return (
       <fieldset className="settings-fieldset">
         <LegendWithHint label={label} description={desc} />
+        {setCount > 0 ? (
+          <p className="settings-field-desc" data-testid="settings-secret-list-state">
+            {tp("settings.secret.listSet", setCount)}
+          </p>
+        ) : null}
         <ul className="settings-array">
           {arr.map((row, i) => (
             <li key={i} className="settings-array-row">
@@ -303,6 +336,7 @@ function SchemaField(props: {
                 {scalarItems ? (
                   <ArrayItemControl
                     schema={itemSchema}
+                    secret={schema.writeOnly === true}
                     value={row}
                     ariaLabel={`${label} ${i + 1}`}
                     onChange={(nv) => {
@@ -447,6 +481,28 @@ function SchemaField(props: {
         ? String(schema.default)
         : ""
       : String(value);
+  if (schema.writeOnly) {
+    // The document serves it empty; empty keeps what is set, a value replaces
+    // it. The placeholder is what says which of the two an empty field means.
+    const set = configuredCount(schema, parentObj) > 0;
+    return (
+      <div className="settings-row">
+        <FieldLabel label={label} description={desc} />
+        <input
+          className="settings-input"
+          type="password"
+          autoComplete="new-password"
+          value={s}
+          placeholder={set ? tr("settings.secret.keep") : tr("settings.secret.unset")}
+          aria-label={label}
+          data-testid={`settings-secret-${path}`}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onChange(e.target.value)
+          }
+        />
+      </div>
+    );
+  }
   return (
     <div className="settings-row">
       <FieldLabel label={label} description={desc} />
@@ -479,11 +535,13 @@ function isScalarItem(sub: JsonSchema): boolean {
  */
 function ArrayItemControl(props: {
   schema: JsonSchema;
+  /** An entry of a write-only list (a relay's pairing tokens). */
+  secret?: boolean;
   value: unknown;
   ariaLabel: string;
   onChange: (v: unknown) => void;
 }) {
-  const { schema, value, ariaLabel, onChange } = props;
+  const { schema, value, ariaLabel, onChange, secret } = props;
   const text = value === undefined || value === null ? "" : String(value);
   if (schema.enum && schema.enum.length > 0) {
     return (
@@ -515,7 +573,8 @@ function ArrayItemControl(props: {
   return (
     <input
       className="settings-input"
-      type="text"
+      type={secret ? "password" : "text"}
+      autoComplete={secret ? "new-password" : undefined}
       value={text}
       aria-label={ariaLabel}
       onChange={(e) => onChange(e.target.value)}
