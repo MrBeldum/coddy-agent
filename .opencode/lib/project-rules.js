@@ -83,13 +83,27 @@ export function parseRule(filePath, text, repoRoot) {
   let description = ""
   let globs = []
   let always = false
-  for (const line of frontmatter[1].split(/\r?\n/)) {
+  const lines = frontmatter[1].split(/\r?\n/)
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
     const separator = line.indexOf(":")
     if (separator < 0) continue
     const key = line.slice(0, separator).trim()
     const value = line.slice(separator + 1).trim()
     if (key === "description") description = unquote(value)
-    if (key === "globs") globs = parseGlobs(value)
+    if (key === "globs") {
+      if (value) {
+        globs = parseGlobs(value)
+      } else {
+        while (index + 1 < lines.length) {
+          const item = lines[index + 1].trim()
+          if (!item.startsWith("-")) break
+          const pattern = unquote(item.slice(1))
+          if (pattern) globs.push(pattern)
+          index += 1
+        }
+      }
+    }
     if (key === "alwaysApply") always = value.toLowerCase() === "true"
   }
 
@@ -179,7 +193,7 @@ function matchesRule(rule, files) {
 function renderRules(rules) {
   if (!rules.length) return ""
   return [
-    "Project rules for this repository. They are authoritative; `.cursor/rules/` is their single source of truth.",
+    "Project rules attached by the OpenCode project adapter from `.cursor/rules/`; no separate OpenCode copy is maintained.",
     ...rules.map((rule) => `<!-- from ${rule.path} -->\n\n${rule.body}`),
   ].join("\n\n")
 }

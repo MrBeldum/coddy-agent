@@ -1,4 +1,4 @@
-.PHONY: build build-acp android check-android ui-deps ui-build ui-test ui-typecheck test test-matrix test-race test-cache test-perf bench-cli-startup bench-cli-startup-real print-test-tag-sets print-full-tags print-lint-tags-no-ui test-opencode-rules check-windows lint lint-windows clean install print-version hooks deb rpm brew brew-formula brew-check site-schema site-schema-check docs docs-check docs-changelog docs-fast site-docs site-docs-check skills-vendor skills-vendor-check security sec-trivy sec-semgrep sec-report
+.PHONY: build build-acp android check-android ui-deps ui-build ui-test ui-typecheck test test-matrix test-race test-cache test-perf bench-cli-startup bench-cli-startup-real print-test-tag-sets print-full-tags print-lint-tags-no-ui test-agent-rules test-opencode-rules check-windows lint lint-windows clean install print-version hooks deb rpm brew brew-formula brew-check site-schema site-schema-check docs docs-check docs-changelog docs-fast site-docs site-docs-check skills-vendor skills-vendor-check security sec-trivy sec-semgrep sec-report
 
 # ---- Build options (extend when you add optional Go build tags) ----
 #   TAGS   optional extra `go build -tags` values (space-separated).
@@ -224,6 +224,11 @@ skills-vendor:
 skills-vendor-check:
 	scripts/vendor-bundled-skills.sh --check
 
+# Test every repository adapter that attaches Cursor rules to another host.
+test-agent-rules:
+	python3 -m unittest -v scripts/test_agent_rule_adapters.py
+	$(MAKE) test-opencode-rules
+
 # Test the project plugin that attaches Cursor rules to OpenCode sessions.
 test-opencode-rules:
 	node --test .opencode/tests/project-rules.test.js
@@ -274,13 +279,13 @@ TEST_TAG_SETS := \
 
 # Express run: the SPA suite, then the whole Go tree once with every optional
 # module compiled in.
-test: test-opencode-rules ui-build ui-test
+test: test-agent-rules ui-build ui-test
 	go test -tags=$(FULL_TAGS_CSV) ./...
 
 # Full matrix: every combination in TEST_TAG_SETS, in sequence. CI's job; run
 # it locally only when a build-tag boundary moved and one combination is not
 # enough.
-test-matrix: test-opencode-rules ui-build ui-test
+test-matrix: test-agent-rules ui-build ui-test
 	go test ./...
 	@set -e; for tags in $(TEST_TAG_SETS); do \
 		echo "go test -tags=$$tags ./..."; \

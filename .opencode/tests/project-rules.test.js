@@ -38,6 +38,19 @@ async function fixture(t) {
       "Keep the served OpenAPI document aligned with HTTP handlers.",
     ].join("\n"),
   )
+  await writeFile(
+    path.join(rulesDir, "provider-proxy.mdc"),
+    [
+      "---",
+      "description: Provider proxy rule",
+      "globs:",
+      "  - internal/llm/**/*.go",
+      "  - cmd/coddy/providers.go",
+      "alwaysApply: false",
+      "---",
+      "Every provider request follows its configured proxy.",
+    ].join("\n"),
+  )
   return root
 }
 
@@ -65,6 +78,8 @@ test("alwaysApply rules enter every OpenCode system prompt", async (t) => {
   const system = await systemText(hooks, "session-always")
 
   assert.match(system, /Always follow the repository workflow/)
+  assert.match(system, /OpenCode project adapter/)
+  assert.doesNotMatch(system, /single source of truth/)
   assert.doesNotMatch(system, /Keep the served OpenAPI document aligned/)
 })
 
@@ -88,6 +103,21 @@ test("reading a governed file activates its scoped rules", async (t) => {
 
   const system = await systemText(hooks, "session-read")
   assert.match(system, /Keep the served OpenAPI document aligned/)
+})
+
+test("YAML-list globs activate the provider rule", async (t) => {
+  const root = await fixture(t)
+  const hooks = await createProjectRulesHooks({ repoRoot: root, directory: root })
+
+  await hooks["tool.execute.before"](
+    { tool: "read", sessionID: "session-list-glob", callID: "call-1" },
+    { args: { filePath: "internal/llm/openai.go" } },
+  )
+
+  assert.match(
+    await systemText(hooks, "session-list-glob"),
+    /Every provider request follows its configured proxy/,
+  )
 })
 
 test("the first direct edit is retried after scoped rules are activated", async (t) => {
