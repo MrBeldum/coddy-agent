@@ -1,11 +1,12 @@
 ---
 description: Every provider request follows providers[].proxy
- globs:
+globs:
   - internal/llm/**/*.go
   - external/httpserver/*auth*_http.go
   - cmd/coddy/codex.go
   - cmd/coddy/devin.go
   - cmd/coddy/providers.go
+alwaysApply: false
 ---
 # Provider transport and proxy boundary
 
