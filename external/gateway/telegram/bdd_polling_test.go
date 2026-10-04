@@ -103,6 +103,7 @@ func (w *pollingWorld) gatewayPointedAtIt() error {
 	}
 	w.bot = New(&config.TelegramGatewayConfig{
 		Enabled: true, Token: "123456:polling", DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual,
+		Admins: []int64{pollingGroupAdminID},
 	}, w.runner, dir, logger.Component(base, logger.ComponentGatewayTelegram), "", nil)
 	// The same origin the operator would export as CODDY_TELEGRAM_API_BASE.
 	w.bot.apiBase = w.f.srv.URL
@@ -201,8 +202,32 @@ func (w *pollingWorld) userSends(text string) error {
 	return nil
 }
 
-// pollingGroupID is the group of the addressing scenario.
-const pollingGroupID = int64(-4242)
+// pollingGroupID is the group of the addressing scenario, and
+// pollingGroupAdminID the one member of it the bot's admins list names.
+const (
+	pollingGroupID      = int64(-4242)
+	pollingGroupAdminID = int64(9090)
+)
+
+func (w *pollingWorld) groupAdminSends(text string) error {
+	upd, _ := w.fake.InjectMessage(tgfake.IncomingMessage{ChatID: pollingGroupID, ChatType: "group", UserID: pollingGroupAdminID, Text: text})
+	w.lastUpdate = upd
+	return nil
+}
+
+func (w *pollingWorld) agentAskedNothing() error {
+	time.Sleep(300 * time.Millisecond)
+	w.runner.mu.Lock()
+	defer w.runner.mu.Unlock()
+	if len(w.runner.prompts) != 0 {
+		return fmt.Errorf("the agent was asked %q", w.runner.prompts)
+	}
+	return nil
+}
+
+func (w *pollingWorld) agentWasAskedText(text string) error {
+	return w.agentWasAsked(&godog.DocString{Content: text})
+}
 
 func (w *pollingWorld) userReplies(text string) error {
 	var last int
@@ -428,6 +453,9 @@ func initializePollingScenario(sc *godog.ScenarioContext) {
 	sc.When(`^the user replies "([^"]*)" to the bot's last message$`, w.userReplies)
 	sc.When(`^somebody in the group sends "([^"]*)"$`, w.groupMemberSends)
 	sc.Then(`^the agent was asked:$`, w.agentWasAsked)
+	sc.Then(`^the agent was asked nothing$`, w.agentAskedNothing)
+	sc.Then(`^the agent was asked "([^"]*)"$`, w.agentWasAskedText)
+	sc.When(`^an admin in the group sends "([^"]*)"$`, w.groupAdminSends)
 	sc.Then(`^the group shows a bot message containing "([^"]*)"$`, w.groupShowsBotMessage)
 	sc.Then(`^the group shows no bot message about a new session$`, w.groupShowsNoNewSession)
 	sc.When(`^the user taps the button for "([^"]*)"$`, w.userTapsButton)

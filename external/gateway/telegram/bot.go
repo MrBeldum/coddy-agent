@@ -388,6 +388,13 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 			"chat", chatID,
 		)
 	}
+	// A group shares the bot with many people: what changes the session's
+	// settings, or replaces the conversation, is the admins' to do.
+	if isGroupChat(msg.Chat) && changesSettings(msg) && !b.cfg.IsAdmin(userID) {
+		b.log.Debug("telegram: update refused", "reason", "settings are admin-only in a group", "user", userID, "chat", chatID)
+		b.reply(bot, chatID, msg.MessageID, adminOnlyNote)
+		return
+	}
 	if isCommand(msg, "clear") {
 		oldID := b.store.Get(key)
 		newID := b.store.Reset(key)
@@ -585,6 +592,28 @@ func (b *Bot) shouldRespond(msg *tgbotapi.Message, text string) bool {
 		return true
 	}
 	return false
+}
+
+// adminOnlyNote answers a group member who is not an admin and tried to
+// change the settings.
+const adminOnlyNote = "Only the bot's admins can change settings in this chat."
+
+// isGroupChat reports whether chat is shared by several people.
+func isGroupChat(chat *tgbotapi.Chat) bool {
+	return chat != nil && (chat.IsGroup() || chat.IsSuperGroup() || chat.IsChannel())
+}
+
+// changesSettings reports whether msg changes the session's settings or
+// replaces the conversation: a settings command, /model, /clear, /resume.
+func changesSettings(msg *tgbotapi.Message) bool {
+	if !msg.IsCommand() {
+		return false
+	}
+	switch strings.ToLower(msg.Command()) {
+	case "model", "clear", "resume":
+		return true
+	}
+	return isSettingsCommand(msg)
 }
 
 // isSettingsCommand reports whether msg starts with a settings command the

@@ -710,6 +710,12 @@ func (w *pachcaWorld) wakeGroup(name, group string) error {
 	return w.wake(w.bot.store.Peek(w.groupKey(name, group)))
 }
 
+func (w *pachcaWorld) adminsAre(notAdmin, admin string) error {
+	w.person(notAdmin)
+	w.bot.cfg.Admins = []int64{w.person(admin)}
+	return nil
+}
+
 func (w *pachcaWorld) cleanup() {
 	_ = w.stop()
 	if w.envSet {
@@ -755,6 +761,7 @@ func initializePachcaScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the person "([^"]*)" replies "([^"]*)" to the bot's last message in the direct chat$`, w.repliesToBotDirect)
 	sc.Step(`^the person "([^"]*)" replies "([^"]*)" to that message in the group "([^"]*)"$`, w.repliesToThatMessage)
 	sc.Step(`^the agent was asked nothing$`, w.agentAskedNothing)
+	sc.Step(`^"([^"]*)" is not an admin of the Pachca bot and "([^"]*)" is$`, w.adminsAre)
 	sc.Step(`^the agent was asked (\d+) times?$`, w.agentAskedTimes)
 	sc.Step(`^the events history no longer holds that message$`, w.historyLacksMessage)
 	sc.Step(`^Pachca received "([^"]*)"$`, w.pachcaReceived)

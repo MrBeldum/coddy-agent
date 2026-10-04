@@ -103,3 +103,19 @@ func TestReplyContext(t *testing.T) {
 		t.Fatalf("a message without text quoted %q", q)
 	}
 }
+
+func TestChangesSettings(t *testing.T) {
+	cases := map[string]bool{
+		"/clear": true, "/model": true, "/model x": true, "/resume": true, "/plan": true,
+		"/think": true, "/help": false, "/context": false, "/mcp": false, "hello": false,
+	}
+	for text, want := range cases {
+		msg := commandMessage(text)
+		if !strings.HasPrefix(text, "/") {
+			msg = &tgbotapi.Message{Text: text}
+		}
+		if got := changesSettings(msg); got != want {
+			t.Errorf("changesSettings(%q) = %v, want %v", text, got, want)
+		}
+	}
+}

@@ -625,3 +625,66 @@ func TestBot_AStopFinishesTheQueuedMessages(t *testing.T) {
 		t.Fatalf("a message taken before the stop was dropped: %d turns", n)
 	}
 }
+
+func TestGroup_SettingsAreAdminOnly(t *testing.T) {
+	cfg := &config.PachcaGatewayConfig{Admins: []int64{9}}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, cfg)
+	e.startAt(t)
+	e.groupPost(t, 1, "@coddy_bot hello", 0)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the first turn")
+	key := "pachca:chat:600:user:1"
+	before := e.bot.store.Peek(key)
+	for _, cmd := range []string{"@coddy_bot /clear", "@coddy_bot /model", "@coddy_bot /model rpa/qwen3.6-35b-a3b", "@coddy_bot /think"} {
+		e.groupPost(t, 1, cmd, 0)
+	}
+	waitFor(t, func() bool {
+		n := 0
+		for _, m := range e.fake.Messages(600) {
+			if strings.Contains(m.Content, "Only the bot's admins") {
+				n++
+			}
+		}
+		return n == 4
+	}, "four refusals")
+	if e.bot.store.Peek(key) != before || e.runner.promptCount() != 1 {
+		t.Fatal("a non-admin changed the group's session")
+	}
+	// The same in a direct chat is the person's own business.
+	e.dm(t, 1, "/clear")
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool {
+		for _, m := range e.fake.Messages(e.fake.PersonalChat(1)) {
+			if m.Content == "New session started." {
+				return true
+			}
+		}
+		return false
+	}, "/clear in a direct chat")
+}
+
+func TestGroup_AModelClickFromANonAdminIsRefused(t *testing.T) {
+	cfg := &config.PachcaGatewayConfig{Admins: []int64{9}}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, cfg)
+	e.startAt(t)
+	e.fake.AddUser(9, "admin", "Admin")
+	e.groupPost(t, 9, "@coddy_bot /model", 0)
+	var menu pachcafake.Message
+	waitFor(t, func() bool {
+		for _, m := range e.fake.Messages(600) {
+			if len(m.Buttons) > 0 {
+				menu = m
+				return true
+			}
+		}
+		return false
+	}, "the admin's model menu")
+	e.fake.AddUser(1, "u1", "U1")
+	if err := e.fake.UserClicks(1, menu.ID, buttonFor(menu, "rpa/qwen3.6-35b-a3b")); err != nil {
+		t.Fatal(err)
+	}
+	e.tickUntilQuiet(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	if e.bot.store.LastModel() != "" {
+		t.Fatal("a non-admin's click switched the model")
+	}
+}

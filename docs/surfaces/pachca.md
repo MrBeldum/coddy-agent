@@ -97,7 +97,7 @@ The banner names the bot (`gateway     pachca`), and the log says `pachca bot co
 | `/context` | The context window usage of the conversation's session. |
 | `/agent`, `/plan`, `/ask`, `/think`, `/nothink`, `/reasoning <level>` | Settings commands, handed to the session like on every surface; `--once` and `--count=N` limit them to the next messages. |
 
-In a group chat a command needs the bot's mention (`@nickname /clear`) or a reply to its message. `/permissions` is not taken from a chat: the bot approves its own agent's requests itself.
+In a group chat a command needs the bot's mention (`@nickname /clear`) or a reply to its message, and what changes the settings - the settings commands, `/model` and its buttons, `/clear` - is the admins' (`admins`): anybody else is answered *Only the bot's admins can change settings in this chat.* In a direct chat each person changes their own session. `/permissions` is not taken from a chat: the bot approves its own agent's requests itself.
 
 ## Answers, limits and formatting
 

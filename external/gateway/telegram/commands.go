@@ -205,6 +205,14 @@ func (b *Bot) handleCallback(ctx context.Context, bot *tgbotapi.BotAPI, cbq *tgb
 		return
 	}
 
+	// The MCP switches change the whole agent's configuration, and in a
+	// group the model and the session are everybody's: both are the admins'.
+	if (action == callbackActionMCP || (isGroup && (action == callbackActionModel || action == callbackActionResume))) && !b.cfg.IsAdmin(userID) {
+		b.log.Debug("telegram: callback refused", "reason", "admin-only", "action", action, "user", userID, "chat", chatID)
+		b.replyToTap(bot, cbq, adminOnlyNote)
+		return
+	}
+
 	isolation := access.EffectiveIsolation(chatID, b.cfg)
 	key := sessionstore.SessionKey(adapterName, chatID, userID, isolation, isGroup)
 

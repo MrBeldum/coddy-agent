@@ -26,3 +26,13 @@ Feature: Pachca chat commands
   Scenario: A command in a group is taken with a mention
     When the person "boris" writes "@coddy_bot /help" in the group "dev"
     Then the group "dev" shows a bot message containing "/clear"
+
+  Scenario: In a group only an admin changes the session's settings
+    A group shares the bot with many people, so its settings - the mode, the
+    model, a new session - are the admins' to change.
+    Given "boris" is not an admin of the Pachca bot and "olga" is
+    When the person "boris" writes "@coddy_bot /plan" in the group "dev"
+    Then the group "dev" shows a bot message containing "Only the bot's admins can change settings in this chat"
+    And the agent was asked nothing
+    When the person "olga" writes "@coddy_bot /plan" in the group "dev"
+    Then the agent was asked "/plan"

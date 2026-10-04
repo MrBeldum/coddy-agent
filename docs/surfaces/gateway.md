@@ -578,6 +578,8 @@ A group is where many people talk, so the bot **only responds** when explicitly 
 
 Commands follow the same rule: in a group a bot command or a settings command needs the mention, which Telegram writes as `/clear@coddy_agent_bot` (the command menu of a group inserts that form), or a reply to the bot's message. A bare `/clear` in a group is left to the people in it.
 
+What changes the settings is the admins' (`gateways.telegram.admins`) in a group: the settings commands (`/agent`, `/plan`, `/ask`, `/think`, `/nothink`, `/reasoning`, `/model <id>`), the `/model` menu and its taps, `/clear` and `/resume`. Anybody else gets *Only the bot's admins can change settings in this chat.* and nothing changes; in a private chat each person still changes their own session. The `/mcp` switches change the whole agent's configuration, so a tap on them is the admins' in every chat.
+
 When `isolation` is `admin`, the bot additionally ignores everyone who is not in the `admins` list.
 
 ### Commands

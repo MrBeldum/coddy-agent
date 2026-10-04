@@ -50,6 +50,17 @@ Feature: The Telegram bot polls a Bot API server
     Then the group shows a bot message containing "group answer"
     And the group shows no bot message about a new session
 
+  Scenario: In a group only an admin changes the session's settings
+    A group shares the bot with many people, so its settings - the mode, the
+    model, a new session - are the admins' to change.
+    Given the agent answers with "group answer"
+    When the bot is started
+    And somebody in the group sends "/plan@coddy_fake_bot"
+    Then the group shows a bot message containing "Only the bot's admins can change settings in this chat"
+    And the agent was asked nothing
+    When an admin in the group sends "/plan@coddy_fake_bot"
+    Then the agent was asked "/plan"
+
   Scenario: A model button tapped in the chat is applied through polling
     When the bot is started
     And the user sends "/model"

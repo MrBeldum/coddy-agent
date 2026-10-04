@@ -316,6 +316,16 @@ func knownCommand(cmd string) bool {
 	return isSettingsCommand(cmd)
 }
 
+// adminOnlyNote answers a group member who is not an admin and tried to
+// change the settings.
+const adminOnlyNote = "Only the bot's admins can change settings in this chat."
+
+// changesSettings reports whether cmd changes the session's settings or
+// replaces the conversation.
+func changesSettings(cmd string) bool {
+	return cmd == "model" || cmd == "clear" || isSettingsCommand(cmd)
+}
+
 func isSettingsCommand(cmd string) bool {
 	sc, ok := session.LookupSettingsCommand(cmd)
 	return ok && sc.Setting != session.SettingPermissionMode
@@ -354,6 +364,13 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 
 	if in.command != "" {
 		b.log.Debug("pachca: command", "command", in.command, "session", b.store.Peek(key), "user", userID, "chat", in.msg.ChatID)
+	}
+	// A group shares the bot with many people: what changes the session's
+	// settings, or replaces the conversation, is the admins' to do.
+	if in.isGroup && changesSettings(in.command) && !b.cfg.IsAdmin(userID) {
+		b.log.Debug("pachca: update refused", "reason", "settings are admin-only in a group", "user", userID, "chat", in.msg.ChatID)
+		b.reply(ctx, c, target, parent, adminOnlyNote)
+		return
 	}
 	switch in.command {
 	case "clear":
