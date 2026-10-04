@@ -26,6 +26,7 @@ The messenger gateway lets you drive a Coddy agent directly from a chat applicat
   - [4. Add a build tag](#4-add-a-build-tag)
   - [5. Wire into hub.Start()](#5-wire-into-hubstart)
 - [The same session in the chat and in the browser](#the-same-session-in-the-chat-and-in-the-browser)
+- [Mini App](#mini-app)
 - [Woken turns land in the chat](#woken-turns-land-in-the-chat)
 - [Pictures the agent looked at](#pictures-the-agent-looked-at)
 - [Session lifecycle](#session-lifecycle)
@@ -444,7 +445,8 @@ The same page is an HTTP API, which is what a script or a coding agent drives:
 | `GET /sim/chat/4242` | the transcript: messages, keyboards after every edit, drafts, `typing`; `?format=text` for `grep`. |
 | `GET /sim/outbox?method=sendMessage&since=10` | every Bot API call with its parameters and the answer; `/sim/outbox/count?method=...` for a script. |
 | `POST /sim/fault` | `{"method": "sendMessage", "code": 429, "retry_after": 2, "times": 1}` makes the next `sendMessage` fail like a flood; `"method": "*"` fails everything until `DELETE /sim/fault`; `"contains": "<details>"` narrows the fault to calls whose parameters carry that text, which is Telegram refusing one entity rather than the method. |
-| `POST /sim/reset` | forgets chats, outbox and faults. Update ids keep growing, so a polling bot is not confused. |
+| `POST /sim/webapp/launch` | `{"chat_id": 4242, "url": "https://coddy.example.com/"}` opens a Mini App the way a client does and answers `{url, init_data}`: the address with the launch parameters in its fragment and the launch data signed with the bot's token. Without `url` it opens the chat's menu button. |
+| `POST /sim/reset` | forgets chats, outbox, faults and menu buttons. Update ids keep growing, so a polling bot is not confused. |
 
 The fake is strict where Telegram is. An edit that changes nothing, an edit
 of a message that was never sent, a text over 4096 characters, a reply to a
@@ -453,8 +455,10 @@ send it anyway), an answer to a callback query the fake never issued, a second
 answer to one it did (a query takes one answer, so a failure told in an alert
 after the tap was acknowledged never reaches the user), a `reply_markup` whose
 `inline_keyboard` is not an array (`null` included, what an empty keyboard of
-the Go library encodes to), and a keyboard whose `callback_data` is longer than
-64 bytes (`BUTTON_DATA_INVALID`) are refused with Telegram's own error, so a
+the Go library encodes to), a keyboard whose `callback_data` is longer than
+64 bytes (`BUTTON_DATA_INVALID`), a button with more than one action, and a
+`web_app` button outside a private chat or to an address that is neither https
+nor plain http on this machine are refused with Telegram's own error, so a
 keyboard that works on the stand works in a chat.
 
 It also remembers `allowed_updates` the way Telegram does. A bot token that
@@ -467,6 +471,39 @@ is how the polling feature reproduces the case. On a real bot,
 `getWebhookInfo` reports the same field.
 The subscription is applied when an update is created: changing it preserves
 already queued updates and cannot recover events excluded at creation.
+
+The page is a Telegram client for [Mini Apps](#mini-app) as well. A `web_app`
+button, or the menu button a bot set to a Mini App (left of the message
+field), opens the app in a phone frame beside the chat, and the page is its
+Telegram, the way web.telegram.org is: it signs the launch data with the
+bot's token (the one of the latest Bot API call, or `--token`), answers the
+viewport, safe area and theme requests, shows **Back** when the app asks for
+it, paints its header with the colour the app sets, and logs every event both
+ways under the phone. The controls above the phone switch the size, the
+window between expanded and half open (the frame clips the full-height
+WebView, as a phone does), Telegram's theme, fullscreen insets and an Android
+keyboard. To open the web UI there, let the stand's `coddy serve` serve it and
+advertise it:
+
+```yaml
+httpserver:
+  allow_insecure: true                 # no sign-in on the stand, advertised on purpose
+gateways:
+  telegram:
+    mini_app:
+      url: "http://127.0.0.1:12345/"   # plain http passes on a loopback host
+```
+
+Then send `/app` and tap **Open in Coddy**. The page and a web UI on the same
+host are one site to a cookie, so the frame keeps a sign-in the way a phone's
+WebView does; the page on `localhost` with the web UI on `127.0.0.1` is a
+cross-site frame, the way Telegram Web is. `npm run check:telegram` drives the
+same stand from a script (*Checking the Telegram Mini App* on the
+[web UI page](web-ui.md)).
+
+![The chat page of cmd/tgfake with a Mini App open: the chat on the left with the bot's answers, the web UI in a half-open phone frame in the middle with the mode sheet over its docked composer and Telegram's header with Back and Close above it, the Bot API calls on the right](../assets/tgfake-mini-app-dark-1280.png)
+
+*The chat page of `cmd/tgfake` with the web UI open as the bot's Mini App, half open: the mode sheet and the composer stay in the part the phone shows, the chat above it.*
 
 Rich-message previews expire 30 seconds after their last successful revision.
 The chat page and `/sim/chat/{id}` stop showing expired drafts; reading the
@@ -532,6 +569,7 @@ When `isolation` is `admin`, the bot additionally ignores everyone who is not in
 | `/reasoning <level>`, `/think [level]`, `/nothink` | all permitted users | Set the reasoning level, or turn thinking on or off where the model's provider can. Not in the command menu. |
 | `/context` | all permitted users | Displays the current session's context window usage broken down by category (conversation, system prompt, tool definitions, rules, skills, MCP). |
 | `/resume [id or title]` | all permitted users | Continues another session. Alone it opens an inline keyboard over the sessions the server keeps, newest first, eight per page, the chat's own session marked; a tap binds the chat to the one chosen. With words after it, the session whose id they are, or whose id starts with them or whose title contains them (those two case-insensitively), is resumed at once; several matches come back as the keyboard, and no match is answered with a message. The reply names the model and the reasoning level the resumed session runs on, its own. The session left behind stays loaded. |
+| `/app` | all permitted users | Only with `gateways.telegram.mini_app.url` set: answers with **Open in Coddy**, a button that opens the chat's conversation in the web UI - as a Mini App in a private chat, as a link in a group ([Mini App](#mini-app)). |
 | `/clear` | all permitted users | Starts a new session for the current user/chat context. The old session is removed from memory (persisted history remains on disk); `/resume` brings it back. |
 
 The settings commands take `--once` or `--count=N` to change a setting for the next messages only, and a message may follow them: `/plan --once how would you split this package?` plans one answer and leaves the chat in its mode. A command alone runs no turn and is answered with a line saying what changed. `/permissions` is not a bot command: the bot approves its chat agent's tools itself, so the session's permission mode would only change what other surfaces watching the session ask ([Session settings](../features/session-settings.md)).
@@ -732,6 +770,30 @@ If a session is deleted from the browser, the chat's mapping in
 bundle and starts a fresh transcript under it. The conversation resets, which
 is what deleting it meant.
 
+## Mini App
+
+The bot can open the web UI as its [Mini App](https://core.telegram.org/bots/webapps): a tap on the menu button beside the message field, or on the button `/app` answers with, opens the web UI inside Telegram, on the chat's own conversation. That conversation is the session the browser shows ([above](#the-same-session-in-the-chat-and-in-the-browser)), so the chat and the Mini App are two views of it. What the web UI does inside Telegram is described under *Telegram Mini App* on the [web UI page](web-ui.md).
+
+Telegram opens a Mini App from the person's phone, over https only, so the web UI has to be reachable there:
+
+1. Publish `coddy serve` behind a TLS proxy (Caddy, nginx, a tunnel) under a public address such as `https://coddy.example.com/`, and keep `httpserver.host` on loopback behind it.
+2. Turn sign-in on with `coddy serve set-password`, or `CODDY_HTTP_USER` and `CODDY_HTTP_PASSWORD`. The menu button is shown to everybody who opens a private chat with the bot, whatever `default_access` says, so the bot does not advertise a web UI that asks for nothing: with no sign-in and no token it leaves the menu button alone, `/app` says what is missing, and `coddy serve --dry-run` warns. `httpserver.allow_insecure: true` tells it you publish the web UI open on purpose.
+3. Name the address:
+
+```yaml
+gateways:
+  telegram:
+    mini_app:
+      url: https://coddy.example.com/
+      menu_button: true     # the default
+```
+
+On every start the bot then points its menu button at `url`, labelled **Coddy**, and adds `/app` to its command list. `/app` answers with **Open in Coddy**: in a private chat a button that opens the chat's conversation as a Mini App (`url?session=<id>`), in a group an ordinary link to the same address, since Telegram allows Mini App buttons in private chats only. Before the chat has a conversation, the button opens the start screen.
+
+The bot borrows the menu button from @BotFather and gives it back. The first time, it keeps the button it replaces in `gateway_sessions.json`; when you set `menu_button: false`, empty `url` or the web UI stops asking for sign-in, it puts that button back, as long as the button still opens the address the bot set. A button you changed in @BotFather in the meantime stays as you left it. Without `url` the bot never touches the menu button, so a Mini App you wired in @BotFather by hand keeps working: the web UI adapts to Telegram whoever opened it.
+
+`coddy serve --dry-run` asks `url` for the web UI and says when the bot will hold it back. Telegram Web (web.telegram.org) runs a Mini App in a frame of another site, where the browser drops the sign-in cookie; the sign-in screen then says so and links to Coddy in a tab of its own. To try all of this with no Telegram and no phone, open the Mini App from the offline stand ([Debugging against a fake Bot API](#debugging-against-a-fake-bot-api)).
+
 ## Woken turns land in the chat
 
 The agent in a chat can start a long command or a subagent in the background
@@ -857,4 +919,5 @@ one answer per tap.
 - **Permissions** — the gateway auto-approves the chat agent's own tool permission requests so it can work unattended. Restrict `tools.command_allowlist` in `config.yaml` if you want to limit which shell commands the agent can run. A subagent whose definition narrowed its permission mode below `bypass` is not waved through: the bot asks in the chat with **Allow** / **Reject** buttons naming the subagent - during the turn, and after it ended for a background subagent - and only the person whose session asked can answer (in a group with individual sessions another member's tap is ignored and leaves the owner's buttons available). The message reads *Allowed*, *Denied* or *No longer waiting* once it settles.
 - **Access control** — set `default_access: "admins"` for bots that should only respond to a specific set of users. Open bots (`default_access: "all"`) will respond to any Telegram user who can write to the chat.
 - **`/resume` lists every session of the server** — the sessions started in a console or a browser included, and a permitted user can continue any of them from the chat, which puts their transcripts in front of the model. With the defaults - every permission auto-approved, an unrestricted shell - the bundles on disk were within a permitted user's reach already; with a narrowed tool set (`tools.command_allowlist`, `ask` mode) `/resume` is a new path to other people's conversations. Either way, keep `default_access` narrow on a bot that more than one person can write to.
-- **Network** — the gateway uses Telegram long-polling (not webhooks). No inbound port needs to be open.
+- **Mini App** — the menu button is shown to everybody who opens a private chat with the bot, whatever `default_access` says, and a tap on it reaches the web UI's address. The bot therefore advertises the web UI only when it asks for a sign-in or a token, or when `httpserver.allow_insecure: true` says it is open on purpose. The launch data Telegram signs (`initData`) is not a sign-in: the web UI keeps it out of its address and never takes it for an identity, and you sign in as in a browser.
+- **Network** — the gateway uses Telegram long-polling (not webhooks). No inbound port needs to be open. A Mini App is the exception you choose: its `url` has to be reachable from the people who open it.
