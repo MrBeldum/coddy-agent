@@ -2,7 +2,8 @@
 description: Safe decoding of file text ingress
 paths:
   - "internal/textenc/**/*.go"
-  - "internal/platform/*encoding*.go"
+  - "internal/platform/output_other.go"
+  - "internal/platform/output_windows.go"
   - "internal/tools/fs/read*.go"
   - "internal/session/promptfiles.go"
   - "internal/session/mentions.go"

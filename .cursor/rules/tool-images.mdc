@@ -5,7 +5,8 @@ globs:
   - "internal/session/tool_images.go"
   - "internal/tools/fs/**/*"
   - "internal/llm/**/*"
-  - "external/httpserver/**/*image*"
+  - "external/httpserver/coddy_coddy.go"
+  - "external/httpserver/coddy_session_asset*.go"
   - "external/gateway/telegram/pictures.go"
 alwaysApply: false
 ---

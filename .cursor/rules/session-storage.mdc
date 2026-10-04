@@ -6,7 +6,8 @@ globs:
   - "internal/session/rewind.go"
   - "internal/agent/react.go"
   - "internal/agent/resume_permission.go"
-  - "external/httpserver/*toolcall*.go"
+  - "external/httpserver/coddy_coddy.go"
+  - "external/httpserver/coddy_toolcalls*.go"
   - "external/httpserver/*toolcalls*.go"
 alwaysApply: false
 ---

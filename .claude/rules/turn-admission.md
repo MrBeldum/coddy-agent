@@ -7,6 +7,8 @@ paths:
   - "internal/serve/wake.go"
   - "cmd/coddy/acp_wake*.go"
   - "external/cli/background.go"
+  - "external/httpserver/composer_stream_relay.go"
+  - "external/httpserver/turn_mirror.go"
   - "external/httpserver/*wake*.go"
   - "external/gateway/*/wake.go"
 ---

@@ -2,13 +2,13 @@
 description: Skill execution semantics and bundled skill delivery
 paths:
   - "internal/skills/**/*.go"
-  - "internal/agent/**/*skill*.go"
+  - "internal/agent/plugin_command.go"
   - "internal/tools/**/*skill*.go"
   - "external/ui/src/ui/skills/**/*"
   - "docs/features/skills.md"
   - "docs/reference/slash-commands.md"
   - "scripts/bundled-skills.json"
-  - "scripts/*skills*vendor*"
+  - "scripts/vendor-bundled-skills.sh"
   - "internal/skills/bundled/**/*"
 ---
 # Skills and bundled delivery
