@@ -75,7 +75,7 @@ function stripYamlComment(value) {
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]
     if (quote) {
-      if (character === "\\" && !escaped) {
+      if (character === "\\" && quote === '"' && !escaped) {
         escaped = true
         continue
       }
@@ -143,6 +143,31 @@ function parseGlobs(value) {
   return values
 }
 
+function flowSequenceComplete(value) {
+  let quote = ""
+  let escaped = false
+  let depth = 0
+  for (const character of value) {
+    if (quote) {
+      if (character === "\\" && quote === '"' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (character === quote && !escaped) quote = ""
+      escaped = false
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+    } else if (character === "[") {
+      depth += 1
+    } else if (character === "]") {
+      depth = Math.max(0, depth - 1)
+    }
+  }
+  return depth === 0
+}
+
 export function parseRule(filePath, text, repoRoot) {
   const frontmatter = text.match(
     /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/,
@@ -161,7 +186,17 @@ export function parseRule(filePath, text, repoRoot) {
     const value = line.slice(separator + 1).trim()
     if (key === "description") description = unquote(stripYamlComment(value))
     if (key === "globs") {
-      const cleanedValue = stripYamlComment(value)
+      let cleanedValue = stripYamlComment(value)
+      if (cleanedValue.startsWith("[") && !flowSequenceComplete(cleanedValue)) {
+        const parts = [cleanedValue]
+        while (index + 1 < lines.length) {
+          index += 1
+          const continuation = stripYamlComment(lines[index].trim())
+          if (continuation) parts.push(continuation)
+          cleanedValue = parts.join(" ")
+          if (flowSequenceComplete(cleanedValue)) break
+        }
+      }
       if (cleanedValue) {
         globs = parseGlobs(cleanedValue)
       } else {

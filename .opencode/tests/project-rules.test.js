@@ -49,6 +49,7 @@ async function fixture(t) {
       "  # provider commands",
       "",
       "  - cmd/coddy/providers.go # sign-in commands",
+      "  - 'fixtures/foo\\' # terminal backslash",
       "alwaysApply: false",
       "---",
       "Every provider request follows its configured proxy.",
@@ -95,6 +96,42 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
     "internal/**/*.go",
   ])
   assert.equal(rule.always, true)
+
+  const multiline = parseRule(
+    "/repo/.cursor/rules/multiline-flow.mdc",
+    [
+      "---",
+      "description: Multiline flow",
+      "globs: [",
+      '  "internal/llm/**/*.go",',
+      '  "cmd/coddy/providers.go"',
+      "]",
+      "alwaysApply: false",
+      "---",
+      "Multiline flow body.",
+    ].join("\n"),
+    "/repo",
+  )
+  assert.deepEqual(multiline.globs, [
+    "internal/llm/**/*.go",
+    "cmd/coddy/providers.go",
+  ])
+  assert.equal(multiline.always, false)
+
+  const terminalBackslash = parseRule(
+    "/repo/.cursor/rules/terminal-backslash.mdc",
+    [
+      "---",
+      "description: Terminal backslash",
+      "globs: # provider paths",
+      "  - 'fixtures/foo\\' # terminal backslash",
+      "alwaysApply: false",
+      "---",
+      "Terminal backslash body.",
+    ].join("\n"),
+    "/repo",
+  )
+  assert.deepEqual(terminalBackslash.globs, ["fixtures/foo\\"])
 })
 
 test("alwaysApply rules enter every OpenCode system prompt", async (t) => {

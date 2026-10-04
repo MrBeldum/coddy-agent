@@ -120,7 +120,7 @@ def strip_yaml_comment(value: str) -> str:
     escaped = False
     for index, char in enumerate(value):
         if quote:
-            if char == "\\" and not escaped:
+            if char == "\\" and quote == '"' and not escaped:
                 escaped = True
                 continue
             if char == quote and not escaped:
@@ -189,6 +189,28 @@ def split_globs(value: str) -> list[str]:
     return out
 
 
+def flow_sequence_complete(value: str) -> bool:
+    quote = ""
+    escaped = False
+    depth = 0
+    for char in value:
+        if quote:
+            if char == "\\" and quote == '"' and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+    return depth == 0
+
+
 def parse_rule(path: Path) -> Rule | None:
     """Read one `.mdc` file. Frontmatter is flat, so no YAML dependency."""
     text = path.read_text(encoding="utf-8")
@@ -214,6 +236,16 @@ def parse_rule(path: Path) -> Rule | None:
             description = unquote(strip_yaml_comment(value))
         elif key == "globs":
             cleaned_value = strip_yaml_comment(value)
+            if cleaned_value.startswith("[") and not flow_sequence_complete(cleaned_value):
+                parts = [cleaned_value]
+                while index + 1 < len(lines):
+                    index += 1
+                    continuation = strip_yaml_comment(lines[index].strip())
+                    if continuation:
+                        parts.append(continuation)
+                    cleaned_value = " ".join(parts)
+                    if flow_sequence_complete(cleaned_value):
+                        break
             if cleaned_value:
                 globs = split_globs(cleaned_value)
             else:
@@ -313,6 +345,28 @@ def claim_rule_ids(session_id: str, rule_ids: set[str]) -> set[str]:
             return claimed
     except Exception:
         return set(rule_ids)
+
+
+def deliver_rule_context(session_id: str, candidates: list[Rule], deliver) -> bool:
+    lock = session_lock(session_id)
+    try:
+        lock.__enter__()
+    except Exception:
+        if not candidates:
+            return False
+        deliver(candidates)
+        return True
+
+    try:
+        sent = load_sent(session_id)
+        selected = [rule for rule in candidates if rule.rel not in sent]
+        if not selected:
+            return False
+        deliver(selected)
+        save_sent(session_id, sent | {rule.rel for rule in selected})
+        return True
+    finally:
+        lock.__exit__(*sys.exc_info())
 
 
 def update_session_state(session_id: str, source: str, always: set[str]) -> None:
@@ -428,20 +482,22 @@ def main() -> int:
         if any(p.match(path) for path in paths for p in patterns):
             candidates.append(rule)
 
-    claimed = claim_rule_ids(session_id, {rule.rel for rule in candidates})
-    if not claimed:
+    if not candidates:
         return 0
 
-    matched = [rule for rule in candidates if rule.rel in claimed]
     touched = ", ".join(sorted(set(paths))[:8])
-    emit(
-        event,
-        render(
-            matched,
-            f"Project rules that cover the files you are editing ({touched})."
-            " Apply them to this change before continuing.",
-        ),
-    )
+
+    def deliver(matched: list[Rule]) -> None:
+        emit(
+            event,
+            render(
+                matched,
+                f"Project rules that cover the files you are editing ({touched})."
+                " Apply them to this change before continuing.",
+            ),
+        )
+
+    deliver_rule_context(session_id, candidates, deliver)
     return 0
 
 

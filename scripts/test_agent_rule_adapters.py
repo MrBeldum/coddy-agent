@@ -33,6 +33,7 @@ def list_rule(directory: Path) -> Path:
         "  # provider commands\n"
         "\n"
         "  - cmd/coddy/providers.go # sign-in commands\n"
+        "  - 'fixtures/foo\\' # terminal backslash\n"
         "alwaysApply: false\n"
         "---\n\n"
         "Every provider request follows its proxy.\n",
@@ -63,6 +64,23 @@ def flow_rule(directory: Path) -> Path:
         "alwaysApply: true # required\n"
         "---\n\n"
         "Flow rule body.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def multiline_flow_rule(directory: Path) -> Path:
+    path = directory / "multiline-flow.mdc"
+    path.write_text(
+        "---\n"
+        "description: Multiline flow\n"
+        "globs: [\n"
+        "  \"internal/llm/**/*.go\",\n"
+        "  \"cmd/coddy/providers.go\"\n"
+        "]\n"
+        "alwaysApply: false\n"
+        "---\n\n"
+        "Multiline flow body.\n",
         encoding="utf-8",
     )
     return path
@@ -150,7 +168,11 @@ class AdapterContractTest(unittest.TestCase):
         zcode = load_module("zcode_rules", ZCODE)
         with tempfile.TemporaryDirectory() as tmp:
             path = list_rule(Path(tmp))
-            expected = ["internal/llm/**/*.go", "cmd/coddy/providers.go"]
+            expected = [
+                "internal/llm/**/*.go",
+                "cmd/coddy/providers.go",
+                "fixtures/foo\\",
+            ]
             self.assertEqual(expected, codex.parse_rule(path).globs)
             self.assertEqual(expected, zcode.parse_rule(path).globs)
 
@@ -167,6 +189,12 @@ class AdapterContractTest(unittest.TestCase):
                     rule.globs,
                 )
                 self.assertTrue(rule.always)
+                multiline = module.parse_rule(multiline_flow_rule(Path(tmp)))
+                self.assertEqual(
+                    ["internal/llm/**/*.go", "cmd/coddy/providers.go"],
+                    multiline.globs,
+                )
+                self.assertFalse(multiline.always)
 
     def test_python_adapter_claims_are_interprocess_safe(self):
         for source, host_dir in ((CODEX, ".codex"), (ZCODE, ".zcode")):
@@ -287,6 +315,38 @@ class AdapterContractTest(unittest.TestCase):
         expected = ["internal/llm/openai.go"]
         self.assertEqual(expected, codex.patched_paths(payload))
         self.assertEqual(expected, zcode.collect_target_paths(payload))
+
+    def test_failed_emit_does_not_claim_rule(self):
+        def broken_emit(_event, _context):
+            raise BrokenPipeError("host closed stdout")
+
+        for source, name in ((CODEX, "codex_emit_failure"), (ZCODE, "zcode_emit_failure")):
+            module = load_module(name, source)
+            with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+                root = Path(tmp)
+                rules_dir = root / "rules"
+                rules_dir.mkdir()
+                list_rule(rules_dir)
+                state_dir = root / "state"
+                original_emit = module.emit
+                module.emit = broken_emit
+                with self.assertRaises(BrokenPipeError):
+                    run_pretool(
+                        module,
+                        rules_dir,
+                        state_dir,
+                        {"file_path": "internal/llm/openai.go"},
+                    )
+                module.emit = original_emit
+                self.assertIn(
+                    "Every provider request",
+                    run_pretool(
+                        module,
+                        rules_dir,
+                        state_dir,
+                        {"file_path": "internal/llm/openai.go"},
+                    ),
+                )
 
     def test_state_failures_degrade_to_duplicate_delivery(self):
         rule_ids = {"provider-proxy.mdc"}
