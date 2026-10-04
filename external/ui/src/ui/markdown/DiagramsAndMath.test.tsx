@@ -101,21 +101,30 @@ describe("Mermaid and SVG fences", () => {
     );
   });
 
-  test("switches to the source and back", async () => {
+  test("the source icon is off by default, shows the source when pressed and the picture again", async () => {
     render(<Markdown text={fence("mermaid", FLOW)} />);
     await screen.findByTestId("md-figure-img");
-    fireEvent.click(screen.getByTestId("md-figure-show-code"));
+    const toggle = screen.getByTestId("md-figure-source-toggle");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.getAttribute("aria-label")).toBe("Show the source code");
+    // Copy belongs to the source view, not the picture.
+    expect(screen.queryByTestId("md-figure-copy")).toBeNull();
+    fireEvent.click(toggle);
     expect(screen.queryByTestId("md-figure-img")).toBeNull();
-    expect(screen.getByTestId("md-figure").textContent).toContain("A --> B");
-    expect(screen.getByTestId("md-figure-show-code").getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByTestId("md-figure-show-picture"));
+    expect(screen.getByTestId("md-figure").querySelector(".md-figure-source pre")!.textContent).toContain("A --> B");
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("Show the picture");
+    fireEvent.click(toggle);
     expect(screen.getByTestId("md-figure-img")).toBeTruthy();
   });
 
-  test("copies the source, not the picture", async () => {
+  test("the copy button sits on the source and copies it", async () => {
     render(<Markdown text={fence("mermaid", FLOW)} />);
     await screen.findByTestId("md-figure-img");
-    fireEvent.click(screen.getByTestId("md-figure-copy"));
+    fireEvent.click(screen.getByTestId("md-figure-source-toggle"));
+    const copy = screen.getByTestId("md-figure-copy");
+    expect(copy.parentElement!.classList.contains("md-figure-source")).toBe(true);
+    fireEvent.click(copy);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(FLOW));
   });
 
@@ -126,7 +135,9 @@ describe("Mermaid and SVG fences", () => {
     });
     render(<Markdown text={fence("mermaid", FLOW)} />);
     await screen.findByTestId("md-figure-img");
-    fireEvent.click(screen.getByTestId("md-figure-download-source"));
+    expect(screen.getByTestId("md-figure-download-mmd").textContent).toBe("MMD");
+    expect(screen.getByTestId("md-figure-download-svg").textContent).toBe("SVG");
+    fireEvent.click(screen.getByTestId("md-figure-download-mmd"));
     fireEvent.click(screen.getByTestId("md-figure-download-svg"));
     expect(clicks).toEqual(["diagram.mmd", "diagram.svg"]);
     expect(await blobText(blobs[0]!)).toBe(FLOW);
@@ -143,7 +154,9 @@ describe("Mermaid and SVG fences", () => {
     expect(error.textContent).toContain("Parse error on line 2:");
     expect(error.textContent).toContain("Expecting 'NODE', got 'EOF'");
     expect(screen.getByTestId("md-figure").dataset.view).toBe("code");
-    expect((screen.getByTestId("md-figure-show-picture") as HTMLButtonElement).disabled).toBe(true);
+    const toggle = screen.getByTestId("md-figure-source-toggle") as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
     expect(mermaid.render).not.toHaveBeenCalled();
   });
 
@@ -217,6 +230,19 @@ describe("Mermaid and SVG fences", () => {
     expect(container.querySelector("svg rect")).toBeNull();
     expect(mermaid.render).not.toHaveBeenCalled();
     expect(screen.getByTestId("md-figure").dataset.kind).toBe("svg");
+  });
+
+  test("an SVG fence saves its source as image.svg and has no MMD button", async () => {
+    const clicks: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicks.push(this.download);
+    });
+    render(<Markdown text={fence("svg", '<svg viewBox="0 0 4 2"/>')} />);
+    await screen.findByTestId("md-figure-img");
+    expect(screen.queryByTestId("md-figure-download-mmd")).toBeNull();
+    fireEvent.click(screen.getByTestId("md-figure-download-svg"));
+    expect(clicks).toEqual(["image.svg"]);
+    click.mockRestore();
   });
 
   test("an oversized SVG is not drawn", async () => {
@@ -363,7 +389,7 @@ describe("formulas", () => {
     render(<Markdown text={"$$\n\\frac{a}{b}\n$$\n\n" + fence("math", "x^2")} />);
     await waitFor(() => expect(document.querySelectorAll(".md-math-display .katex-display")).toHaveLength(2));
     const block = screen.getAllByTestId("md-math-block")[0]!;
-    fireEvent.click(block.querySelector('[data-testid="md-figure-show-code"]')!);
+    fireEvent.click(block.querySelector('[data-testid="md-figure-source-toggle"]')!);
     expect(block.querySelector("pre")!.textContent).toBe("\\frac{a}{b}");
     fireEvent.click(block.querySelector('[data-testid="md-math-copy"]')!);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("\\frac{a}{b}"));
@@ -450,9 +476,9 @@ describe("formulas", () => {
     render(<Markdown text={"$$\nx^2\n$$"} />);
     await waitFor(() => expect(document.querySelector(".md-math-display .katex")).toBeTruthy());
     const block = screen.getByTestId("md-math-block");
-    fireEvent.click(block.querySelector('[data-testid="md-figure-show-code"]')!);
+    fireEvent.click(block.querySelector('[data-testid="md-figure-source-toggle"]')!);
     expect(block.querySelector(".md-math-display")).toBeNull();
-    fireEvent.click(block.querySelector('[data-testid="md-figure-show-picture"]')!);
+    fireEvent.click(block.querySelector('[data-testid="md-figure-source-toggle"]')!);
     expect(block.querySelector(".md-math-display .katex")?.textContent).toBe("x^2");
   });
 

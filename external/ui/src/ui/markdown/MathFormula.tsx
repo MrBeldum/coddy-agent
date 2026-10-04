@@ -9,8 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useT } from "../i18n/I18nProvider";
-import { CodeBlockCopyButton } from "../messages/CodeBlockCopyButton";
-import { FigureViewToggle } from "./DiagramBlock";
+import { FigureSource, SourceToggle } from "./DiagramBlock";
 import { loadKatex, type KatexApi } from "./renderers";
 
 /** How every formula is typeset. */
@@ -164,21 +163,17 @@ export function MathBlock(props: { source: string }) {
       <div className="md-figure-head">
         <span className="md-figure-label">{t("markdown.math.label")}</span>
         <div className="md-figure-actions">
-          <FigureViewToggle
-            showing={showing}
-            pictureLabel={t("markdown.math.showFormula")}
-            pictureDisabled={unavailable}
-            onChange={setView}
+          <SourceToggle
+            showingSource={showing === "code"}
+            disabled={unavailable}
+            onToggle={() => setView((v) => (v === "code" ? "picture" : "code"))}
           />
-          <CodeBlockCopyButton textToCopy={props.source} dataTestId="md-math-copy" />
         </div>
       </div>
       {showing === "picture" && api ? (
         <Typeset as="div" api={api} source={props.source} display onFail={onFail} className="md-math-display" />
       ) : (
-        <pre className="md-figure-code">
-          <code>{props.source}</code>
-        </pre>
+        <FigureSource source={props.source} copyTestId="md-math-copy" />
       )}
     </figure>
   );

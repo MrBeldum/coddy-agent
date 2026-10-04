@@ -43,11 +43,12 @@ export function downloadText(name: string, text: string, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-function DownloadGlyph() {
+/** Angle brackets: the source behind a picture. */
+function SourceGlyph() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden className="md-copy__glyph">
       <path
-        d="M8 2v8m0 0L5 7m3 3l3-3M3 12.5h10"
+        d="M5.5 4L1.5 8l4 4M10.5 4l4 4-4 4"
         stroke="currentColor"
         strokeWidth="1.5"
         strokeLinecap="round"
@@ -57,33 +58,55 @@ function DownloadGlyph() {
   );
 }
 
-/** A two-way switch between the rendered view and the source, shared by diagrams and formulas. */
-export function FigureViewToggle(props: {
-  showing: "picture" | "code";
-  pictureLabel: string;
-  onChange: (view: "picture" | "code") => void;
-  pictureDisabled?: boolean;
-}) {
+/**
+ * The switch to a figure's source: one icon button, off while the picture is
+ * shown, pressed while the source is. A figure whose picture cannot be drawn
+ * shows its source with the button pressed and disabled.
+ */
+export function SourceToggle(props: { showingSource: boolean; onToggle: () => void; disabled?: boolean }) {
   const { t } = useT();
+  const label = props.showingSource ? t("markdown.figure.showPicture") : t("markdown.figure.showSource");
   return (
-    <div className="md-figure-toggle" role="group" aria-label={t("markdown.figure.view")}>
-      <button
-        type="button"
-        aria-pressed={props.showing === "picture"}
-        disabled={props.pictureDisabled}
-        onClick={() => props.onChange("picture")}
-        data-testid="md-figure-show-picture"
-      >
-        {props.pictureLabel}
-      </button>
-      <button
-        type="button"
-        aria-pressed={props.showing === "code"}
-        onClick={() => props.onChange("code")}
-        data-testid="md-figure-show-code"
-      >
-        {t("markdown.figure.showCode")}
-      </button>
+    <button
+      type="button"
+      className="md-copy md-figure-source-toggle"
+      aria-pressed={props.showingSource}
+      disabled={props.disabled}
+      title={label}
+      aria-label={label}
+      data-testid="md-figure-source-toggle"
+      onClick={props.onToggle}
+    >
+      <SourceGlyph />
+    </button>
+  );
+}
+
+/** A file format to save a figure as, named by its extension. */
+function FormatButton(props: { ext: string; title: string; testId: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="md-copy md-figure-format"
+      title={props.title}
+      aria-label={props.title}
+      data-testid={props.testId}
+      onClick={props.onClick}
+    >
+      <span aria-hidden>{props.ext}</span>
+    </button>
+  );
+}
+
+/**
+ * A figure's source: the text in a box that scrolls once it is long, with the
+ * copy button in the box's top right corner, as on a code block.
+ */
+export function FigureSource(props: { source: string; children?: ReactNode; copyTestId: string }) {
+  return (
+    <div className="md-figure-source">
+      <CodeBlockCopyButton textToCopy={props.source} dataTestId={props.copyTestId} />
+      <pre className="md-figure-code">{props.children ?? <code>{props.source}</code>}</pre>
     </div>
   );
 }
@@ -142,8 +165,6 @@ export function DiagramBlock(props: { kind: PictureKind; source: string; childre
 
   const pictureUnavailable = error !== null;
   const showing = pictureUnavailable ? "code" : view;
-  const sourceName = kind === "mermaid" ? "diagram.mmd" : "image.svg";
-  const sourceType = kind === "mermaid" ? "text/plain" : "image/svg+xml";
   const label = kind === "mermaid" ? t("markdown.figure.mermaid") : t("markdown.figure.svg");
 
   return (
@@ -156,35 +177,31 @@ export function DiagramBlock(props: { kind: PictureKind; source: string; childre
           </span>
         ) : null}
         <div className="md-figure-actions">
-          <FigureViewToggle
-            showing={showing}
-            pictureLabel={t("markdown.figure.showPicture")}
-            pictureDisabled={pictureUnavailable}
-            onChange={setView}
-          />
-          <CodeBlockCopyButton textToCopy={source} dataTestId="md-figure-copy" />
-          <button
-            type="button"
-            className="md-copy"
-            title={t("markdown.figure.downloadSource")}
-            aria-label={t("markdown.figure.downloadSource")}
-            data-testid="md-figure-download-source"
-            onClick={() => downloadText(sourceName, source, sourceType)}
-          >
-            <DownloadGlyph />
-          </button>
-          {kind === "mermaid" && picture ? (
-            <button
-              type="button"
-              className="md-copy md-figure-download-svg"
-              title={t("markdown.figure.downloadSvg")}
-              aria-label={t("markdown.figure.downloadSvg")}
-              data-testid="md-figure-download-svg"
-              onClick={() => downloadText("diagram.svg", picture.svg, "image/svg+xml")}
-            >
-              <span aria-hidden>SVG</span>
-            </button>
+          {kind === "mermaid" ? (
+            <FormatButton
+              ext="MMD"
+              title={t("markdown.figure.downloadSource")}
+              testId="md-figure-download-mmd"
+              onClick={() => downloadText("diagram.mmd", source, "text/plain")}
+            />
           ) : null}
+          {kind === "svg" || picture ? (
+            <FormatButton
+              ext="SVG"
+              title={t("markdown.figure.downloadSvg")}
+              testId="md-figure-download-svg"
+              onClick={() =>
+                kind === "svg"
+                  ? downloadText("image.svg", source, "image/svg+xml")
+                  : downloadText("diagram.svg", picture!.svg, "image/svg+xml")
+              }
+            />
+          ) : null}
+          <SourceToggle
+            showingSource={showing === "code"}
+            disabled={pictureUnavailable}
+            onToggle={() => setView((v) => (v === "code" ? "picture" : "code"))}
+          />
         </div>
       </div>
       {error ? (
@@ -211,7 +228,9 @@ export function DiagramBlock(props: { kind: PictureKind; source: string; childre
           />
         </button>
       ) : (
-        <pre className="md-figure-code">{props.children ?? <code>{source}</code>}</pre>
+        <FigureSource source={source} copyTestId="md-figure-copy">
+          {props.children}
+        </FigureSource>
       )}
       {zoomed && picture ? (
         <ImageLightbox src={svgDataUrl(picture.svg)} alt={label} onClose={() => setZoomed(false)} />
