@@ -445,7 +445,7 @@ The same page is an HTTP API, which is what a script or a coding agent drives:
 | `GET /sim/chat/4242` | the transcript: messages, keyboards after every edit, drafts, `typing`; `?format=text` for `grep`. |
 | `GET /sim/outbox?method=sendMessage&since=10` | every Bot API call with its parameters and the answer; `/sim/outbox/count?method=...` for a script. |
 | `POST /sim/fault` | `{"method": "sendMessage", "code": 429, "retry_after": 2, "times": 1}` makes the next `sendMessage` fail like a flood; `"method": "*"` fails everything until `DELETE /sim/fault`; `"contains": "<details>"` narrows the fault to calls whose parameters carry that text, which is Telegram refusing one entity rather than the method. |
-| `POST /sim/webapp/launch` | `{"chat_id": 4242, "url": "https://coddy.example.com/"}` opens a Mini App the way a client does and answers `{url, init_data}`: the address with the launch parameters in its fragment and the launch data signed with the bot's token. Without `url` it opens the chat's menu button. |
+| `POST /sim/webapp/launch` | `{"chat_id": 4242, "url": "https://coddy.example.com/"}` opens a Mini App the way a client does and answers `{url, init_data}`: the address with the launch parameters in its fragment and the launch data signed with the bot's token. Without `url` it opens the chat's menu button, which only a private chat has. |
 | `POST /sim/reset` | forgets chats, outbox, faults and menu buttons. Update ids keep growing, so a polling bot is not confused. |
 
 The fake is strict where Telegram is. An edit that changes nothing, an edit
@@ -456,10 +456,12 @@ answer to one it did (a query takes one answer, so a failure told in an alert
 after the tap was acknowledged never reaches the user), a `reply_markup` whose
 `inline_keyboard` is not an array (`null` included, what an empty keyboard of
 the Go library encodes to), a keyboard whose `callback_data` is longer than
-64 bytes (`BUTTON_DATA_INVALID`), a button with more than one action, and a
-`web_app` button outside a private chat or to an address that is neither https
-nor plain http on this machine are refused with Telegram's own error, so a
-keyboard that works on the stand works in a chat.
+64 bytes (`BUTTON_DATA_INVALID`), a button with no action, and a `web_app`
+button outside a private chat or to an address that is neither https nor plain
+http on this machine are refused with Telegram's own error. The stand is
+stricter in one place: it refuses a button with more than one action, which
+Telegram would read as its first. A keyboard that works on the stand works in
+a chat.
 
 It also remembers `allowed_updates` the way Telegram does. A bot token that
 once ran under another framework may be subscribed to messages alone, and a
@@ -790,7 +792,7 @@ gateways:
 
 On every start the bot then points its menu button at `url`, labelled **Coddy**, and adds `/app` to its command list. `/app` answers with **Open in Coddy**: in a private chat a button that opens the chat's conversation as a Mini App (`url?session=<id>`), in a group an ordinary link to the same address, since Telegram allows Mini App buttons in private chats only. Before the chat has a conversation, the button opens the start screen.
 
-The bot borrows the menu button from @BotFather and gives it back. The first time, it keeps the button it replaces in `gateway_sessions.json`; when you set `menu_button: false`, empty `url` or the web UI stops asking for sign-in, it puts that button back, as long as the button still opens the address the bot set. A button you changed in @BotFather in the meantime stays as you left it. Without `url` the bot never touches the menu button, so a Mini App you wired in @BotFather by hand keeps working: the web UI adapts to Telegram whoever opened it.
+The bot borrows the menu button from @BotFather and gives it back. The first time, it keeps the button it replaces in `gateway_sessions.json`, and when Telegram does not say which button that is, it leaves the menu button alone until the next start. When you set `menu_button: false`, empty `url` or the web UI stops asking for sign-in, it puts that button back, as long as the button still opens the address the bot set. A button of yours that opens the same address as the bot's comes back too, unless the web UI stopped asking for sign-in: then the chat shows the commands. A button you changed in @BotFather in the meantime stays as you left it. Without `url` the bot never touches the menu button, so a Mini App you wired in @BotFather by hand keeps working: the web UI adapts to Telegram whoever opened it.
 
 `coddy serve --dry-run` asks `url` for the web UI and says when the bot will hold it back. Telegram Web (web.telegram.org) runs a Mini App in a frame of another site, where the browser drops the sign-in cookie; the sign-in screen then says so and links to Coddy in a tab of its own. To try all of this with no Telegram and no phone, open the Mini App from the offline stand ([Debugging against a fake Bot API](#debugging-against-a-fake-bot-api)).
 
