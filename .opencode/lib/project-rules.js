@@ -66,11 +66,41 @@ function unquote(value) {
   return trimmed
 }
 
+function stripYamlComment(value) {
+  let quote = ""
+  let escaped = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote) {
+      if (character === "\\" && !escaped) {
+        escaped = true
+        continue
+      }
+      if (character === quote && !escaped) quote = ""
+      escaped = false
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (
+      character === "#" &&
+      (index === 0 || /\s/.test(value[index - 1]))
+    ) {
+      return value.slice(0, index).trim()
+    }
+  }
+  return value.trim()
+}
+
 function parseGlobs(value) {
-  const trimmed = value.trim().replace(/^\[/, "").replace(/\]$/, "")
+  const trimmed = stripYamlComment(value)
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
   return trimmed
     .split(",")
-    .map(unquote)
+    .map((item) => unquote(stripYamlComment(item)))
     .filter(Boolean)
 }
 
@@ -97,8 +127,12 @@ export function parseRule(filePath, text, repoRoot) {
       } else {
         while (index + 1 < lines.length) {
           const item = lines[index + 1].trim()
+          if (!item || item.startsWith("#")) {
+            index += 1
+            continue
+          }
           if (!item.startsWith("-")) break
-          const pattern = unquote(item.slice(1))
+          const pattern = unquote(stripYamlComment(item.slice(1)))
           if (pattern) globs.push(pattern)
           index += 1
         }

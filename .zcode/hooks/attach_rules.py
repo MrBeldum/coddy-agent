@@ -19,14 +19,14 @@ It fails open: any unexpected input exits 0 with no output, so a broken rule fil
 can never block an edit.
 
 Wired up in `.zcode/config.json` under `hooks.events.{SessionStart,PreToolUse}`.
-Unlike the Codex sibling (`.codex/hooks/attach_rules.py`) the edited file paths
-arrive as JSON fields of the tool payload (`tool_input.file_path`, `.path`, ...),
-not as an embedded `*** Update File:` patch, so this variant extracts them from
-those fields instead of parsing a patch blob.
+ZCode delivers edited paths as JSON fields of the tool payload
+(`tool_input.file_path`, `.path`, ...), so this variant reads those structured
+fields. The Codex sibling accepts the same fields and also parses patch headers.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -39,7 +39,14 @@ from pathlib import Path
 SCRIPT_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_ROOT.parents[1]
 RULES_DIR = Path(os.environ.get("ZCODE_RULES_DIR") or (REPO_ROOT / ".cursor" / "rules"))
-STATE_DIR = Path(os.environ.get("ZCODE_RULES_STATE_DIR") or (Path(tempfile.gettempdir()) / "zcode-coddy-rules"))
+
+
+def default_state_dir(repo_root: Path) -> Path:
+    repo_key = hashlib.sha256(str(repo_root.resolve()).encode()).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"zcode-attach-rules-{repo_key}"
+
+
+STATE_DIR = Path(os.environ.get("ZCODE_RULES_STATE_DIR") or default_state_dir(REPO_ROOT))
 
 # Field names inside a ZCode tool payload that carry a file path. The matcher is
 # intentionally permissive: it also walks nested structures, so a path nested
@@ -102,6 +109,33 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
     return re.compile("^" + "".join(out) + "$")
 
 
+def strip_yaml_comment(value: str) -> str:
+    quote = ""
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if char == "\\" and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if char in ("'", '"'):
+            quote = char
+            continue
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].strip()
+    return value.strip()
+
+
+def unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        return value[1:-1]
+    return value
+
+
 def parse_rule(path: Path) -> Rule | None:
     """Read one `.mdc` file. Frontmatter is flat, so no YAML dependency."""
     text = path.read_text(encoding="utf-8")
@@ -127,16 +161,20 @@ def parse_rule(path: Path) -> Rule | None:
             description = value
         elif key == "globs":
             if value:
+                value = strip_yaml_comment(value)
                 value = value.removeprefix("[").removesuffix("]")
-                globs = [g.strip().strip("'\"") for g in value.split(",") if g.strip()]
+                globs = [unquote(strip_yaml_comment(g)) for g in value.split(",") if strip_yaml_comment(g)]
             else:
                 index += 1
                 while index < len(lines):
                     item = lines[index].strip()
+                    if not item or item.startswith("#"):
+                        index += 1
+                        continue
                     if not item.startswith("-"):
                         index -= 1
                         break
-                    pattern = item[1:].strip().strip("'\"")
+                    pattern = unquote(strip_yaml_comment(item[1:].strip()))
                     if pattern:
                         globs.append(pattern)
                     index += 1
@@ -247,12 +285,12 @@ def main() -> int:
         return 0
 
     if event == "SessionStart":
-        if payload.get("source") == "clear":
-            state_file(session_id).unlink(missing_ok=True)
+        source = payload.get("source", "")
+        sent = load_sent(session_id) if source == "resume" else set()
         always = [r for r in rules if r.always]
+        save_sent(session_id, sent | {r.rel for r in always})
         if not always:
             return 0
-        save_sent(session_id, {r.rel for r in always})
         emit(
             event,
             render(

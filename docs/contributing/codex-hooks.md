@@ -30,7 +30,7 @@ The project adapter parses `.mdc` frontmatter itself (`description`, scalar or l
 
 - **Glob matching is hand-rolled.** `fnmatch` is unusable because its `*` also crosses `/`, which makes `external/httpserver/**/*.go` miss `external/httpserver/server.go`. The script translates globs to a regex where `**/` becomes "zero or more directories", `*` stays inside one segment, and a bare `**` spans anything.
 - **Paths come from patch headers and structured tool fields.** `*** Add File:`, `*** Update File:`, `*** Delete File:` and `*** Move to:` are read, as are known JSON fields such as `file_path`, `path`, `source` and `destination`. Absolute paths are made repo-relative, and paths outside the repository are ignored.
-- **Each rule is injected at most once per session.** State is a JSON file under `<tempdir>/codex-coddy-rules/<session_id>.json`, so re-editing the same area does not re-send the same 3 KB. A `SessionStart` with `source: "clear"` resets it.
+- **Each scoped rule is injected at most once per active session context.** State is a JSON file under `<tempdir>/codex-attach-rules-<repository-hash>/<session_id>.json`, so clones cannot suppress one another. `resume` preserves scoped dedupe; `startup`, `compact` and `clear` reset state to the always-on set so scoped rules can attach again when needed.
 - **It fails open.** Malformed JSON on stdin, an unparsable rule file, or an unwritable state directory all exit 0 with no output. A broken rule can never block an edit.
 
 ## Context budget
@@ -74,7 +74,7 @@ echo '{"hook_event_name":"SessionStart","session_id":"probe","source":"startup"}
 Empty output is a valid answer and means one of three things: no glob matched, the rule was already sent in this session, or the input was not understood. Clear the dedup state to re-test:
 
 ```bash
-rm -rf "${TMPDIR:-/tmp}/codex-coddy-rules"
+rm -rf "${TMPDIR:-/tmp}"/codex-attach-rules-*
 ```
 
 If a hook produces nothing inside a real session, check `/hooks` first. Trust is the usual cause.

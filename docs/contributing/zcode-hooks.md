@@ -30,7 +30,7 @@ The project adapter parses `.mdc` frontmatter itself (`description`, scalar or l
 
 - **Glob matching is hand-rolled.** `fnmatch` is unusable because its `*` also crosses `/`, which makes `external/httpserver/**/*.go` miss `external/httpserver/server.go`. The script translates globs to a regex where `**/` becomes "zero or more directories", `*` stays inside one segment, and a bare `**` spans anything.
 - **Paths come from structured tool fields.** ZCode hands the hook a JSON object, so the script walks `tool_input` and keeps string values under known path-carrying keys (`file_path`, `path`, `notebook_path`, `source`, `destination`, `new_path`, `old_path`, ...). The Codex sibling accepts those fields too and additionally parses `apply_patch` headers. Nested and absolute paths are normalised before matching.
-- **Each rule is injected at most once per session.** State is a JSON file under `<tempdir>/zcode-coddy-rules/<session_id>.json`, keyed by the session id from the payload (also available as `${CLAUDE_SESSION_ID}`), so re-editing the same area does not re-send the same rule. A `SessionStart` with `source: "clear"` drops the dynamic history and reseeds it with the always-on set.
+- **Each scoped rule is injected at most once per active session context.** State is a JSON file under `<tempdir>/zcode-attach-rules-<repository-hash>/<session_id>.json`, keyed by repository and session id, so clones cannot suppress one another. `resume` preserves scoped dedupe; `startup`, `compact` and `clear` reset state to the always-on set.
 - **It fails open.** Malformed JSON on stdin, an unparsable rule file, or an unwritable state directory all exit 0 with no output. A broken rule can never block an edit.
 
 ## Enabling
@@ -66,7 +66,7 @@ echo '{"hook_event_name":"SessionStart","session_id":"probe","source":"startup"}
 Empty output is a valid answer and means one of three things: no glob matched, the rule was already sent in this session, or the input was not understood. Clear the dedup state to re-test:
 
 ```bash
-rm -rf "${TMPDIR:-/tmp}/zcode-coddy-rules"
+rm -rf "${TMPDIR:-/tmp}"/zcode-attach-rules-*
 ```
 
 To probe against a throwaway rules directory and state without touching the session-shared defaults, set `ZCODE_RULES_DIR` and `ZCODE_RULES_STATE_DIR`.

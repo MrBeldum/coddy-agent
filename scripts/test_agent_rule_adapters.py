@@ -27,8 +27,10 @@ def list_rule(directory: Path) -> Path:
         "---\n"
         "description: Provider proxy\n"
         "globs:\n"
-        "  - internal/llm/**/*.go\n"
-        "  - cmd/coddy/providers.go\n"
+        "  - \"internal/llm/**/*.go\" # provider core\n"
+        "  # provider commands\n"
+        "\n"
+        "  - cmd/coddy/providers.go # sign-in commands\n"
         "alwaysApply: false\n"
         "---\n\n"
         "Every provider request follows its proxy.\n",
@@ -50,7 +52,7 @@ def always_rule(directory: Path) -> Path:
     return path
 
 
-def run_hook(module, rules_dir: Path, state_dir: Path, payload: dict) -> str:
+def run_hook_optional(module, rules_dir: Path, state_dir: Path, payload: dict) -> str | None:
     module.RULES_DIR = rules_dir
     module.STATE_DIR = state_dir
     payload.setdefault("session_id", "provider-proxy-case")
@@ -62,8 +64,18 @@ def run_hook(module, rules_dir: Path, state_dir: Path, payload: dict) -> str:
             assert module.main() == 0
     finally:
         sys.stdin = old_stdin
-    rendered = json.loads(output.getvalue())
+    raw = output.getvalue()
+    if not raw:
+        return None
+    rendered = json.loads(raw)
     return rendered["hookSpecificOutput"]["additionalContext"]
+
+
+def run_hook(module, rules_dir: Path, state_dir: Path, payload: dict) -> str:
+    context = run_hook_optional(module, rules_dir, state_dir, payload)
+    if context is None:
+        raise AssertionError("hook emitted no context")
+    return context
 
 
 def run_pretool(module, rules_dir: Path, state_dir: Path, tool_input: dict) -> str:
@@ -119,6 +131,55 @@ class AdapterContractTest(unittest.TestCase):
                 )
                 self.assertNotIn("They are The", context)
                 self.assertIn(f"The {name} project hook attached them", context)
+
+    def test_session_start_sources_control_scoped_deduplication(self):
+        codex = load_module("codex_lifecycle", CODEX)
+        zcode = load_module("zcode_lifecycle", ZCODE)
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            root = Path(tmp)
+            rules_dir = root / "rules"
+            rules_dir.mkdir()
+            always_rule(rules_dir)
+            list_rule(rules_dir)
+            tool_input = {"file_path": "internal/llm/openai.go"}
+            for name, module in (("codex", codex), ("zcode", zcode)):
+                state_dir = root / f"state-{name}"
+                self.assertIn("Every provider request", run_pretool(module, rules_dir, state_dir, tool_input))
+
+                run_hook(
+                    module,
+                    rules_dir,
+                    state_dir,
+                    {"hook_event_name": "SessionStart", "source": "resume"},
+                )
+                self.assertIsNone(
+                    run_hook_optional(
+                        module,
+                        rules_dir,
+                        state_dir,
+                        {"hook_event_name": "PreToolUse", "tool_input": tool_input},
+                    )
+                )
+
+                for source in ("compact", "clear", "startup"):
+                    run_hook(
+                        module,
+                        rules_dir,
+                        state_dir,
+                        {"hook_event_name": "SessionStart", "source": source},
+                    )
+                    self.assertIn(
+                        "Every provider request",
+                        run_pretool(module, rules_dir, state_dir, tool_input),
+                    )
+
+    def test_zcode_default_state_dir_is_repository_scoped(self):
+        zcode = load_module("zcode_state_dir", ZCODE)
+        first = zcode.default_state_dir(ROOT / "first")
+        second = zcode.default_state_dir(ROOT / "second")
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.name.startswith("zcode-attach-rules-"))
+        self.assertTrue(second.name.startswith("zcode-attach-rules-"))
 
     def test_codex_extracts_structured_edit_paths(self):
         codex = load_module("codex_paths", CODEX)

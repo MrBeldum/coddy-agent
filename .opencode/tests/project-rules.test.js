@@ -44,8 +44,10 @@ async function fixture(t) {
       "---",
       "description: Provider proxy rule",
       "globs:",
-      "  - internal/llm/**/*.go",
-      "  - cmd/coddy/providers.go",
+      '  - "internal/llm/**/*.go" # provider core',
+      "  # provider commands",
+      "",
+      "  - cmd/coddy/providers.go # sign-in commands",
       "alwaysApply: false",
       "---",
       "Every provider request follows its configured proxy.",
@@ -116,6 +118,15 @@ test("YAML-list globs activate the provider rule", async (t) => {
 
   assert.match(
     await systemText(hooks, "session-list-glob"),
+    /Every provider request follows its configured proxy/,
+  )
+
+  await hooks["tool.execute.before"](
+    { tool: "read", sessionID: "session-list-glob-second", callID: "call-2" },
+    { args: { filePath: "cmd/coddy/providers.go" } },
+  )
+  assert.match(
+    await systemText(hooks, "session-list-glob-second"),
     /Every provider request follows its configured proxy/,
   )
 })

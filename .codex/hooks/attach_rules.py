@@ -101,6 +101,33 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
     return re.compile("^" + "".join(out) + "$")
 
 
+def strip_yaml_comment(value: str) -> str:
+    quote = ""
+    escaped = False
+    for index, char in enumerate(value):
+        if quote:
+            if char == "\\" and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if char in ("'", '"'):
+            quote = char
+            continue
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].strip()
+    return value.strip()
+
+
+def unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        return value[1:-1]
+    return value
+
+
 def parse_rule(path: Path) -> Rule | None:
     """Read one `.mdc` file. Frontmatter is flat, so no YAML dependency."""
     text = path.read_text(encoding="utf-8")
@@ -126,16 +153,20 @@ def parse_rule(path: Path) -> Rule | None:
             description = value
         elif key == "globs":
             if value:
+                value = strip_yaml_comment(value)
                 value = value.removeprefix("[").removesuffix("]")
-                globs = [g.strip().strip("'\"") for g in value.split(",") if g.strip()]
+                globs = [unquote(strip_yaml_comment(g)) for g in value.split(",") if strip_yaml_comment(g)]
             else:
                 index += 1
                 while index < len(lines):
                     item = lines[index].strip()
+                    if not item or item.startswith("#"):
+                        index += 1
+                        continue
                     if not item.startswith("-"):
                         index -= 1
                         break
-                    pattern = item[1:].strip().strip("'\"")
+                    pattern = unquote(strip_yaml_comment(item[1:].strip()))
                     if pattern:
                         globs.append(pattern)
                     index += 1
@@ -252,12 +283,12 @@ def main() -> int:
         return 0
 
     if event == "SessionStart":
-        if payload.get("source") == "clear":
-            state_file(session_id).unlink(missing_ok=True)
+        source = payload.get("source", "")
+        sent = load_sent(session_id) if source == "resume" else set()
         always = [r for r in rules if r.always]
+        save_sent(session_id, sent | {r.rel for r in always})
         if not always:
             return 0
-        save_sent(session_id, {r.rel for r in always})
         emit(
             event,
             render(
