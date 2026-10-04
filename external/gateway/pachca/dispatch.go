@@ -402,8 +402,9 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 	}
 	// A typed "/model <id>" is a session-scoped pick on this surface even
 	// though the manager applies it inside the turn: the gateway remembers it
-	// like a button click.
-	if line, err := session.ParseSettingsCommands(text); err == nil && line.Session.Model != nil {
+	// like a button click - when an admin typed it, since the remembered model
+	// is what every fresh conversation of the bot starts on.
+	if line, err := session.ParseSettingsCommands(text); err == nil && line.Session.Model != nil && b.cfg.IsAdmin(userID) {
 		if id := strings.TrimSpace(*line.Session.Model); b.runner.Cfg().FindModelEntry(id) != nil {
 			b.store.SetLastModel(id)
 		}

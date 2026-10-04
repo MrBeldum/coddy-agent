@@ -93,7 +93,7 @@ The banner names the bot (`gateway     pachca`), and the log says `pachca bot co
 |---------|--------------|
 | `/help`, `/start` | The command list and a greeting. |
 | `/clear` | Starts a new session for the conversation; the old one stays on disk. |
-| `/model` | Posts the configured models as buttons; a click switches the conversation's model, and the next new conversation starts on it. `/model <id>` sets it directly. |
+| `/model` | Posts the configured models as buttons; a click switches the conversation's model, and the next new conversation of the bot starts on it when an admin picked it (anybody else's pick stays in their own session). `/model <id>` sets it directly. |
 | `/context` | The context window usage of the conversation's session. |
 | `/agent`, `/plan`, `/ask`, `/think`, `/nothink`, `/reasoning <level>` | Settings commands, handed to the session like on every surface; `--once` and `--count=N` limit them to the next messages. |
 

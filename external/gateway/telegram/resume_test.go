@@ -404,7 +404,7 @@ func TestResumeTapFailuresReplyInTheChat(t *testing.T) {
 			runner := &failingResumeRunner{resumeRunner: newResumeRunner()}
 			runner.keep("sess_aaaaaaaaaaaaaaaaaaaaaaaa", "Kept", "")
 			runner.keep("sess_bbbbbbbbbbbbbbbbbbbbbbbb", "Gone", "")
-			bot := New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual},
+			bot := New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual, Admins: []int64{resumeUserID}},
 				runner, "/work", slog.New(slog.DiscardHandler), "", nil)
 			key := sessionstore.SessionKey(adapterName, resumeChatID, resumeUserID, config.IsolationIndividual, false)
 			bot.processMessage(t.Context(), f.api, f.userMessage(resumeChatID, resumeUserID, "/resume"), key)

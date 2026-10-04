@@ -688,3 +688,42 @@ func TestGroup_AModelClickFromANonAdminIsRefused(t *testing.T) {
 		t.Fatal("a non-admin's click switched the model")
 	}
 }
+
+func TestModel_ANonAdminPickIsNotRemembered(t *testing.T) {
+	cfg := &config.PachcaGatewayConfig{Admins: []int64{9}}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, cfg)
+	e.startAt(t)
+	e.dm(t, 1, "/model")
+	e.tickUntilQuiet(t, 2)
+	chat := e.fake.PersonalChat(1)
+	var menu pachcafake.Message
+	waitFor(t, func() bool {
+		for _, m := range e.fake.Messages(chat) {
+			if len(m.Buttons) > 0 {
+				menu = m
+				return true
+			}
+		}
+		return false
+	}, "the model menu")
+	if err := e.fake.UserClicks(1, menu.ID, buttonFor(menu, "rpa/qwen3.6-35b-a3b")); err != nil {
+		t.Fatal(err)
+	}
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool {
+		id := e.bot.store.Peek("pachca:user:1")
+		e.runner.mu.Lock()
+		defer e.runner.mu.Unlock()
+		st := e.runner.live[id]
+		return st != nil && st.GetSelectedModelID() == "rpa/qwen3.6-35b-a3b"
+	}, "the pick in the person's own session")
+	if got := e.bot.store.LastModel(); got != "" {
+		t.Fatalf("a non-admin's pick became the bot's default: %q", got)
+	}
+	e.dm(t, 1, "/model openai/gpt-4o")
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the typed /model turn")
+	if got := e.bot.store.LastModel(); got != "" {
+		t.Fatalf("a non-admin's typed /model became the bot's default: %q", got)
+	}
+}

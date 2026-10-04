@@ -207,7 +207,7 @@ func (b *Bot) handleCallback(ctx context.Context, bot *tgbotapi.BotAPI, cbq *tgb
 
 	// The MCP switches change the whole agent's configuration, and in a
 	// group the model and the session are everybody's: both are the admins'.
-	if (action == callbackActionMCP || (isGroup && (action == callbackActionModel || action == callbackActionResume))) && !b.cfg.IsAdmin(userID) {
+	if (action == callbackActionMCP || action == callbackActionResume || (isGroup && action == callbackActionModel)) && !b.cfg.IsAdmin(userID) {
 		b.log.Debug("telegram: callback refused", "reason", "admin-only", "action", action, "user", userID, "chat", chatID)
 		b.replyToTap(bot, cbq, adminOnlyNote)
 		return
@@ -293,9 +293,12 @@ func (b *Bot) applyModel(ctx context.Context, bot *tgbotapi.BotAPI, cbq *tgbotap
 		return
 	}
 	b.log.Info("telegram: model applied", "session", sessionID, "model", newModel)
-	// The gateway is a surface of its own: the model the operator picked here
-	// is what the next fresh chat session starts on.
-	b.store.SetLastModel(newModel)
+	// The gateway is a surface of its own: the model an admin picked here is
+	// what the next fresh chat session starts on. Anybody else's pick stays
+	// in their own session.
+	if b.cfg.IsAdmin(cbq.From.ID) {
+		b.store.SetLastModel(newModel)
+	}
 	cfg := b.runner.Cfg()
 	kb := buildModelKeyboard(cfg.Models, newModel)
 	// A tap on the model the menu already marks current leaves nothing to

@@ -389,8 +389,9 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 		)
 	}
 	// A group shares the bot with many people: what changes the session's
-	// settings, or replaces the conversation, is the admins' to do.
-	if isGroupChat(msg.Chat) && changesSettings(msg) && !b.cfg.IsAdmin(userID) {
+	// settings, or replaces the conversation, is the admins' to do. /resume
+	// reaches every session the server keeps, so it is theirs in any chat.
+	if ((isGroupChat(msg.Chat) && changesSettings(msg)) || isCommand(msg, "resume")) && !b.cfg.IsAdmin(userID) {
 		b.log.Debug("telegram: update refused", "reason", "settings are admin-only in a group", "user", userID, "chat", chatID)
 		b.reply(bot, chatID, msg.MessageID, adminOnlyNote)
 		return
@@ -460,8 +461,9 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	// A typed "/model <id>" is a session-scoped pick on this surface even
 	// though the manager applies it inside the turn: the gateway remembers it
 	// like a keyboard tap (turn-scoped forms live in line.Turns and never
-	// reach this).
-	if line, err := session.ParseSettingsCommands(text); err == nil && line.Session.Model != nil {
+	// reach this) - when an admin typed it, since the remembered model is
+	// what every fresh chat of the bot starts on.
+	if line, err := session.ParseSettingsCommands(text); err == nil && line.Session.Model != nil && b.cfg.IsAdmin(userID) {
 		if id := strings.TrimSpace(*line.Session.Model); b.runner.Cfg().FindModelEntry(id) != nil {
 			b.store.SetLastModel(id)
 		}

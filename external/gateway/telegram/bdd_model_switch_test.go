@@ -207,6 +207,8 @@ func (w *modelSwitchWorld) buildBot() error {
 	w.logClose = closer
 	w.bot = New(&config.TelegramGatewayConfig{
 		Enabled: true, Token: "t", DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual,
+		// The model a fresh chat starts on is the admins' pick.
+		Admins: []int64{modelSwitchUserID},
 	},
 		w.runner, dir, logger.Component(base, logger.ComponentGatewayTelegram), "", nil)
 	return nil

@@ -212,7 +212,11 @@ func (b *Bot) applyModelClick(ctx context.Context, c *Client, p buttonPayload, v
 		return
 	}
 	b.log.Info("pachca: model applied", "session", st.GetID(), "model", model)
-	b.store.SetLastModel(model)
+	// The model a fresh conversation starts on is an admin's pick; anybody
+	// else's stays in their own session.
+	if b.cfg.IsAdmin(p.UserID) {
+		b.store.SetLastModel(model)
+	}
 	if err := c.EditMessage(ctx, p.MessageID, modelMenuText(model), modelButtons(cfg.Models, model)); err != nil {
 		b.log.Debug("pachca: edit model menu", "err", err)
 	}
