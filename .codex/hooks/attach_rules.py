@@ -253,6 +253,23 @@ def flow_sequence_complete(value: str) -> bool:
     return depth == 0
 
 
+def flow_line_continues(value: str) -> bool:
+    quote = ""
+    escaped = False
+    for char in value:
+        if quote:
+            if char == "\\" and quote == '"' and not escaped:
+                escaped = True
+                continue
+            if char == quote and not escaped:
+                quote = ""
+            escaped = False
+            continue
+        if char in ("'", '"'):
+            quote = char
+    return quote == '"' and value.endswith("\\")
+
+
 def parse_rule(path: Path) -> Rule | None:
     """Read one `.mdc` file. Frontmatter is flat, so no YAML dependency."""
     text = path.read_text(encoding="utf-8")
@@ -279,13 +296,14 @@ def parse_rule(path: Path) -> Rule | None:
         elif key == "globs":
             cleaned_value = strip_yaml_comment(value)
             if cleaned_value.startswith("[") and not flow_sequence_complete(cleaned_value):
-                parts = [cleaned_value]
                 while index + 1 < len(lines):
                     index += 1
                     continuation = strip_yaml_comment(lines[index].strip())
                     if continuation:
-                        parts.append(continuation)
-                    cleaned_value = " ".join(parts)
+                        if flow_line_continues(cleaned_value):
+                            cleaned_value = cleaned_value[:-1] + continuation.lstrip()
+                        else:
+                            cleaned_value += " " + continuation
                     if flow_sequence_complete(cleaned_value):
                         break
             if cleaned_value:
@@ -351,6 +369,15 @@ def save_sent(session_id: str, sent: set[str]) -> bool:
         return False
 
 
+def clear_sent(session_id: str) -> None:
+    if save_sent(session_id, set()):
+        return
+    try:
+        state_file(session_id).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 @contextmanager
 def session_lock(session_id: str):
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -402,6 +429,8 @@ def deliver_session_start(session_id: str, source: str, always: list[Rule], deli
     try:
         lock.__enter__()
     except Exception:
+        if source != "resume":
+            clear_sent(session_id)
         if not always:
             return False
         deliver(always)
@@ -409,6 +438,8 @@ def deliver_session_start(session_id: str, source: str, always: list[Rule], deli
 
     try:
         sent = load_sent(session_id) if source == "resume" else set()
+        if source != "resume":
+            clear_sent(session_id)
         if always:
             deliver(always)
         save_sent(session_id, sent | {rule.rel for rule in always})

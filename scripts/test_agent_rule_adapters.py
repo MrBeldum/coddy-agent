@@ -75,7 +75,8 @@ def multiline_flow_rule(directory: Path) -> Path:
         "---\n"
         "description: Multiline flow\n"
         "globs: [\n"
-        "  \"internal/llm/**/*.go\",\n"
+        "  \"internal/llm/\\\n"
+        "    *.go\",\n"
         "  \"cmd/coddy/providers.go\"\n"
         "]\n"
         "alwaysApply: false\n"
@@ -203,7 +204,7 @@ class AdapterContractTest(unittest.TestCase):
                 self.assertTrue(rule.always)
                 multiline = module.parse_rule(multiline_flow_rule(Path(tmp)))
                 self.assertEqual(
-                    ["internal/llm/**/*.go", "cmd/coddy/providers.go"],
+                    ["internal/llm/*.go", "cmd/coddy/providers.go"],
                     multiline.globs,
                 )
                 self.assertFalse(multiline.always)
@@ -360,7 +361,7 @@ class AdapterContractTest(unittest.TestCase):
                     ),
                 )
 
-    def test_failed_session_start_emit_does_not_persist(self):
+    def test_failed_session_start_emit_resets_scoped_state(self):
         def broken_emit(_event, _context):
             raise BrokenPipeError("host closed stdout")
 
@@ -371,7 +372,14 @@ class AdapterContractTest(unittest.TestCase):
                 rules_dir = root / "rules"
                 rules_dir.mkdir()
                 always_rule(rules_dir)
+                list_rule(rules_dir)
                 state_dir = root / "state"
+                tool_input = {"file_path": "internal/llm/openai.go"}
+                self.assertIn(
+                    "Every provider request",
+                    run_pretool(module, rules_dir, state_dir, tool_input),
+                )
+
                 original_emit = module.emit
                 module.emit = broken_emit
                 with self.assertRaises(BrokenPipeError):
@@ -379,18 +387,15 @@ class AdapterContractTest(unittest.TestCase):
                         module,
                         rules_dir,
                         state_dir,
-                        {"hook_event_name": "SessionStart", "source": "startup"},
+                        {"hook_event_name": "SessionStart", "source": "compact"},
                     )
-                self.assertEqual(set(), module.load_sent("provider-proxy-case"))
+                sent = module.load_sent("provider-proxy-case")
+                self.assertFalse(any(rule.endswith("provider-proxy.mdc") for rule in sent))
+
                 module.emit = original_emit
                 self.assertIn(
-                    "Always follow the repository workflow",
-                    run_hook(
-                        module,
-                        rules_dir,
-                        state_dir,
-                        {"hook_event_name": "SessionStart", "source": "startup"},
-                    ),
+                    "Every provider request",
+                    run_pretool(module, rules_dir, state_dir, tool_input),
                 )
 
     def test_state_failures_degrade_to_duplicate_delivery(self):

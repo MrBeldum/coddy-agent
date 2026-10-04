@@ -221,6 +221,24 @@ function flowSequenceComplete(value) {
   return depth === 0
 }
 
+function flowLineContinues(value) {
+  let quote = ""
+  let escaped = false
+  for (const character of value) {
+    if (quote) {
+      if (character === "\\" && quote === '"' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (character === quote && !escaped) quote = ""
+      escaped = false
+      continue
+    }
+    if (character === '"' || character === "'") quote = character
+  }
+  return quote === '"' && value.endsWith("\\")
+}
+
 export function parseRule(filePath, text, repoRoot) {
   const frontmatter = text.match(
     /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)([\s\S]*)$/,
@@ -241,12 +259,16 @@ export function parseRule(filePath, text, repoRoot) {
     if (key === "globs") {
       let cleanedValue = stripYamlComment(value)
       if (cleanedValue.startsWith("[") && !flowSequenceComplete(cleanedValue)) {
-        const parts = [cleanedValue]
         while (index + 1 < lines.length) {
           index += 1
           const continuation = stripYamlComment(lines[index].trim())
-          if (continuation) parts.push(continuation)
-          cleanedValue = parts.join(" ")
+          if (continuation) {
+            if (flowLineContinues(cleanedValue)) {
+              cleanedValue = cleanedValue.slice(0, -1) + continuation.trimStart()
+            } else {
+              cleanedValue += ` ${continuation}`
+            }
+          }
           if (flowSequenceComplete(cleanedValue)) break
         }
       }
