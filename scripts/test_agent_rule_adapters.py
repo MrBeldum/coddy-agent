@@ -28,7 +28,7 @@ def list_rule(directory: Path) -> Path:
     path.write_text(
         "---\n"
         "description: Provider proxy\n"
-        "globs:\n"
+        "globs: # provider paths\n"
         "  - \"internal/llm/**/*.go\" # provider core\n"
         "  # provider commands\n"
         "\n"
@@ -59,7 +59,7 @@ def flow_rule(directory: Path) -> Path:
     path.write_text(
         "---\n"
         "description: \"Flow rule\" # display text\n"
-        "globs: [\"fixtures/foo,bar.go\", \"internal/**/*.go\"] # scoped paths\n"
+        "globs: [\"fixtures/foo,bar.go\", 'fixtures/it''s.go', \"\\u0069nternal/**/*.go\"] # scoped paths\n"
         "alwaysApply: true # required\n"
         "---\n\n"
         "Flow rule body.\n",
@@ -162,7 +162,10 @@ class AdapterContractTest(unittest.TestCase):
             for module in (codex, zcode):
                 rule = module.parse_rule(path)
                 self.assertEqual("Flow rule", rule.description)
-                self.assertEqual(["fixtures/foo,bar.go", "internal/**/*.go"], rule.globs)
+                self.assertEqual(
+                    ["fixtures/foo,bar.go", "fixtures/it's.go", "internal/**/*.go"],
+                    rule.globs,
+                )
                 self.assertTrue(rule.always)
 
     def test_python_adapter_claims_are_interprocess_safe(self):
@@ -284,6 +287,24 @@ class AdapterContractTest(unittest.TestCase):
         expected = ["internal/llm/openai.go"]
         self.assertEqual(expected, codex.patched_paths(payload))
         self.assertEqual(expected, zcode.collect_target_paths(payload))
+
+    def test_state_failures_degrade_to_duplicate_delivery(self):
+        rule_ids = {"provider-proxy.mdc"}
+
+        @contextlib.contextmanager
+        def broken_lock(_session_id):
+            raise OSError("state directory unavailable")
+            yield
+
+        for source, name in ((CODEX, "codex_state_failure"), (ZCODE, "zcode_state_failure")):
+            save_failure = load_module(name + "_save", source)
+            save_failure.save_sent = lambda _session_id, _sent: False
+            self.assertEqual(rule_ids, save_failure.claim_rule_ids("session", rule_ids))
+
+            lock_failure = load_module(name + "_lock", source)
+            lock_failure.session_lock = broken_lock
+            self.assertEqual(rule_ids, lock_failure.claim_rule_ids("session", rule_ids))
+            lock_failure.update_session_state("session", "startup", {"always.mdc"})
 
     def test_adapters_do_not_claim_vendor_policy_ownership(self):
         for path in (CODEX, ZCODE):

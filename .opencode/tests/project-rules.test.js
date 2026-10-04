@@ -44,7 +44,7 @@ async function fixture(t) {
     [
       "---",
       "description: Provider proxy rule",
-      "globs:",
+      "globs: # provider paths",
       '  - "internal/llm/**/*.go" # provider core',
       "  # provider commands",
       "",
@@ -80,7 +80,7 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
     [
       "---",
       'description: "Flow rule" # display text',
-      'globs: ["fixtures/foo,bar.go", "internal/**/*.go"] # scoped paths',
+      "globs: [\"fixtures/foo,bar.go\", 'fixtures/it''s.go', \"\\u0069nternal/**/*.go\"] # scoped paths",
       "alwaysApply: true # required",
       "---",
       "Flow rule body.",
@@ -89,7 +89,11 @@ test("flow-style YAML scalars preserve quoted commas and comments", () => {
   )
 
   assert.equal(rule.description, "Flow rule")
-  assert.deepEqual(rule.globs, ["fixtures/foo,bar.go", "internal/**/*.go"])
+  assert.deepEqual(rule.globs, [
+    "fixtures/foo,bar.go",
+    "fixtures/it's.go",
+    "internal/**/*.go",
+  ])
   assert.equal(rule.always, true)
 })
 

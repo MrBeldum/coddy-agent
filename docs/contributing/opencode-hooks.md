@@ -25,7 +25,7 @@ OpenCode's stable `tool.execute.before` hook can block or modify a tool call, bu
 
 ## Rule parsing and matching
 
-The implementation reads `description`, `globs`, and `alwaysApply` from Cursor frontmatter. `globs` may be a scalar, a flow list or a YAML block list; quoted commas and YAML comments are handled without truncating the list. A glob translator keeps `*` inside one path segment and treats `**/` as zero or more directories, so `external/httpserver/**/*.go` matches both `external/httpserver/server.go` and deeper files.
+The implementation reads `description`, `globs`, and `alwaysApply` from Cursor frontmatter. `globs` may be a scalar, a flow list or a YAML block list; quoted commas, doubled single quotes, double-quoted escapes and YAML comments are decoded without truncating the list. A glob translator keeps `*` inside one path segment and treats `**/` as zero or more directories, so `external/httpserver/**/*.go` matches both `external/httpserver/server.go` and deeper files.
 
 Tool arguments are inspected recursively. Recognized path keys include `filePath`, `path`, `filename`, `target`, and their common variants. Unified patch payloads recognize `*** Add File:`, `*** Update File:`, `*** Delete File:`, and `*** Move to:` headers. Absolute paths outside the repository are ignored.
 

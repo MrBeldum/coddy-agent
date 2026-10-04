@@ -129,8 +129,13 @@ def strip_yaml_comment(value: str) -> str:
 
 def unquote(value: str) -> str:
     value = value.strip()
-    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
-        return value[1:-1]
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value[1:-1]
+    if len(value) >= 2 and value[0] == "'" and value[-1] == "'":
+        return value[1:-1].replace("''", "'")
     return value
 
 
@@ -200,8 +205,9 @@ def parse_rule(path: Path) -> Rule | None:
         if key == "description":
             description = unquote(strip_yaml_comment(value))
         elif key == "globs":
-            if value:
-                globs = split_globs(value)
+            cleaned_value = strip_yaml_comment(value)
+            if cleaned_value:
+                globs = split_globs(cleaned_value)
             else:
                 index += 1
                 while index < len(lines):
@@ -288,20 +294,26 @@ def session_lock(session_id: str):
 
 
 def claim_rule_ids(session_id: str, rule_ids: set[str]) -> set[str]:
-    with session_lock(session_id):
-        sent = load_sent(session_id)
-        claimed = rule_ids - sent
-        if not claimed:
-            return set()
-        if not save_sent(session_id, sent | claimed):
-            return set()
-        return claimed
+    try:
+        with session_lock(session_id):
+            sent = load_sent(session_id)
+            claimed = rule_ids - sent
+            if not claimed:
+                return set()
+            if not save_sent(session_id, sent | claimed):
+                return claimed
+            return claimed
+    except Exception:
+        return set(rule_ids)
 
 
 def update_session_state(session_id: str, source: str, always: set[str]) -> None:
-    with session_lock(session_id):
-        sent = load_sent(session_id) if source == "resume" else set()
-        save_sent(session_id, sent | always)
+    try:
+        with session_lock(session_id):
+            sent = load_sent(session_id) if source == "resume" else set()
+            save_sent(session_id, sent | always)
+    except Exception:
+        pass
 
 
 def patched_paths(tool_input: object) -> list[str]:

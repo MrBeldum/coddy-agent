@@ -56,12 +56,15 @@ export function globToRegExp(pattern) {
 
 function unquote(value) {
   const trimmed = value.trim()
-  if (
-    trimmed.length >= 2 &&
-    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'")))
-  ) {
-    return trimmed.slice(1, -1)
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return JSON.parse(trimmed)
+    } catch {
+      return trimmed.slice(1, -1)
+    }
+  }
+  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replaceAll("''", "'")
   }
   return trimmed
 }
@@ -158,8 +161,9 @@ export function parseRule(filePath, text, repoRoot) {
     const value = line.slice(separator + 1).trim()
     if (key === "description") description = unquote(stripYamlComment(value))
     if (key === "globs") {
-      if (value) {
-        globs = parseGlobs(value)
+      const cleanedValue = stripYamlComment(value)
+      if (cleanedValue) {
+        globs = parseGlobs(cleanedValue)
       } else {
         while (index + 1 < lines.length) {
           const item = lines[index + 1].trim()
