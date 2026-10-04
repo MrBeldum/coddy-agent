@@ -413,7 +413,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 				OwnedBy:          ent.ProviderName(),
 				MaxContextTokens: s.contextWindowFor(cfg, mid),
 				Multimodal:       ent.Multimodal,
-				ReasoningLevels:  cfg.ReasoningLevelsFor(ent),
+				ReasoningLevels:  cfg.ReasoningChoicesFor(ent),
 				ReasoningDefault: cfg.DefaultReasoningLevelFor(ent),
 				Default:          defaultModel != "" && mid == defaultModel,
 			})

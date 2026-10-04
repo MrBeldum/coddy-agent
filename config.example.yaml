@@ -106,6 +106,7 @@ models:
   #   max_tokens: 8192
   #   reasoning_default: medium       # level pre-selected for new chats (must be a valid level)
   #   # reasoning_levels: [low, high] # optional: override the offered levels; [] hides the selector; omit the key to auto-detect from the model id
+  #   # allow_reasoning_off: true     # optional: add Off only after verifying this deployment honours Coddy's disable-reasoning request
 
   # - model: "devin/claude-sonnet-5"  # one entry per Devin family; each level is a variant
   #   reasoning_levels: [low, medium, high, xhigh, max]
@@ -120,6 +121,7 @@ models:
   #   max_tokens: 8192
   #   temperature: 0.2
   #   multimodal: false
+  #   # allow_reasoning_off: true     # NeuralDeep Hub may ignore this request; use only after verifying the deployment
 
   # - model: "neuraldeep/qwen3.6-35b-a3b"
   #   max_tokens: 8192               # qwen3 reasoning also pins chat_template_kwargs.enable_thinking

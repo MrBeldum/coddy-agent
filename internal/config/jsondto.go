@@ -106,8 +106,9 @@ type ModelJSON struct {
 	// ReasoningLevels keeps the unset/explicit distinction of ModelEntry.ReasoningLevels:
 	// an omitted key auto-detects, an explicit [] hides the reasoning selector. A plain
 	// slice would collapse both into "absent" on the way out to the settings UI.
-	ReasoningLevels  *[]string `json:"reasoning_levels,omitempty"`
-	ReasoningDefault string    `json:"reasoning_default,omitempty"`
+	ReasoningLevels   *[]string `json:"reasoning_levels,omitempty"`
+	ReasoningDefault  string    `json:"reasoning_default,omitempty"`
+	AllowReasoningOff bool      `json:"allow_reasoning_off,omitempty"`
 	// Stream keeps the unset/explicit distinction of ModelEntry.Stream: a settings
 	// round trip must not turn an omitted key into an explicit false.
 	Stream *bool `json:"stream,omitempty"`

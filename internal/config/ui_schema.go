@@ -238,6 +238,9 @@ func UISchemaMap() map[string]interface{} {
 		},
 		"reasoning_default": strProp("Default reasoning level",
 			"Reasoning level pre-selected for new chats with this model. Must be one of the resolved reasoning levels; ignored otherwise."),
+		"allow_reasoning_off": boolPropDefault("Allow disabling reasoning",
+			"Expose Off in the reasoning selector for this model. Enable it only when this provider/model deployment honours Coddy's provider-specific request that disables reasoning; Coddy cannot verify that capability automatically.",
+			false),
 		// The only boolean here that defaults to true when the key is absent, so the
 		// schema has to say so: the form seeds new entries from schema defaults and
 		// renders an unset switch from them.
@@ -325,7 +328,7 @@ func UISchemaMap() map[string]interface{} {
 			"title":       "Logical models",
 			"description": "Named model entries the agent and UI can select; ids reference provider prefixes.",
 			"items": objectSchema("", "", modelProps,
-				[]string{"model", "max_tokens", "temperature", "max_context_tokens", "multimodal", "stream", "reasoning_levels", "reasoning_default"},
+				[]string{"model", "max_tokens", "temperature", "max_context_tokens", "multimodal", "stream", "reasoning_levels", "reasoning_default", "allow_reasoning_off"},
 				[]string{"model"}),
 		},
 		"agent": objectSchema("ReAct loop", "Defaults for the main agent loop (model id and safety caps).",
