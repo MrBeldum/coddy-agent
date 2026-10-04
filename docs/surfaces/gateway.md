@@ -21,7 +21,7 @@ The messenger gateway lets you drive a Coddy agent directly from a chat applicat
 - [What the messenger needs, and where it is said](#what-the-messenger-needs-and-where-it-is-said)
 - [Writing a new adapter](#writing-a-new-adapter)
   - [1. Implement the Adapter interface](#1-implement-the-adapter-interface)
-  - [2. Register in Start()](#2-register-in-start)
+  - [2. Register in Serve()](#2-register-in-serve)
   - [3. Implement acp.UpdateSender](#3-implement-acpupdatesender)
   - [4. Add a build tag](#4-add-a-build-tag)
   - [5. Wire into hub.Start()](#5-wire-into-hubstart)
@@ -651,22 +651,18 @@ type SessionRunner interface {
 
 `session.Manager` already satisfies this interface — pass it directly. `HandleSessionSetConfigOption` is what the `/model` inline keyboard calls, and the settings commands (`/agent`, `/model <id> --once`, ...) reach the session as prompt text through `HandleSessionPromptWithSender`, whose manager takes them off the start of the message; `HandleSessionList` is what `/resume` offers to the chat; `Cfg()` returns the loaded config (used by `/model` to list available models).
 
-### 2. Register in Start()
+### 2. Register in Serve()
 
-In `external/gateway/start.go`, add a block for the new adapter next to the Telegram block:
+`Serve` in `external/gateway/serve_gateway.go` builds every enabled adapter and hands them to the hub. Add a block for the new adapter next to the Telegram block:
 
 ```go
-//go:build gateway || gateway.discord
-
-if cfg.Gateways.Discord.Enabled {
-    bot := discord.New(&cfg.Gateways.Discord, mgr, defaultCWD, log)
+if opts.Cfg.Gateways.Discord.Enabled {
+    bot := discord.New(&opts.Cfg.Gateways.Discord, opts.Mgr, opts.DefaultCWD, opts.Log)
     adapters = append(adapters, bot)
 }
 ```
 
-Because the Telegram file uses `//go:build gateway || gateway.telegram` and the Discord file uses `//go:build gateway || gateway.discord`, adding the Discord code to `start.go` requires updating the build constraint on that file to include `|| gateway.discord` as well. The cleanest approach is to split `start.go` per-adapter and give each its own constraint file, then have a `start_base.go` (tagged `gateway || gateway.telegram || gateway.discord`) that defines the `Start` function skeleton.
-
-For a simpler one-adapter project, a single `start.go` with `//go:build gateway || gateway.telegram` is sufficient.
+`serve_gateway.go` is built under `//go:build gateway || gateway.telegram`, and `serve_stub.go` under its negation: the stub's `Serve` reports that no adapter was built in, and its `Available` is false, so `coddy serve` refuses a configuration that asks for a bot this binary does not have. A new tag goes into both constraints (`gateway || gateway.telegram || gateway.discord`, and the same inside `!(...)` in the stub). The untagged `serve.go` holds what the caller fills in (`Options`) and stays untagged.
 
 ### 3. Implement acp.UpdateSender
 
@@ -694,7 +690,7 @@ Follow the existing pattern:
 - `external/gateway/discord/*_test.go` → same constraint
 - Stub (if needed) → `//go:build !(gateway || gateway.discord)`
 
-Update the `start.go` / `start_stub.go` constraint to include the new tag.
+Update the constraints of `serve_gateway.go` and `serve_stub.go` to include the new tag.
 
 ### 5. Wire into hub.Start()
 
