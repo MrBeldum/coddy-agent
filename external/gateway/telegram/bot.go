@@ -391,7 +391,11 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	// A group shares the bot with many people: what changes the session's
 	// settings, or replaces the conversation, is the admins' to do. /resume
 	// reaches every session the server keeps, so it is theirs in any chat.
-	if ((isGroupChat(msg.Chat) && changesSettings(msg)) || isCommand(msg, "resume")) && !b.cfg.IsAdmin(userID) {
+	// The command may follow the bot's mention ("@bot /think"), which Telegram
+	// does not mark as a command: the words after the mention count too.
+	leading := leadingCommand(stripMention(text, b.botName), b.botName)
+	textChangesSettings := changesSettings(msg) || commandChangesSettings(leading)
+	if ((isGroupChat(msg.Chat) && textChangesSettings) || isCommand(msg, "resume") || leading == "resume") && !b.cfg.IsAdmin(userID) {
 		b.log.Debug("telegram: update refused", "reason", "settings are admin-only in a group", "user", userID, "chat", chatID)
 		b.reply(bot, chatID, msg.MessageID, adminOnlyNote)
 		return
@@ -616,6 +620,39 @@ func changesSettings(msg *tgbotapi.Message) bool {
 		return true
 	}
 	return isSettingsCommand(msg)
+}
+
+// leadingCommand is the lower-case command word text starts with ("/think",
+// "/model@botname x"), without the slash and the bot's name, or "".
+func leadingCommand(text, botName string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return ""
+	}
+	word := strings.Fields(text[1:])
+	if len(word) == 0 {
+		return ""
+	}
+	cmd := strings.ToLower(word[0])
+	if at := strings.IndexByte(cmd, '@'); at >= 0 {
+		if !strings.EqualFold(cmd[at+1:], botName) {
+			return ""
+		}
+		cmd = cmd[:at]
+	}
+	return cmd
+}
+
+// commandChangesSettings is changesSettings for a command word.
+func commandChangesSettings(cmd string) bool {
+	switch cmd {
+	case "":
+		return false
+	case "model", "clear", "resume":
+		return true
+	}
+	sc, ok := session.LookupSettingsCommand(cmd)
+	return ok && sc.Setting != session.SettingPermissionMode
 }
 
 // isSettingsCommand reports whether msg starts with a settings command the

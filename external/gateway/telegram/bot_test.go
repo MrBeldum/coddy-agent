@@ -119,3 +119,24 @@ func TestChangesSettings(t *testing.T) {
 		}
 	}
 }
+
+// A settings command written after the bot's mention ("@bot /think") is the
+// same command: in a group it is the admins' too.
+func TestGroupSettingsCommandAfterAMentionIsAdminOnly(t *testing.T) {
+	f := newFakeAPI(t, tgfake.Options{BotUsername: "coddy_bot"})
+	runner := newScriptedRunner()
+	b := New(&config.TelegramGatewayConfig{DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual, Admins: []int64{9}},
+		runner, t.TempDir(), slog.New(slog.DiscardHandler), "", nil)
+	b.botName = "coddy_bot"
+	for _, text := range []string{"@coddy_bot /think", "@coddy_bot /model openai/x", "@coddy_bot /resume", "@coddy_bot /clear"} {
+		msg := f.userMessage(-100, 5, text)
+		key := sessionstore.SessionKey(adapterName, -100, 5, config.IsolationIndividual, true)
+		b.processMessage(context.Background(), f.api, msg, key)
+		if len(runner.prompts) != 0 {
+			t.Fatalf("%q from a non-admin reached the session: %q", text, runner.prompts)
+		}
+		if replies := f.repliesTo(-100, msg.MessageID); len(replies) != 1 || !strings.Contains(replies[0].Text, "Only the bot's admins") {
+			t.Fatalf("%q was not refused: %+v", text, replies)
+		}
+	}
+}
