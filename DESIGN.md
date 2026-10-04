@@ -1024,6 +1024,17 @@ Once **`/compact`** opens the draft, the composer completes the option the comma
 - Syntax colors use the `--syntax-*` semantic palette in each of the seven appearance themes. Keywords, strings, numbers, titles, attributes/selectors, types, comments, metadata, and deletions follow the active theme immediately, including already-rendered responses. Keep token selectors scoped to `.md-code`.
 - Each code block has a copy button in the top right corner that copies only the block contents. The block keeps its own line box (**12px** at **1.5**, whatever the text around it) and the button sits on the middle of its first line (**`top: 3px`** for a **26px** button over **1px** border, **6px** padding and an **18px** line), so a one-line block has it centred (**`codeCopyButtonCss.test.ts`**).
 
+### Diagrams and formulas
+
+A **`mermaid`** or **`svg`** fence and a display formula (**`$$...$$`**, **`\[...\]`**, a **`math`** fence) are a **figure** (**`.md-figure`**), not a code block; an inline formula (**`$...$`**, **`\(...\)`**) is typeset in the line. Behaviour: **`docs/surfaces/web-ui.md`** (**Diagrams and formulas**).
+
+- **Frame.** The code block's frame: **14px** radius, the same hairline border, **`--coddy-surface-inset`** behind it, **12px** above and below. It never grows wider than the transcript.
+- **Head** (**`.md-figure-head`**): the kind on the left (**12px**, muted), the actions on the right in one row: the **Picture / Code** (or **Formula / Code**) segmented switch (**`.md-figure-toggle`**, the pressed half on a **16%** accent tint, **`aria-pressed`**), then the copy button and the download button in the **`md-copy`** chrome, set in the row rather than floating over the content, and for Mermaid an **SVG** text button. The head wraps on a narrow column; the actions keep together at its right edge.
+- **Picture** (**`.md-figure-picture`**): centred with **12px** around it, at most the column wide and **min(70vh, 640px)** tall, proportions kept, **`cursor: zoom-in`**; it is a button that opens the image viewer (**`ImageLightbox`**). The picture is an `<img>` of a `data:` SVG, never SVG in the DOM.
+- **Code view and errors.** The source as a code block body (**12px** at **1.5**, scrolling sideways in its own box). A failed draw puts one **12px** line in **`--coddy-danger`** between the head and the source, and the switch's picture half is disabled.
+- **Formulas.** A display formula scrolls sideways inside **`.md-math-display`**. An inline formula (**`.md-math-inline`**) is KaTeX at **1.1em**, **`cursor: copy`**, an accent tint on hover and for a moment after it was copied, and its source as the tooltip; until KaTeX has loaded it shows its source in the inline-code font.
+- **Colours.** A Mermaid diagram is drawn with Mermaid's **`base`** theme fed from the active appearance (surface, raised surface, accent border, text, muted lines, **`darkMode`** for every theme but **light**) and drawn again on a theme switch. Live check: **`npm run check:diagrams`**.
+
 ### Memory tree (deferred explorer)
 
 A file-tree over combined **global** (**`memory.dir`** / `$CODDY_HOME/memory`) and **workspace** (`<cwd>/memory`) remains out of scope for this milestone.
