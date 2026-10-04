@@ -288,6 +288,46 @@ func TestTelegramTokenProbe(t *testing.T) {
 	}
 }
 
+func TestPachcaTokenProbe(t *testing.T) {
+	status := http.StatusOK
+	scopes := `["messages:create","messages:update","messages:read","chats:read","profile:read","users:read","webhooks:events:read","webhooks:events:delete"]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token/info" || r.Header.Get("Authorization") != "Bearer pc-token" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		if status == http.StatusOK {
+			_, _ = fmt.Fprintf(w, `{"data":{"id":1,"user_id":77,"scopes":%s}}`, scopes)
+		} else {
+			_, _ = fmt.Fprint(w, `{"error":"invalid_token","error_description":"revoked"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv(config.PachcaAPIBaseEnv, srv.URL)
+	body := "gateways:\n  pachca:\n    enable: true\n    token: \"pc-token\"\n"
+
+	if c := find(t, run(t, body, nil), "gateways.pachca"); c.Status != StatusOK || !strings.Contains(c.Message, "77") {
+		t.Errorf("accepted token %+v", c)
+	}
+	scopes = `["messages:create","messages:update","messages:read","chats:read","profile:read","users:read","webhooks:events:read"]`
+	if c := find(t, run(t, body, nil), "gateways.pachca"); c.Status != StatusWarning || !strings.Contains(c.Message, "webhooks:events:delete") {
+		t.Errorf("token without the delete scope %+v", c)
+	}
+	scopes = `["messages:create"]`
+	if c := find(t, run(t, body, nil), "gateways.pachca"); c.Status != StatusError || !strings.Contains(c.Message, "profile:read") {
+		t.Errorf("token without required scopes %+v", c)
+	}
+	status = http.StatusUnauthorized
+	if c := find(t, run(t, body, nil), "gateways.pachca"); c.Status != StatusError || !strings.Contains(c.Message, "rejected") || c.Line != 5 {
+		t.Errorf("rejected token %+v", c)
+	}
+	t.Setenv(config.PachcaBotTokenEnvVar, "")
+	if c := find(t, run(t, "gateways:\n  pachca:\n    enable: true\n", nil), "gateways.pachca"); c.Status != StatusError || !strings.Contains(c.Message, "no token") {
+		t.Errorf("missing token %+v", c)
+	}
+}
+
 // runWithMCP prepares body, writes mcpJSON as <home>/mcp.json - where the MCP
 // servers are declared - and runs the probes.
 func runWithMCP(t *testing.T, body, mcpJSON string) *Report {
@@ -832,5 +872,23 @@ func TestMiniAppChecks(t *testing.T) {
 	dead.Close()
 	if c := find(t, run(t, body(deadURL), nil), "gateways.telegram.mini_app.url"); c.Status != StatusWarning || !strings.Contains(c.Message, "cannot reach") {
 		t.Errorf("an unreachable address: %+v", c)
+	}
+}
+
+func TestGatewayWithoutAdminsIsWarned(t *testing.T) {
+	t.Setenv(config.PachcaBotTokenEnvVar, "")
+	t.Setenv(config.TelegramBotTokenEnvVar, "")
+	if c := find(t, run(t, "gateways:\n  telegram:\n    enable: true\n", nil), "gateways.telegram.admins"); c.Status != StatusWarning {
+		t.Errorf("a Telegram bot without admins: %+v", c)
+	}
+	body := "gateways:\n  pachca:\n    enable: true\n"
+	if c := find(t, run(t, body, nil), "gateways.pachca.admins"); c.Status != StatusWarning || !strings.Contains(c.Message, "no admins") {
+		t.Errorf("no admins: %+v", c)
+	}
+	body = "gateways:\n  pachca:\n    enable: true\n    admins: [7]\n"
+	for _, c := range run(t, body, nil).Checks {
+		if c.Path == "gateways.pachca.admins" {
+			t.Errorf("a bot with admins was warned: %+v", c)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-//go:build gateway || gateway.telegram
+//go:build gateway || gateway.telegram || gateway.pachca
 
 // Package sessionstore maps stable messenger chat/user keys to Coddy session IDs.
 // Each unique (gateway, chatID, userID, isolation) combination yields a single session ID

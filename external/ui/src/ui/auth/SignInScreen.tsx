@@ -31,6 +31,14 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
   const [error, setError] = useState("");
   // The server took the password, but the session it set did not come back.
   const [notKept, setNotKept] = useState(false);
+  // What happened to the Mini App's own sign-in, when the page is one.
+  const auth = snapshotAuth();
+  const telegramNote = auth.telegramRefused
+    ? t("auth.signIn.telegramNotAdmin")
+    : auth.telegramProblem === "retry"
+      ? t("auth.signIn.telegramRetry")
+      : "";
+  const telegramNotKept = auth.telegramProblem === "not_kept";
 
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
@@ -88,59 +96,89 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
           width={188}
           height={56}
         />
-        <form className="auth-card" onSubmit={submit}>
-          <h1 className="auth-title">{t("auth.signIn.title")}</h1>
-
-          <label className="auth-field">
-            <span className="auth-label">{t("auth.signIn.user")}</span>
-            <input
-              className="auth-input"
-              type="text"
-              name="username"
-              autoComplete="username"
-              autoFocus
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-
-          <label className="auth-field">
-            <span className="auth-label">{t("auth.signIn.password")}</span>
-            <input
-              className="auth-input"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-
-          {error ? (
-            <p className="auth-error" role="alert">
-              {error}
+        {(telegramNote || telegramNotKept) && !auth.loginRequired ? (
+          <div className="auth-card">
+            <p className="auth-error" role="alert" data-testid="telegram-note">
+              {telegramNote || t("auth.signIn.notKept")}{" "}
+              {telegramNotKept ? (
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t("auth.signIn.openInTab")}
+                </a>
+              ) : null}
             </p>
-          ) : null}
+          </div>
+        ) : (
+          <form className="auth-card" onSubmit={submit}>
+            <h1 className="auth-title">{t("auth.signIn.title")}</h1>
+            {telegramNote ? (
+              <p
+                className="auth-error"
+                role="alert"
+                data-testid="telegram-note"
+              >
+                {telegramNote}
+              </p>
+            ) : null}
 
-          {notKept ? (
-            <p className="auth-error" role="alert">
-              {t("auth.signIn.notKept")}{" "}
-              <a href={window.location.href} target="_blank" rel="noopener noreferrer">
-                {t("auth.signIn.openInTab")}
-              </a>
-            </p>
-          ) : null}
+            <label className="auth-field">
+              <span className="auth-label">{t("auth.signIn.user")}</span>
+              <input
+                className="auth-input"
+                type="text"
+                name="username"
+                autoComplete="username"
+                autoFocus
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                disabled={busy}
+              />
+            </label>
 
-          <button
-            className="auth-submit"
-            type="submit"
-            disabled={busy || user.trim() === "" || password === ""}
-          >
-            {busy ? t("auth.signIn.working") : t("auth.signIn.submit")}
-          </button>
-        </form>
+            <label className="auth-field">
+              <span className="auth-label">{t("auth.signIn.password")}</span>
+              <input
+                className="auth-input"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+
+            {error ? (
+              <p className="auth-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+
+            {notKept || telegramNotKept ? (
+              <p className="auth-error" role="alert">
+                {t("auth.signIn.notKept")}{" "}
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t("auth.signIn.openInTab")}
+                </a>
+              </p>
+            ) : null}
+
+            <button
+              className="auth-submit"
+              type="submit"
+              disabled={busy || user.trim() === "" || password === ""}
+            >
+              {busy ? t("auth.signIn.working") : t("auth.signIn.submit")}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

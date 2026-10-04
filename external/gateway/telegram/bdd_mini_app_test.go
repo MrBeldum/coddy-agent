@@ -58,6 +58,8 @@ func (w *miniAppWorld) start(app string) error {
 	w.bot = New(&config.TelegramGatewayConfig{
 		Enabled: true, Token: "123456:miniapp", DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual,
 		MiniApp: config.TelegramMiniAppConfig{URL: app},
+		// Only the bot's admins open the web UI from the chat.
+		Admins: []int64{miniAppChat},
 	}, w.runner, w.dir, logger.Component(base, logger.ComponentGatewayTelegram), filepath.Join(w.dir, "gateway_sessions.json"), nil)
 	w.bot.apiBase = w.f.srv.URL
 	polls := len(w.f.fake.Calls("getUpdates"))

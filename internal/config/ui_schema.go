@@ -314,6 +314,61 @@ func UISchemaMap() map[string]interface{} {
 			}, []string{"url", "menu_button"}, nil),
 	}
 
+	pachcaUserGroupProps := map[string]interface{}{
+		"name": strProp("Group name", "Name referenced by access as group:<name>."),
+		"user_ids": map[string]interface{}{
+			"type":        "array",
+			"title":       "User IDs",
+			"description": "Pachca user IDs that belong to this group.",
+			"items":       map[string]interface{}{"type": "integer"},
+		},
+	}
+	pachcaChatProps := map[string]interface{}{
+		"chat_id": intProp("Chat ID", "Pachca chat id: a conversation, a channel, a direct chat or a thread's own chat."),
+		"isolation": map[string]interface{}{
+			"type": "string", "title": "Isolation",
+			"description": "Per-chat session isolation override.",
+			"enum":        isolationEnum,
+		},
+		"access": strProp("Access", "Per-chat access override: all, admins, or group:<name>."),
+	}
+	pachcaProps := map[string]interface{}{
+		"enable": boolProp("Enabled", "Run the Pachca bot (requires the gateway or gateway.pachca build tag)."),
+		"token": strProp("Bot token",
+			"The access token of a Pachca integration bot. Optional here: leave empty to read it from the PACHCA_BOT_TOKEN environment variable (e.g. via .env). Secret: when set it is stored in config.yaml and shown in full."),
+		"proxy": strProp("Proxy URL",
+			"Optional proxy for the Pachca API requests: http:// or https:// for an HTTP proxy, socks5:// or socks5h:// for SOCKS5. A URL here replaces the system proxy for the bot. Left empty, the bot follows the system proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY); none connects directly."),
+		"poll_interval_seconds": intProp("Poll interval, seconds",
+			"How often the bot reads its events history, 1 to 60 seconds (default 2)."),
+		"admins": map[string]interface{}{
+			"type":        "array",
+			"title":       "Admins",
+			"description": "Pachca user IDs with elevated rights; admins always pass access checks.",
+			"items":       map[string]interface{}{"type": "integer"},
+		},
+		"default_access": strProp("Default access",
+			"Fallback access level for chats without an override: all, admins, or group:<name>."),
+		"default_isolation": map[string]interface{}{
+			"type": "string", "title": "Default isolation",
+			"description": "Fallback session isolation for group chats.",
+			"enum":        isolationEnum,
+		},
+		"user_groups": map[string]interface{}{
+			"type":        "array",
+			"title":       "User groups",
+			"description": "Named sets of user IDs referenced by access as group:<name>.",
+			"items": objectSchema("", "", pachcaUserGroupProps,
+				[]string{"name", "user_ids"}, []string{"name"}),
+		},
+		"chats": map[string]interface{}{
+			"type":        "array",
+			"title":       "Per-chat overrides",
+			"description": "Override isolation and access for specific chats.",
+			"items": objectSchema("", "", pachcaChatProps,
+				[]string{"chat_id", "isolation", "access"}, []string{"chat_id"}),
+		},
+	}
+
 	props := map[string]interface{}{
 		"providers": map[string]interface{}{
 			"type":        "array",
@@ -691,13 +746,16 @@ func UISchemaMap() map[string]interface{} {
 			},
 			[]string{"enable", "auto_enable", "threshold_percent", "keep_recent_turns", "model", "result_eviction"},
 			nil),
-		"gateways": objectSchema("Messenger gateways", "Telegram bot gateway (requires the gateway or gateway.telegram build tag).",
+		"gateways": objectSchema("Messenger gateways", "Telegram and Pachca bots (require the gateway build tag, or gateway.telegram / gateway.pachca for one of them).",
 			map[string]interface{}{
 				"telegram": objectSchema("Telegram", "Telegram bot adapter settings.", telegramProps,
 					[]string{"enable", "token", "rich_messages", "proxy", "admins", "default_access", "default_isolation", "user_groups", "chats", "mini_app"},
 					nil),
+				"pachca": objectSchema("Pachca", "Pachca integration bot settings.", pachcaProps,
+					[]string{"enable", "token", "proxy", "poll_interval_seconds", "admins", "default_access", "default_isolation", "user_groups", "chats"},
+					nil),
 			},
-			[]string{"telegram"},
+			[]string{"telegram", "pachca"},
 			nil),
 	}
 

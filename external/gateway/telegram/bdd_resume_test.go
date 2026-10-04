@@ -243,6 +243,8 @@ func (w *resumeWorld) buildBot() error {
 	}
 	w.bot = New(&config.TelegramGatewayConfig{
 		Enabled: true, Token: "t", DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual,
+		// /resume reaches every session the server keeps: an admin's command.
+		Admins: []int64{resumeUserID},
 	}, w.runner, "/work", logger.Component(base, logger.ComponentGatewayTelegram), w.storePath, nil)
 	return nil
 }
@@ -385,6 +387,13 @@ func (w *resumeWorld) agentPromptedInSession(id string) error {
 	return nil
 }
 
+func (w *resumeWorld) agentNotPromptedInSession(id string) error {
+	if p, ok := w.runner.lastPrompt(); ok && p.sessionID == id {
+		return fmt.Errorf("the prompt %q went to session %q", p.text, id)
+	}
+	return nil
+}
+
 // chatReceived looks for want in what the chat shows: the bot's messages as
 // they read now, an edited one with its new text. A message Telegram refused
 // never got there.
@@ -441,9 +450,11 @@ func initializeResumeScenario(sc *godog.ScenarioContext) {
 
 	sc.Step(`^a telegram gateway over a server keeping these sessions:$`, w.gatewayKeepingSessions)
 	sc.Step(`^the user sends "([^"]*)"$`, w.userSends)
+	sc.Step(`^the user is not an admin of the bot$`, func() error { w.bot.cfg.Admins = nil; return nil })
 	sc.Step(`^the chat is offered a keyboard with the buttons:$`, w.offeredKeyboardWith)
 	sc.Step(`^the user taps the button for "([^"]*)"$`, w.tapButton)
 	sc.Step(`^the agent was prompted in the session "([^"]*)"$`, w.agentPromptedInSession)
+	sc.Step(`^the agent was not prompted in the session "([^"]*)"$`, w.agentNotPromptedInSession)
 	sc.Step(`^the chat received "([^"]*)"$`, w.chatReceived)
 	sc.Step(`^the keyboard marks the session behind the chat as the current one$`, w.keyboardMarksTheChatSession)
 	sc.Step(`^the gateway is restarted over the same session store$`, w.restartOverTheSameStore)

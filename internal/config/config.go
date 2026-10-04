@@ -143,6 +143,10 @@ func validateSubconfigs(cfg *Config) error {
 		// The error already names its key under gateways.telegram.
 		return err
 	}
+	cfg.Gateways.Pachca.Normalize()
+	if err := cfg.Gateways.Pachca.Validate(); err != nil {
+		return err
+	}
 	if err := cfg.HTTPServer.Validate(); err != nil {
 		return fmt.Errorf("httpserver: %w", err)
 	}
@@ -195,6 +199,8 @@ func applyDefaults(cfg *Config) {
 
 	cfg.Gateways.Telegram.Normalize()
 	cfg.Gateways.Telegram.ApplyDefaults()
+	cfg.Gateways.Pachca.Normalize()
+	cfg.Gateways.Pachca.ApplyDefaults()
 
 	cfg.HTTPServer.Normalize()
 

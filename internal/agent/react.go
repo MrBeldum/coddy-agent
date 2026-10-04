@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -30,6 +31,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/skills"
 	"github.com/EvilFreelancer/coddy-agent/internal/tooling"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools"
+	fstools "github.com/EvilFreelancer/coddy-agent/internal/tools/fs"
 	"github.com/EvilFreelancer/coddy-agent/internal/tools/todo"
 	toolweb "github.com/EvilFreelancer/coddy-agent/internal/tools/web"
 )
@@ -1780,6 +1782,15 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 	// operator may have switched the session to bypass from the previous
 	// call's dialog, and the rest of the batch runs under that.
 	env.PermissionMode = effectivePermMode(a.state, a.cfg)
+	env.Confined = false
+	if st := sessionStatePtr(a.state); st != nil {
+		if r := st.GetTurnRestriction(); r != nil {
+			env.Confined = r.ConfineToWorkspace
+			if err := checkRestrictedCall(r, tc, env.CWD, a.cfg); err != nil {
+				return "", err
+			}
+		}
+	}
 	env.ToolCallID = strings.TrimSpace(tc.ID)
 	a.currentToolCallID = env.ToolCallID
 	a.callImages = nil
@@ -1887,7 +1898,9 @@ func (a *Agent) executeToolCall(ctx context.Context, tc llm.ToolCall, env *tools
 	requiresPerm := ok && tool.RequiresPermission
 
 	var sessCmdGrants, sessWriteGrants, sessHTTPGrants []string
-	if st := sessionStatePtr(a.state); st != nil {
+	// A restricted turn is not the turn of whoever granted "always allow":
+	// the grants of the session stay with the people who gave them.
+	if st := sessionStatePtr(a.state); st != nil && (st.GetTurnRestriction() == nil || !st.GetTurnRestriction().AskAlways) {
 		sessCmdGrants = st.GetPermissionCommandGrants()
 		sessWriteGrants = st.GetPermissionWriteGrants()
 		sessHTTPGrants = st.GetPermissionHTTPGrants()
@@ -2804,10 +2817,52 @@ func configWriteTool(name string) bool {
 
 // effectivePermMode returns the session-level permission mode override, falling back to the config default.
 func effectivePermMode(state SessionState, cfg *config.Config) string {
+	// A restricted turn asks the surface before anything that needs approval:
+	// the surface knows who wrote the message, the session's mode does not.
+	if st := sessionStatePtr(state); st != nil {
+		if r := st.GetTurnRestriction(); r != nil && r.AskAlways {
+			return config.PermModeAsk
+		}
+	}
 	if m := state.EffectivePermissionMode(); m != "" {
 		return m
 	}
 	return cfg.Tools.ResolvedPermMode()
+}
+
+// checkRestrictedCall refuses a call the turn's restriction does not allow:
+// a tool outside its list, or a read outside the session's working directory
+// or inside the agent's home.
+func checkRestrictedCall(r *session.TurnRestriction, tc llm.ToolCall, cwd string, cfg *config.Config) error {
+	note := strings.TrimSpace(r.Note)
+	if note == "" {
+		note = "this tool is not available in this turn"
+	}
+	if !r.Allows(tc.Name) {
+		return fmt.Errorf("%s: %s", tc.Name, note)
+	}
+	if !r.ConfineToWorkspace {
+		return nil
+	}
+	paths := fstools.ToolCallPaths(tc.Name, tc.InputJSON, cwd)
+	if tc.Name == "glob" {
+		var a struct {
+			Pattern string `json:"pattern"`
+		}
+		if json.Unmarshal([]byte(tc.InputJSON), &a) == nil && (filepath.IsAbs(a.Pattern) || strings.HasPrefix(a.Pattern, "~") || strings.Contains(a.Pattern, "..")) {
+			paths = append(paths, a.Pattern)
+		}
+	}
+	home := ""
+	if cfg != nil {
+		home = cfg.Paths.Home
+	}
+	for _, p := range paths {
+		if !session.PathInWorkspace(p, cwd, home) {
+			return fmt.Errorf("%s: %s (%s is outside the session's working directory)", tc.Name, note, p)
+		}
+	}
+	return nil
 }
 
 // extractCommand parses the "command" field from run_command JSON args.

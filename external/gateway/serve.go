@@ -108,3 +108,23 @@ func Fingerprint(c *config.Config) string {
 	sum.Write([]byte(tg.EffectiveToken()))
 	return hex.EncodeToString(sum.Sum(nil))
 }
+
+// PachcaFingerprint is everything a rebuilt Pachca bot would read
+// differently: the whole Pachca block and the token it resolves to, hashed
+// for the reasons Fingerprint gives. It is apart from the Telegram one, so a
+// change to either bot rebuilds that bot alone.
+func PachcaFingerprint(c *config.Config) string {
+	if c == nil {
+		return ""
+	}
+	pc := c.Gateways.Pachca
+	raw, err := json.Marshal(pc)
+	if err != nil {
+		return "unmarshalable"
+	}
+	sum := sha256.New()
+	sum.Write(raw)
+	sum.Write([]byte{0})
+	sum.Write([]byte(pc.EffectiveToken()))
+	return hex.EncodeToString(sum.Sum(nil))
+}

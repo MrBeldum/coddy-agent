@@ -12,9 +12,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf16"
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/access"
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/proxyutil"
+	"github.com/EvilFreelancer/coddy-agent/external/gateway/replyquote"
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/sessionstore"
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
@@ -238,7 +240,8 @@ func helpText(cfg *config.TelegramGatewayConfig, botName string) string {
 		app +
 		"/clear — start a new session (forgets previous context)\n" +
 		"/help — show this message\n\n" +
-		"In group chats mention me (@" + botName + ") or reply to my message to talk to me."
+		"Reply to a message to ask about it.\n" +
+		"In group chats mention me (@" + botName + ") or reply to my message to talk to me; commands there need the mention too (/clear@" + botName + ")."
 }
 
 // apiEndpointSuffix is the path template the Bot API library formats the
@@ -329,9 +332,15 @@ func (b *Bot) dispatch(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.
 	}
 	b.mu.Unlock()
 
+	// A queued message counts as in flight from here, so a stop waits for it
+	// as well as for the turn running ahead of it: Telegram already
+	// confirmed its update. Only this goroutine dispatches, and it is the one
+	// that waits at a stop, so the count never grows during that wait.
+	b.inFlight.Add(1)
 	select {
 	case ch <- workerJob{bot: bot, msg: msg, key: key}:
 	default:
+		b.inFlight.Done()
 		b.log.Debug("telegram: update rejected", "reason", "worker queue full", "key", key, "cap", workerQueueCap)
 		b.reply(bot, chatID, msg.MessageID, "⏳ Still processing your previous message, please wait.")
 	}
@@ -346,16 +355,25 @@ func (b *Bot) sessionWorker(ctx context.Context, ch chan workerJob) {
 			if !ok {
 				return
 			}
-			b.inFlight.Add(1)
 			b.processMessage(ctx, job.bot, job.msg, job.key)
 			b.inFlight.Done()
 		case <-ctx.Done():
-			return
+			// The stop waited as long as it could: what is still queued is
+			// let go, and no longer counted.
+			for {
+				select {
+				case <-ch:
+					b.inFlight.Done()
+				default:
+					return
+				}
+			}
 		}
 	}
 }
 
 func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.Message, key string) {
+	msg = commandAfterMention(msg, b.botName)
 	userID := msg.From.ID
 	chatID := msg.Chat.ID
 	text := strings.TrimSpace(msg.Text)
@@ -371,6 +389,18 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 			"user", userID,
 			"chat", chatID,
 		)
+	}
+	// A group shares the bot with many people: what changes the session's
+	// settings, or replaces the conversation, is the admins' to do. /resume
+	// reaches every session the server keeps, so it is theirs in any chat.
+	// The command may follow the bot's mention ("@bot /think"), which Telegram
+	// does not mark as a command: the words after the mention count too.
+	leading := leadingCommand(stripMention(text, b.botName), b.botName)
+	textChangesSettings := changesSettings(msg) || commandChangesSettings(leading)
+	if ((isGroupChat(msg.Chat) && textChangesSettings) || isCommand(msg, "resume") || leading == "resume") && !b.cfg.IsAdmin(userID) {
+		b.log.Debug("telegram: update refused", "reason", "admin-only command", "user", userID, "chat", chatID)
+		b.reply(bot, chatID, msg.MessageID, adminOnlyNote)
+		return
 	}
 	if isCommand(msg, "clear") {
 		oldID := b.store.Get(key)
@@ -421,16 +451,25 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	}
 
 	// Strip @mention prefix if present.
-	text = stripMention(text, b.botName)
-	if strings.TrimSpace(text) == "" {
+	text = strings.TrimSpace(stripMention(text, b.botName))
+	// A reply asks about the message it answers: the session receives that
+	// message quoted in front of what the person wrote, and a mention alone
+	// under a reply asks about the quoted message. A settings command is not
+	// quoted - the manager reads it off the start of the text.
+	author, quoted := replyContext(msg.ReplyToMessage)
+	if text == "" && quoted == "" {
 		return
+	}
+	if !isSettingsCommand(msg) {
+		text = replyquote.Prompt(author, quoted, text)
 	}
 
 	// A typed "/model <id>" is a session-scoped pick on this surface even
 	// though the manager applies it inside the turn: the gateway remembers it
 	// like a keyboard tap (turn-scoped forms live in line.Turns and never
-	// reach this).
-	if line, err := session.ParseSettingsCommands(text); err == nil && line.Session.Model != nil {
+	// reach this) - when an admin typed it, since the remembered model is
+	// what every fresh chat of the bot starts on.
+	if line, err := session.ParseSettingsCommands(text); err == nil && line.Session.Model != nil && b.cfg.IsAdmin(userID) {
 		if id := strings.TrimSpace(*line.Session.Model); b.runner.Cfg().FindModelEntry(id) != nil {
 			b.store.SetLastModel(id)
 		}
@@ -480,6 +519,14 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 		draftID:    b.draftSeq.Add(1),
 	})
 	sender.pictures = st
+	// Somebody who is not the bot's admin gets the conversation and nothing
+	// that changes the agent: the turn refuses the tools that would, and the
+	// chat approves nothing it is asked about.
+	var restriction *session.TurnRestriction
+	if !b.cfg.IsAdmin(userID) {
+		restriction = access.NonAdminTurn()
+		sender.refuseApprovals = true
+	}
 
 	// Anything else in this process that can show a session follows along.
 	// The chat stays in charge: permission prompts and questions never leave
@@ -494,6 +541,7 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	}, mirrored, &session.PromptRunOpts{
 		SkipUsagePublish:    true,
 		SurfaceSystemPrompt: surfaceSystemPrompt(rich),
+		Restriction:         restriction,
 	})
 	sender.Flush()
 
@@ -529,18 +577,31 @@ func (b *Bot) chatSender(bot *tgbotapi.BotAPI, chatID int64, replyTo int, rich r
 	return s
 }
 
-// shouldRespond checks whether the bot should process a group message.
-// It responds to: built-in commands, direct @-mentions, and replies to the bot.
-func (b *Bot) shouldRespond(msg *tgbotapi.Message, text string) bool {
-	if msg.IsCommand() {
-		switch strings.ToLower(msg.Command()) {
-		case "clear", "start", "help", "model", "mcp", "context", "resume", "app":
-			return true
-		}
-		if isSettingsCommand(msg) {
-			return true
+// replyContext is the author and the text of the message msg replies to,
+// empty when it replies to none or to one without text (the service message
+// that opens a forum topic, a sticker).
+func replyContext(msg *tgbotapi.Message) (author, text string) {
+	if msg == nil {
+		return "", ""
+	}
+	text = msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
+	if msg.From != nil {
+		author = strings.TrimSpace(msg.From.FirstName + " " + msg.From.LastName)
+		if author == "" && msg.From.UserName != "" {
+			author = "@" + msg.From.UserName
 		}
 	}
+	return author, text
+}
+
+// shouldRespond checks whether the bot should process a group message. A
+// group is where many people talk, so only a mention of the bot or a reply to
+// one of its messages is for it; a command needs the mention too, which
+// Telegram writes as /command@botname.
+func (b *Bot) shouldRespond(msg *tgbotapi.Message, text string) bool {
 	if strings.Contains(text, "@"+b.botName) {
 		return true
 	}
@@ -548,6 +609,81 @@ func (b *Bot) shouldRespond(msg *tgbotapi.Message, text string) bool {
 		return true
 	}
 	return false
+}
+
+// adminOnlyNote answers a group member who is not an admin and tried to
+// change the settings.
+const adminOnlyNote = "Only the bot's admins can change settings in this chat."
+
+// isGroupChat reports whether chat is shared by several people.
+func isGroupChat(chat *tgbotapi.Chat) bool {
+	return chat != nil && (chat.IsGroup() || chat.IsSuperGroup() || chat.IsChannel())
+}
+
+// changesSettings reports whether msg changes the session's settings or
+// replaces the conversation: a settings command, /model, /clear, /resume.
+func changesSettings(msg *tgbotapi.Message) bool {
+	if !msg.IsCommand() {
+		return false
+	}
+	switch strings.ToLower(msg.Command()) {
+	case "model", "clear", "resume":
+		return true
+	}
+	return isSettingsCommand(msg)
+}
+
+// commandAfterMention turns "@bot /command args" into the command Telegram
+// would have marked had the mention not come first, so every check and
+// handler reads both forms the same: the filter of unknown commands and of
+// /permissions, the admin-only commands, the quote a reply would add.
+func commandAfterMention(msg *tgbotapi.Message, botName string) *tgbotapi.Message {
+	if msg == nil || msg.IsCommand() || botName == "" {
+		return msg
+	}
+	text := strings.TrimSpace(msg.Text)
+	stripped := stripMention(text, botName)
+	if stripped == text || leadingCommand(stripped, botName) == "" {
+		return msg
+	}
+	word := strings.Fields(stripped)[0]
+	out := *msg
+	out.Text = stripped
+	out.Entities = []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len(utf16.Encode([]rune(word)))}}
+	return &out
+}
+
+// leadingCommand is the lower-case command word text starts with ("/think",
+// "/model@botname x"), without the slash and the bot's name, or "".
+func leadingCommand(text, botName string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return ""
+	}
+	word := strings.Fields(text[1:])
+	if len(word) == 0 {
+		return ""
+	}
+	cmd := strings.ToLower(word[0])
+	if at := strings.IndexByte(cmd, '@'); at >= 0 {
+		if !strings.EqualFold(cmd[at+1:], botName) {
+			return ""
+		}
+		cmd = cmd[:at]
+	}
+	return cmd
+}
+
+// commandChangesSettings is changesSettings for a command word.
+func commandChangesSettings(cmd string) bool {
+	switch cmd {
+	case "":
+		return false
+	case "model", "clear", "resume":
+		return true
+	}
+	sc, ok := session.LookupSettingsCommand(cmd)
+	return ok && sc.Setting != session.SettingPermissionMode
 }
 
 // isSettingsCommand reports whether msg starts with a settings command the

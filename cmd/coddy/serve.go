@@ -83,7 +83,7 @@ func runServe(args []string) error {
 	swarmInsecure := fs.Bool("swarm-allow-insecure", false, "permit binding the relay off loopback without a client token")
 
 	httpOn := fs.Bool("http", true, "run the HTTP API in this process; overrides httpserver.enable")
-	gatewayOn := fs.Bool("gateway", false, "run the messenger gateway; overrides gateways.*.enable")
+	gatewayOn := fs.Bool("gateway", false, "run the Telegram bot; overrides gateways.telegram.enable (the Pachca bot follows gateways.pachca.enable)")
 	swarmOn := fs.Bool("swarm", false, "run the swarm relay; overrides swarm.enable")
 	schedulerOn := fs.Bool("scheduler", false, "run the cron scheduler; overrides scheduler.enable")
 
@@ -515,7 +515,7 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			Kind:          serve.KindGateway,
 			ConfigKey:     "gateways.telegram.enable",
 			BuildTag:      "gateway",
-			Available:     gateway.Available,
+			Available:     gateway.TelegramAvailable,
 			NeedsSessions: true,
 			Enabled:       func(c *config.Config) bool { return c.Gateways.Telegram.Enabled },
 			// A bot is a client of somebody else's server, so it can be rebuilt
@@ -523,12 +523,29 @@ func subsystems(rt *serve.Runtime, deps subsystemDeps) []serve.Subsystem {
 			// takes effect without anyone reaching the machine.
 			Fingerprint: gateway.Fingerprint,
 			Run: func(ctx context.Context, cfg *config.Config) error {
-				return gateway.Serve(ctx, gateway.Options{
+				return gateway.ServeTelegram(ctx, gateway.Options{
 					Cfg: cfg, Mgr: rt.Mgr, Log: rt.Log,
 					DefaultCWD: rt.Paths.CWD, Mirror: rt, Prompts: rt, Wakes: rt,
 					WebUI: func(c *config.Config) gateway.WebUIAccess {
 						return webUIAccess(c, len(deps.httpAuthTokens) > 0, deps.httpLogin.IsSet())
 					},
+				})
+			},
+		},
+		{
+			// The Pachca bot is a surface of its own, so a token rotated for
+			// it rebuilds this bot alone and the Telegram one keeps running.
+			Kind:          serve.KindGatewayPachca,
+			ConfigKey:     "gateways.pachca.enable",
+			BuildTag:      "gateway",
+			Available:     gateway.PachcaAvailable,
+			NeedsSessions: true,
+			Enabled:       func(c *config.Config) bool { return c.Gateways.Pachca.Enabled },
+			Fingerprint:   gateway.PachcaFingerprint,
+			Run: func(ctx context.Context, cfg *config.Config) error {
+				return gateway.ServePachca(ctx, gateway.Options{
+					Cfg: cfg, Mgr: rt.Mgr, Log: rt.Log,
+					DefaultCWD: rt.Paths.CWD, Mirror: rt, Prompts: rt, Wakes: rt,
 				})
 			},
 		},
@@ -678,6 +695,8 @@ func printServeBanner(cfg *config.Config, enabled []serve.Subsystem, httpAddr, s
 			fmt.Fprintf(os.Stderr, "  swarm       %s://%s  (relay)\n", scheme, swarmAddr)
 		case serve.KindGateway:
 			fmt.Fprintf(os.Stderr, "  gateway     telegram\n")
+		case serve.KindGatewayPachca:
+			fmt.Fprintf(os.Stderr, "  gateway     pachca\n")
 		case serve.KindScheduler:
 			fmt.Fprintf(os.Stderr, "  scheduler   %s\n", cfg.Scheduler.Dir)
 		}

@@ -52,6 +52,8 @@ func (w *subagentPermissionWorld) reset() {
 	runner := newStubRunner(&config.Config{})
 	w.bot = New(&config.TelegramGatewayConfig{
 		Enabled: true, Token: "t", DefaultAccess: config.AccessAll, DefaultIsolation: config.IsolationIndividual,
+		// Approving what a subagent asks is an admin's.
+		Admins: []int64{permissionUserID},
 	}, runner, "", slog.New(slog.DiscardHandler), "", nil)
 	w.bot.setAPI(w.f.api)
 	w.isGroup = false

@@ -34,6 +34,10 @@ export const messagesEn: Record<string, string> = {
   "auth.signIn.notKept":
     "The server accepted the sign-in, but this browser did not keep it in this frame, because the page is embedded in another site such as Telegram Web.",
   "auth.signIn.openInTab": "Open Coddy in a tab of its own",
+  "auth.signIn.telegramNotAdmin":
+    "Only the bot's admins can open Coddy from Telegram.",
+  "auth.signIn.telegramRetry":
+    "Telegram's sign-in did not go through. Close the Mini App and open it again.",
   "auth.signOut.action": "Sign out",
   "auth.signOut.tooltipUser": "Sign out ({user})",
 
@@ -224,7 +228,7 @@ export const messagesEn: Record<string, string> = {
   "settings.section.logger.label": "Logger",
   "settings.section.logger.desc": "Level, outputs, rotation",
   "settings.section.gateways.label": "Gateways",
-  "settings.section.gateways.desc": "Telegram bot",
+  "settings.section.gateways.desc": "Telegram and Pachca bots",
   "settings.group.agent.turn": "Model and turns",
   "settings.group.agent.retries": "Retries",
   "settings.group.agent.timeouts": "Stream timeouts",
@@ -751,6 +755,52 @@ export const messagesEn: Record<string, string> = {
     "Per-chat session isolation override.",
   "settings.schema.gateways.telegram.chats.access.label": "Access",
   "settings.schema.gateways.telegram.chats.access.desc":
+    "Per-chat access override: all, admins, or group:<name>.",
+  "settings.schema.gateways.pachca.label": "Pachca",
+  "settings.schema.gateways.pachca.desc": "Pachca integration bot settings.",
+  "settings.schema.gateways.pachca.enable.label": "Enabled",
+  "settings.schema.gateways.pachca.enable.desc":
+    "Run the Pachca bot (requires the gateway or gateway.pachca build tag).",
+  "settings.schema.gateways.pachca.token.label": "Bot token",
+  "settings.schema.gateways.pachca.token.desc":
+    "The access token of a Pachca integration bot. Optional here: leave empty to read it from the PACHCA_BOT_TOKEN environment variable (e.g. via .env). Secret: when set it is stored in config.yaml and shown in full.",
+  "settings.schema.gateways.pachca.proxy.label": "Proxy URL",
+  "settings.schema.gateways.pachca.proxy.desc":
+    "Optional proxy for the Pachca API requests: http:// or https:// for an HTTP proxy, socks5:// or socks5h:// for SOCKS5. A URL here replaces the system proxy for the bot. Left empty, the bot follows the system proxy (HTTPS_PROXY, HTTP_PROXY, NO_PROXY).",
+  "settings.schema.gateways.pachca.poll_interval_seconds.label":
+    "Poll interval, seconds",
+  "settings.schema.gateways.pachca.poll_interval_seconds.desc":
+    "How often the bot reads its events history, 1 to 60 seconds (default 2).",
+  "settings.schema.gateways.pachca.admins.label": "Admins",
+  "settings.schema.gateways.pachca.admins.desc":
+    "Pachca user IDs with elevated rights; admins always pass access checks.",
+  "settings.schema.gateways.pachca.default_access.label": "Default access",
+  "settings.schema.gateways.pachca.default_access.desc":
+    "Fallback access level for chats without an override: all, admins, or group:<name>.",
+  "settings.schema.gateways.pachca.default_isolation.label":
+    "Default isolation",
+  "settings.schema.gateways.pachca.default_isolation.desc":
+    "Fallback session isolation for group chats.",
+  "settings.schema.gateways.pachca.user_groups.label": "User groups",
+  "settings.schema.gateways.pachca.user_groups.desc":
+    "Named sets of user IDs referenced by access as group:<name>.",
+  "settings.schema.gateways.pachca.user_groups.name.label": "Group name",
+  "settings.schema.gateways.pachca.user_groups.name.desc":
+    "Name referenced by access as group:<name>.",
+  "settings.schema.gateways.pachca.user_groups.user_ids.label": "User IDs",
+  "settings.schema.gateways.pachca.user_groups.user_ids.desc":
+    "Pachca user IDs that belong to this group.",
+  "settings.schema.gateways.pachca.chats.label": "Per-chat overrides",
+  "settings.schema.gateways.pachca.chats.desc":
+    "Override isolation and access for specific chats.",
+  "settings.schema.gateways.pachca.chats.chat_id.label": "Chat ID",
+  "settings.schema.gateways.pachca.chats.chat_id.desc":
+    "Pachca chat id: a conversation, a channel, a direct chat or a thread's own chat.",
+  "settings.schema.gateways.pachca.chats.isolation.label": "Isolation",
+  "settings.schema.gateways.pachca.chats.isolation.desc":
+    "Per-chat session isolation override.",
+  "settings.schema.gateways.pachca.chats.access.label": "Access",
+  "settings.schema.gateways.pachca.chats.access.desc":
     "Per-chat access override: all, admins, or group:<name>.",
 
   "settings.combobox.toggleAria": "Toggle options",

@@ -6,6 +6,7 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/external/gateway"
 	"github.com/EvilFreelancer/coddy-agent/external/httpserver"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
+	"github.com/EvilFreelancer/coddy-agent/internal/serve"
 )
 
 // A relay reads its settings when it starts, so the supervisor rebuilds it on
@@ -76,6 +77,65 @@ func TestOfferNewestNeverDropsTheConfigurationItHandsOver(t *testing.T) {
 		default:
 			t.Fatalf("round %d: the supervisor took the older configuration and the newer one was dropped", i)
 		}
+	}
+}
+
+// TestGatewayFingerprintsAreIndependent holds the two bots to their own
+// settings: a Pachca token rotated from the settings screen rebuilds the
+// Pachca bot and leaves the Telegram one running, and the other way round.
+func TestGatewayFingerprintsAreIndependent(t *testing.T) {
+	base := func() *config.Config {
+		c := &config.Config{}
+		c.Gateways.Telegram = config.TelegramGatewayConfig{Enabled: true, Token: "tg"}
+		c.Gateways.Pachca = config.PachcaGatewayConfig{Enabled: true, Token: "pc"}
+		return c
+	}
+	tg, pc := gateway.Fingerprint(base()), gateway.PachcaFingerprint(base())
+
+	moved := base()
+	moved.Gateways.Pachca.Token = "pc2"
+	moved.Gateways.Pachca.PollIntervalSeconds = 5
+	moved.Gateways.Pachca.Chats = []config.GatewayChatConfig{{ChatID: 1, Access: config.AccessAdmins}}
+	if gateway.Fingerprint(moved) != tg {
+		t.Fatal("a Pachca change moved the Telegram fingerprint")
+	}
+	if gateway.PachcaFingerprint(moved) == pc {
+		t.Fatal("a Pachca change did not move the Pachca fingerprint")
+	}
+
+	moved = base()
+	moved.Gateways.Telegram.Token = "tg2"
+	if gateway.PachcaFingerprint(moved) != pc {
+		t.Fatal("a Telegram change moved the Pachca fingerprint")
+	}
+	if gateway.PachcaFingerprint(nil) != "" {
+		t.Fatal("a nil config has a fingerprint")
+	}
+}
+
+// TestServeRunsThePachcaBotAsASubsystemOfItsOwn names the descriptor the
+// supervisor refuses by name in a build without the tag.
+func TestServeRunsThePachcaBotAsASubsystemOfItsOwn(t *testing.T) {
+	var found bool
+	for _, sub := range subsystems(nil, subsystemDeps{}) {
+		if sub.Kind != serve.KindGatewayPachca {
+			continue
+		}
+		found = true
+		if sub.ConfigKey != "gateways.pachca.enable" || sub.BuildTag != "gateway" || !sub.NeedsSessions {
+			t.Fatalf("pachca subsystem descriptor: %+v", sub)
+		}
+		c := &config.Config{}
+		if sub.Enabled(c) {
+			t.Fatal("pachca enabled by an empty config")
+		}
+		c.Gateways.Pachca.Enabled = true
+		if !sub.Enabled(c) {
+			t.Fatal("gateways.pachca.enable does not enable the subsystem")
+		}
+	}
+	if !found {
+		t.Fatal("no pachca subsystem")
 	}
 }
 

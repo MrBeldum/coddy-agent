@@ -84,7 +84,8 @@ way through the gate:
 |---|---|
 | **`GET /coddy/auth/me`** | `login_required`, `auth_required`, `authenticated`, and `user` / `expires_at` for a signed-in browser. The SPA calls it on boot to choose between the sign-in screen and the app. |
 | **`POST /coddy/auth/login`** | `{user, password}`. On success sets an `HttpOnly`, `SameSite=Strict` `coddy_session_<host digest>` cookie (`Secure` when the request arrived over TLS or through a proxy sending `X-Forwarded-Proto: https`), living for `session_ttl_hours`; with `0` the browser drops it on close and the server expires its own record after 30 days. The name carries a digest of the host the request was addressed to, because cookies are not scoped by port: without it two Coddy servers on one machine - a relay and the node behind it, say - would sign each other out at every login. |
-| **`POST /coddy/auth/logout`** | Drops the session on the server and expires the cookie. Idempotent. |
+| **`POST /coddy/auth/telegram`** | `{init_data}`: the launch data of the web UI opened as the Telegram bot's Mini App. The signature is checked against the bot's token (launch data at most an hour old, each launch once), and only a user in `gateways.telegram.admins` is signed in: an HttpOnly, `SameSite=Strict` `coddy_tg_session_<host digest>` cookie that opens what the form's cookie opens, also behind a token-only gate, and ends when the token changes, the bot is disabled or the person stops being an admin. 403 for anybody else. `GET /coddy/auth/me` says `telegram_login: true` when the route is available. |
+| **`POST /coddy/auth/logout`** | Drops the session on the server and expires the cookie (the Mini App's too). Idempotent. |
 
 Once signed in, the cookie opens every `/v1/*` and `/coddy/*` route, the SSE streams included - a
 same-origin `EventSource` sends cookies, so no `?access_token=` is needed. The cookie is
