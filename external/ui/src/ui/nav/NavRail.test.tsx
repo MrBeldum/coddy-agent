@@ -307,7 +307,7 @@ describe("NavRail on a phone: the More menu", () => {
   }
 
   function signIn() {
-    setAuthState({ loginRequired: true, authRequired: true, authenticated: true, user: "demo", loaded: true });
+    setAuthState({ loginRequired: true, authRequired: true, authenticated: true, user: "demo", telegramRefused: false, loaded: true });
     restore.push(() => resetAuthStateForTests());
   }
 

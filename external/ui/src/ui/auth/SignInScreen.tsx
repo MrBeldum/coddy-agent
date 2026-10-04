@@ -88,59 +88,84 @@ export function SignInScreen(props: { onSignedIn?: () => void }) {
           width={188}
           height={56}
         />
-        <form className="auth-card" onSubmit={submit}>
-          <h1 className="auth-title">{t("auth.signIn.title")}</h1>
-
-          <label className="auth-field">
-            <span className="auth-label">{t("auth.signIn.user")}</span>
-            <input
-              className="auth-input"
-              type="text"
-              name="username"
-              autoComplete="username"
-              autoFocus
-              value={user}
-              onChange={(e) => setUser(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-
-          <label className="auth-field">
-            <span className="auth-label">{t("auth.signIn.password")}</span>
-            <input
-              className="auth-input"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={busy}
-            />
-          </label>
-
-          {error ? (
-            <p className="auth-error" role="alert">
-              {error}
+        {snapshotAuth().telegramRefused && !snapshotAuth().loginRequired ? (
+          <div className="auth-card">
+            <p
+              className="auth-error"
+              role="alert"
+              data-testid="telegram-not-admin"
+            >
+              {t("auth.signIn.telegramNotAdmin")}
             </p>
-          ) : null}
+          </div>
+        ) : (
+          <form className="auth-card" onSubmit={submit}>
+            <h1 className="auth-title">{t("auth.signIn.title")}</h1>
+            {snapshotAuth().telegramRefused ? (
+              <p
+                className="auth-error"
+                role="alert"
+                data-testid="telegram-not-admin"
+              >
+                {t("auth.signIn.telegramNotAdmin")}
+              </p>
+            ) : null}
 
-          {notKept ? (
-            <p className="auth-error" role="alert">
-              {t("auth.signIn.notKept")}{" "}
-              <a href={window.location.href} target="_blank" rel="noopener noreferrer">
-                {t("auth.signIn.openInTab")}
-              </a>
-            </p>
-          ) : null}
+            <label className="auth-field">
+              <span className="auth-label">{t("auth.signIn.user")}</span>
+              <input
+                className="auth-input"
+                type="text"
+                name="username"
+                autoComplete="username"
+                autoFocus
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+                disabled={busy}
+              />
+            </label>
 
-          <button
-            className="auth-submit"
-            type="submit"
-            disabled={busy || user.trim() === "" || password === ""}
-          >
-            {busy ? t("auth.signIn.working") : t("auth.signIn.submit")}
-          </button>
-        </form>
+            <label className="auth-field">
+              <span className="auth-label">{t("auth.signIn.password")}</span>
+              <input
+                className="auth-input"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+
+            {error ? (
+              <p className="auth-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+
+            {notKept ? (
+              <p className="auth-error" role="alert">
+                {t("auth.signIn.notKept")}{" "}
+                <a
+                  href={window.location.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {t("auth.signIn.openInTab")}
+                </a>
+              </p>
+            ) : null}
+
+            <button
+              className="auth-submit"
+              type="submit"
+              disabled={busy || user.trim() === "" || password === ""}
+            >
+              {busy ? t("auth.signIn.working") : t("auth.signIn.submit")}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

@@ -30,6 +30,8 @@ export const messagesRu: Record<string, string> = {
   "auth.signIn.notKept":
     "Сервер принял вход, но браузер не сохранил его в этом фрейме, потому что страница встроена в другой сайт, например в Telegram Web.",
   "auth.signIn.openInTab": "Открыть Coddy в отдельной вкладке",
+  "auth.signIn.telegramNotAdmin":
+    "Открыть Coddy из Telegram могут только админы бота.",
   "auth.signOut.action": "Выйти",
   "auth.signOut.tooltipUser": "Выйти ({user})",
 

@@ -34,6 +34,8 @@ export const messagesEn: Record<string, string> = {
   "auth.signIn.notKept":
     "The server accepted the sign-in, but this browser did not keep it in this frame, because the page is embedded in another site such as Telegram Web.",
   "auth.signIn.openInTab": "Open Coddy in a tab of its own",
+  "auth.signIn.telegramNotAdmin":
+    "Only the bot's admins can open Coddy from Telegram.",
   "auth.signOut.action": "Sign out",
   "auth.signOut.tooltipUser": "Sign out ({user})",
 

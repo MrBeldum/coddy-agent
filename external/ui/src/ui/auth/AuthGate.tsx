@@ -40,7 +40,7 @@ export function AuthGate(props: { children: React.ReactNode }) {
     // a slow page.
     return <div className="auth-boot" aria-hidden />;
   }
-  if (state.loginRequired && !state.authenticated) {
+  if ((state.loginRequired || state.telegramRefused) && !state.authenticated) {
     return <SignInScreen />;
   }
   return <>{props.children}</>;

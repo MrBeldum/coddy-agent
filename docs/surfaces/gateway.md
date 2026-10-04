@@ -578,7 +578,17 @@ A group is where many people talk, so the bot **only responds** when explicitly 
 
 Commands follow the same rule: in a group a bot command or a settings command needs the mention, which Telegram writes as `/clear@coddy_agent_bot` (the command menu of a group inserts that form), or a reply to the bot's message. A bare `/clear` in a group is left to the people in it.
 
-What changes the settings is the admins' (`gateways.telegram.admins`) in a group: the settings commands (`/agent`, `/plan`, `/ask`, `/think`, `/nothink`, `/reasoning`, `/model <id>`), the `/model` menu and its taps, `/clear` and `/resume`. Anybody else gets *Only the bot's admins can change settings in this chat.* and nothing changes; in a private chat each person still changes their own session. The `/mcp` switches change the whole agent's configuration, so a tap on them is the admins' in every chat, and so is `/resume`, which reaches every session the server keeps, the operator's own included.
+### What somebody who is not an admin may do
+
+The bot sees who wrote every message, and its admins (`gateways.telegram.admins`) can do everything. Anybody else the access rules let in gets the conversation and nothing that changes the agent:
+
+- the turn refuses the tools that would change the whole agent or escape the conversation - `config_set`, `config_commit`, `config_revert`, `config_rollback`, `switch_model`, `spawn_agent`, `worktree_create` and the scheduler's tools - and the model is told why;
+- every call that needs approval (a shell command, a file write, an HTTP request) asks the bot, whatever the session's permission mode, and the bot refuses it;
+- a woken turn and a background subagent's request take the rights of whoever the conversation belongs to: a private chat's or an individual group session's person, never a shared group's.
+
+The tool definitions the model sees stay the same, so the provider's prompt cache holds across admins and everybody else in one shared session.
+
+What changes the settings is the admins' in a group: the settings commands (`/agent`, `/plan`, `/ask`, `/think`, `/nothink`, `/reasoning`, `/model <id>`), the `/model` menu and its taps, `/clear` and `/resume`. Anybody else gets *Only the bot's admins can change settings in this chat.* and nothing changes; in a private chat each person still changes their own session. The `/mcp` switches change the whole agent's configuration, so a tap on them is the admins' in every chat, and so is `/resume`, which reaches every session the server keeps, the operator's own included.
 
 When `isolation` is `admin`, the bot additionally ignores everyone who is not in the `admins` list.
 
@@ -822,6 +832,8 @@ gateways:
       url: https://coddy.example.com/
       menu_button: true     # the default
 ```
+
+Only the bot's admins (`gateways.telegram.admins`) open the web UI from the chat. The Mini App signs an admin in by its launch data, with no password: Telegram signs it with the bot's token, the server checks the signature, takes each launch once and at most an hour old, and opens a session of its own (`POST /coddy/auth/telegram`) that also works behind a token-only gate and ends when the token changes or the person stops being an admin. Anybody else who taps the menu button sees *Only the bot's admins can open Coddy from Telegram.* above the ordinary sign-in form (or alone, when the server has no form), and `/app` answers them the same way. The web UI is the whole agent; the chat is what everybody else gets.
 
 On every start the bot then points its menu button at `url`, labelled **Coddy**, and adds `/app` to its command list. `/app` answers with **Open in Coddy**: in a private chat a button that opens the chat's conversation as a Mini App (`url?session=<id>`), in a group an ordinary link to the same address, since Telegram allows Mini App buttons in private chats only. Before the chat has a conversation, the button opens the start screen.
 

@@ -78,6 +78,7 @@ describe("refreshAuthState", () => {
       authRequired: true,
       authenticated: true,
       user: "operator",
+      telegramRefused: false,
       loaded: true,
     });
     expect(snapshotAuth()).toEqual(state);
@@ -297,5 +298,62 @@ describe("installAuthUnauthorizedWatch", () => {
     unauthorizedCb?.();
     expect(seen).toHaveLength(0);
     stop();
+  });
+});
+
+describe("Telegram Mini App sign-in", () => {
+  afterEach(async () => {
+    const { resetTelegramLaunchForTests } = await import("../telegram/launch");
+    resetTelegramLaunchForTests();
+  });
+
+  async function openAsMiniApp(initData: string) {
+    const { captureTelegramLaunch } = await import("../telegram/launch");
+    window.history.replaceState(null, "", `/#tgWebAppData=${encodeURIComponent(initData)}&tgWebAppVersion=8.0`);
+    captureTelegramLaunch(window);
+  }
+
+  it("signs an admin in with the launch data before any form", async () => {
+    await openAsMiniApp("auth_date=1&user=%7B%22id%22%3A7%7D&hash=abc");
+    let signedIn = false;
+    respond = (url) => {
+      if (url === "/coddy/auth/telegram") {
+        signedIn = true;
+        return jsonResponse(200, { ok: true, user: "telegram:7" });
+      }
+      return jsonResponse(200, {
+        login_required: true,
+        auth_required: true,
+        authenticated: signedIn,
+        user: signedIn ? "telegram:7" : "",
+        telegram_login: true,
+      });
+    };
+    const state = await refreshAuthState();
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual([
+      "GET /coddy/auth/me",
+      "POST /coddy/auth/telegram",
+      "GET /coddy/auth/me",
+    ]);
+    expect(state.authenticated).toBe(true);
+    expect(state.telegramRefused).toBe(false);
+  });
+
+  it("remembers that somebody who is not an admin was refused, and asks once", async () => {
+    await openAsMiniApp("auth_date=1&user=%7B%22id%22%3A8%7D&hash=abc");
+    respond = (url) =>
+      url === "/coddy/auth/telegram"
+        ? jsonResponse(403, { error: "only the bot's admins can open Coddy here" })
+        : jsonResponse(200, { login_required: false, auth_required: true, authenticated: false, telegram_login: true });
+    const state = await refreshAuthState();
+    expect(state.telegramRefused).toBe(true);
+    await refreshAuthState();
+    expect(seen.filter((s) => s.url === "/coddy/auth/telegram")).toHaveLength(1);
+  });
+
+  it("does nothing outside a Mini App", async () => {
+    respond = () => jsonResponse(200, { login_required: true, auth_required: true, authenticated: false, telegram_login: true });
+    await refreshAuthState();
+    expect(seen.some((s) => s.url === "/coddy/auth/telegram")).toBe(false);
   });
 });

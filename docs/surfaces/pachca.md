@@ -99,6 +99,10 @@ The banner names the bot (`gateway     pachca`), and the log says `pachca bot co
 
 In a group chat a command needs the bot's mention (`@nickname /clear`) or a reply to its message, and what changes the settings - the settings commands, `/model` and its buttons, `/clear` - is the admins' (`admins`): anybody else is answered *Only the bot's admins can change settings in this chat.* In a direct chat each person changes their own session. `/permissions` is not taken from a chat: the bot approves its own agent's requests itself.
 
+## What somebody who is not an admin may do
+
+The bot sees who wrote every message. Its admins (`admins`) can do everything; anybody else gets the conversation and nothing that changes the agent: the config, `switch_model`, subagent, worktree and scheduler tools are refused, and every call that needs approval is asked about and refused, whatever the session's permission mode - the same rule as the Telegram bot ([What somebody who is not an admin may do](gateway.md#what-somebody-who-is-not-an-admin-may-do)). A woken turn and a background subagent's request take the rights of the conversation's owner. Pachca has no web UI entry: the chat is the whole surface.
+
 ## Answers, limits and formatting
 
 The answer is posted as one message at its first words and edited in place at most every two seconds while it is written, with the running tool's name under it; at the end the message is replaced by the full answer. Edits do not count against Pachca's limit of messages per chat. An answer longer than one message continues in further messages, and a piece Pachca refuses as too long is split again.
@@ -109,7 +113,7 @@ A short rate limit (`429` with a pause up to a minute) is waited out. The daily 
 
 ## Permissions and woken turns
 
-The chat's own agent is allowed what it asks, like in Telegram: the operator configured the bot deliberately. A subagent whose definition narrows what it may do asks in the chat with **Allow** and **Reject** buttons, and only somebody whose session in that chat is the one that asked can answer: the person themselves, or anyone in a group chat whose isolation is `shared` (or an admin under `admin`), since they share that session. A background subagent asks the same way after the turn ended. A background task the agent started with `notify_on_finish` wakes the conversation when it ends, and the woken turn runs in the chat it belongs to: a note says what woke the agent, then the answer follows.
+An admin's own agent is allowed what it asks, like in Telegram: the operator configured the bot deliberately; for anybody else nothing is approved (above). A subagent whose definition narrows what it may do asks in the chat with **Allow** and **Reject** buttons, and only somebody whose session in that chat is the one that asked can answer: the person themselves, or anyone in a group chat whose isolation is `shared` (or an admin under `admin`), since they share that session. A background subagent asks the same way after the turn ended. A background task the agent started with `notify_on_finish` wakes the conversation when it ends, and the woken turn runs in the chat it belongs to: a note says what woke the agent, then the answer follows.
 
 ## What is not supported
 
