@@ -31,7 +31,9 @@ func (b *Bot) RunBackgroundWake(ctx context.Context, wake agent.Wake) (bool, err
 	if !ok {
 		return false, nil
 	}
-	b.inFlight.Add(1)
+	if !b.beginTurn() {
+		return false, nil
+	}
 	defer b.inFlight.Done()
 	return true, b.runWokenTurn(ctx, c, target, wake)
 }

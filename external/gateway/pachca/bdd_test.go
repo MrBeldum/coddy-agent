@@ -54,6 +54,8 @@ type scriptRunner struct {
 	sessions []string
 	perm     *permissionScript
 	answered []string
+	// gate, when set, holds every turn until a value arrives.
+	gate chan struct{}
 }
 
 func newScriptRunner() *scriptRunner {
@@ -91,7 +93,11 @@ func (r *scriptRunner) HandleSessionPromptWithSender(ctx context.Context, params
 	r.sessions = append(r.sessions, params.SessionID)
 	answer := r.answer
 	perm := r.perm
+	gate := r.gate
 	r.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
 
 	if opts != nil && opts.BackgroundWake != nil {
 		_ = sender.SendSessionUpdate(params.SessionID, acp.BackgroundWakeUpdate{

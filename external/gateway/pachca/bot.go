@@ -279,11 +279,13 @@ func (b *Bot) drain() {
 }
 
 // enqueue hands a message to the worker of its session key. It reports false
-// when the bot is stopping: the event then stays in the history.
+// when the bot is stopping: the event then stays in the history. A queued
+// message counts as in flight from here, so a stop waits for it as well as
+// for the turn running ahead of it: its event is already gone.
 func (b *Bot) enqueue(ctx context.Context, in inbound, key string) (accepted, queued bool) {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.stopping {
-		b.mu.Unlock()
 		return false, false
 	}
 	ch, ok := b.workers[key]
@@ -292,24 +294,45 @@ func (b *Bot) enqueue(ctx context.Context, in inbound, key string) (accepted, qu
 		b.workers[key] = ch
 		go b.sessionWorker(ctx, ch)
 	}
-	b.mu.Unlock()
+	b.inFlight.Add(1)
 	select {
 	case ch <- workerJob{in: in, key: key}:
 		return true, true
 	default:
+		b.inFlight.Done()
 		return true, false
 	}
+}
+
+// beginTurn counts a turn that did not come through a queue (a woken one) as
+// in flight, unless the bot is stopping.
+func (b *Bot) beginTurn() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.stopping {
+		return false
+	}
+	b.inFlight.Add(1)
+	return true
 }
 
 func (b *Bot) sessionWorker(ctx context.Context, ch chan workerJob) {
 	for {
 		select {
 		case job := <-ch:
-			b.inFlight.Add(1)
 			b.processMessage(ctx, job.in, job.key)
 			b.inFlight.Done()
 		case <-ctx.Done():
-			return
+			// The stop waited as long as it could: what is still queued
+			// is let go, and no longer counted.
+			for {
+				select {
+				case <-ch:
+					b.inFlight.Done()
+				default:
+					return
+				}
+			}
 		}
 	}
 }

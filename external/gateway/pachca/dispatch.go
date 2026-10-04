@@ -74,8 +74,7 @@ func (b *Bot) handleEvent(ctx, turnCtx context.Context, c *Client, e Event) bool
 			b.log.Debug("pachca: event ignored", "reason", "bad button payload", "event", e.ID)
 			return true
 		}
-		b.handleButton(turnCtx, c, p)
-		return true
+		return b.handleButton(turnCtx, c, p)
 	case kind.Type == "message":
 		var p messagePayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -98,11 +97,17 @@ func (b *Bot) handleMessage(ctx, turnCtx context.Context, c *Client, p messagePa
 		b.posted.add(p.ID)
 		return true
 	}
-	if !b.seen.add("m:" + strconv.FormatInt(p.ID, 10)) {
+	seenKey := "m:" + strconv.FormatInt(p.ID, 10)
+	if b.seen.has(seenKey) {
 		b.log.Debug("pachca: event ignored", "reason", "message delivered twice", "message", p.ID)
 		return true
 	}
-	isGroup := b.isGroup(ctx, c, p.ChatID)
+	isGroup, err := b.isGroup(ctx, c, p.ChatID, p.EntityType)
+	if err != nil {
+		// Read again on the next pass rather than drop a message that may
+		// well be for the bot.
+		return false
+	}
 	b.log.Debug("pachca: update",
 		"kind", "message",
 		"user", p.UserID,
@@ -121,7 +126,13 @@ func (b *Bot) handleMessage(ctx, turnCtx context.Context, c *Client, p messagePa
 		b.log.Debug("pachca: update ignored", "reason", "unknown command", "command", in.command)
 		return true
 	}
-	if isGroup && !b.addressed(ctx, c, p) {
+	addressed := true
+	if isGroup {
+		if addressed, err = b.addressed(ctx, c, p); err != nil {
+			return false
+		}
+	}
+	if !addressed {
 		b.log.Debug("pachca: update ignored", "reason", "not addressed to the bot", "user", p.UserID, "chat", p.ChatID)
 		return true
 	}
@@ -135,9 +146,10 @@ func (b *Bot) handleMessage(ctx, turnCtx context.Context, c *Client, p messagePa
 	if !accepted {
 		return false
 	}
+	b.seen.add(seenKey)
 	if !queued {
 		b.log.Debug("pachca: update rejected", "reason", "worker queue full", "key", key, "cap", workerQueueCap)
-		b.reply(ctx, c, b.answerTarget(in), b.replyParent(in), "Still working on your previous message, please wait.")
+		b.reply(ctx, c, b.answerTarget(in), b.replyParent(in), "Too many messages are waiting for an answer here; this one was not taken. Send it again once I have answered.")
 	}
 	return true
 }
@@ -160,32 +172,39 @@ func (b *Bot) allowed(chatID, userID int64, isGroup bool) bool {
 // where many people talk, so only a mention of the bot or a reply to one of
 // its messages is: a command without either, or a message in a thread under
 // the bot's message, is left to the people in it.
-func (b *Bot) addressed(ctx context.Context, c *Client, p messagePayload) bool {
+func (b *Bot) addressed(ctx context.Context, c *Client, p messagePayload) (bool, error) {
 	if mentions(p.Content, b.nickname, b.selfID) {
-		return true
+		return true, nil
 	}
-	return p.ParentMessageID != nil && b.wroteMessage(ctx, c, *p.ParentMessageID)
+	if p.ParentMessageID == nil {
+		return false, nil
+	}
+	return b.wroteMessage(ctx, c, *p.ParentMessageID)
 }
 
 // wroteMessage reports whether the bot wrote message id: from memory, or by
-// reading the message once.
-func (b *Bot) wroteMessage(ctx context.Context, c *Client, id int64) bool {
+// reading the message once. A read that failed for a passing reason is an
+// error, so the event is read again.
+func (b *Bot) wroteMessage(ctx context.Context, c *Client, id int64) (bool, error) {
 	if id == 0 {
-		return false
+		return false, nil
 	}
 	if b.posted.has(id) {
-		return true
+		return true, nil
 	}
 	if author, ok := b.parents.get(id); ok {
-		return author == b.selfID
+		return author == b.selfID, nil
 	}
 	m, err := c.Message(ctx, id)
 	if err != nil {
 		b.log.Debug("pachca: read parent message", "err", err, "message", id)
-		return false
+		if IsTransient(err) {
+			return false, err
+		}
+		return false, nil
 	}
 	b.parents.put(id, m.UserID)
-	return m.UserID == b.selfID
+	return m.UserID == b.selfID, nil
 }
 
 // mentions reports whether text names the bot, as @nickname or <@id>.
@@ -215,34 +234,61 @@ func isNickRune(c byte) bool {
 	return c == '_' || c == '.' || c == '-' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }
 
-// stripMention takes the bot's mentions out of text.
+// stripMention takes the bot's mentions out of text, each with one space
+// next to it. The lines and the indentation of what the person wrote (code,
+// a log, a list) stay as they are.
 func stripMention(text, nickname string, selfID int64) string {
+	var needles []string
 	if selfID != 0 {
-		text = strings.ReplaceAll(text, "<@"+strconv.FormatInt(selfID, 10)+">", "")
+		needles = append(needles, "<@"+strconv.FormatInt(selfID, 10)+">")
 	}
 	if nickname != "" {
-		needle := "@" + strings.ToLower(nickname)
-		var out strings.Builder
-		lower := strings.ToLower(text)
-		i := 0
-		for {
-			j := strings.Index(lower[i:], needle)
-			if j < 0 {
-				out.WriteString(text[i:])
-				break
-			}
-			end := i + j + len(needle)
-			if end < len(lower) && isNickRune(lower[end]) {
-				out.WriteString(text[i:end])
-				i = end
+		needles = append(needles, "@"+nickname)
+	}
+	var out strings.Builder
+	for i := 0; i < len(text); {
+		n := matchMention(text, i, needles)
+		if n == 0 {
+			out.WriteByte(text[i])
+			i++
+			continue
+		}
+		i += n
+		switch {
+		case i < len(text) && text[i] == ' ':
+			i++
+		case out.Len() > 0 && strings.HasSuffix(out.String(), " "):
+			s := out.String()
+			out.Reset()
+			out.WriteString(s[:len(s)-1])
+		}
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// matchMention is the length of the mention among needles that starts at
+// text[i], or 0. A nickname followed by more nickname characters is somebody
+// else's.
+func matchMention(text string, i int, needles []string) int {
+	for _, n := range needles {
+		if i+len(n) > len(text) || !strings.EqualFold(text[i:i+len(n)], n) {
+			continue
+		}
+		if strings.HasPrefix(n, "@") {
+			if end := i + len(n); end < len(text) && isNickRune(toLowerASCII(text[end])) {
 				continue
 			}
-			out.WriteString(text[i : i+j])
-			i = end
 		}
-		text = out.String()
+		return len(n)
 	}
-	return strings.TrimSpace(strings.Join(strings.Fields(text), " "))
+	return 0
+}
+
+func toLowerASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }
 
 // parseCommand splits "/word rest" into its command word and the rest.

@@ -316,6 +316,13 @@ func (s *idSet) add(id int64) {
 	}
 }
 
+// forget drops id, so the next question about it reads the message.
+func (s *idSet) forget(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.set, id)
+}
+
 func (s *idSet) has(id int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -362,23 +369,34 @@ type chatKinds struct {
 
 func newChatKinds() *chatKinds { return &chatKinds{personal: make(map[int64]bool)} }
 
-// isGroup reports whether chatID is anything but a direct chat. A chat the
-// bot cannot read counts as a group: there the bot answers only when it is
-// addressed, which is the stricter of the two.
-func (b *Bot) isGroup(ctx context.Context, c *Client, chatID int64) bool {
+// isGroup reports whether chatID is anything but a direct chat. A message
+// event whose entity is a user says so itself; anything else is read once. A
+// chat the bot may not read counts as a group: there the bot answers only
+// when it is addressed, which is the stricter of the two. A lookup that
+// failed for a passing reason is returned as an error, so the event stays in
+// the history and is read again.
+func (b *Bot) isGroup(ctx context.Context, c *Client, chatID int64, entityType string) (bool, error) {
 	b.chats.mu.Lock()
 	personal, ok := b.chats.personal[chatID]
 	b.chats.mu.Unlock()
 	if ok {
-		return !personal
+		return !personal, nil
 	}
-	ch, err := c.Chat(ctx, chatID)
-	if err != nil {
-		b.log.Debug("pachca: read chat", "err", err, "chat", chatID)
-		return true
+	if entityType == "user" {
+		personal = true
+	} else {
+		ch, err := c.Chat(ctx, chatID)
+		if err != nil {
+			b.log.Debug("pachca: read chat", "err", err, "chat", chatID)
+			if IsTransient(err) {
+				return true, err
+			}
+			return true, nil
+		}
+		personal = ch.Personal
 	}
 	b.chats.mu.Lock()
-	b.chats.personal[chatID] = ch.Personal
+	b.chats.personal[chatID] = personal
 	b.chats.mu.Unlock()
-	return !ch.Personal
+	return !personal, nil
 }

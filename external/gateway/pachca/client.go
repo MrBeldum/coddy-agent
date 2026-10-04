@@ -115,6 +115,20 @@ func IsRateLimited(err error) bool {
 	return IsStatus(err, http.StatusTooManyRequests)
 }
 
+// IsTransient reports whether err may well not happen again: the network, a
+// server error or a rate limit, as opposed to a refusal that will stand (a
+// missing scope, a message that does not exist).
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ae *APIError
+	if !errors.As(err, &ae) {
+		return true
+	}
+	return ae.Status == http.StatusTooManyRequests || ae.Status >= 500
+}
+
 // TokenInfo is GET /oauth/token/info.
 type TokenInfo struct {
 	UserID int64    `json:"user_id"`

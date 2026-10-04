@@ -142,39 +142,49 @@ func formatContextBreakdown(bd *session.ContextBreakdown, sessionID string) stri
 }
 
 // clickKey is the session key of the person who clicked, in the chat the
-// button is in.
-func (b *Bot) clickKey(ctx context.Context, c *Client, p buttonPayload) (string, bool) {
-	isGroup := b.isGroup(ctx, c, p.ChatID)
+// button is in. An error is a lookup to try again.
+func (b *Bot) clickKey(ctx context.Context, c *Client, p buttonPayload) (string, bool, error) {
+	isGroup, err := b.isGroup(ctx, c, p.ChatID, "")
+	if err != nil {
+		return "", false, err
+	}
 	if !b.allowed(p.ChatID, p.UserID, isGroup) {
-		return "", false
+		return "", false, nil
 	}
 	isolation := access.EffectiveIsolation(p.ChatID, b.cfg)
-	return sessionstore.SessionKey(adapterName, p.ChatID, p.UserID, isolation, isGroup), true
+	return sessionstore.SessionKey(adapterName, p.ChatID, p.UserID, isolation, isGroup), true, nil
 }
 
-// handleButton answers a click. It runs off the poll so a click that answers
-// a permission request reaches the turn waiting for it.
-func (b *Bot) handleButton(ctx context.Context, c *Client, p buttonPayload) {
+// handleButton answers a click. It runs off the session workers, so a click
+// that answers a permission request reaches the turn waiting for it. It
+// reports false when the click must be read again.
+func (b *Bot) handleButton(ctx context.Context, c *Client, p buttonPayload) bool {
 	action, value, _ := strings.Cut(p.Data, ":")
 	b.log.Debug("pachca: update", "kind", "button", "user", p.UserID, "chat", p.ChatID, "action", action)
 	if action != actionModel && action != actionPermission {
 		b.log.Debug("pachca: update ignored", "reason", "unknown button", "data_len", len(p.Data))
-		return
+		return true
 	}
-	key, ok := b.clickKey(ctx, c, p)
+	key, ok, err := b.clickKey(ctx, c, p)
+	if err != nil {
+		return false
+	}
 	if !ok {
-		return
+		return true
 	}
 	switch action {
 	case actionPermission:
 		b.answerPermissionClick(ctx, c, p, value, key)
 	case actionModel:
-		b.inFlight.Add(1)
+		if !b.beginTurn() {
+			return false
+		}
 		go func() {
 			defer b.inFlight.Done()
 			b.applyModelClick(ctx, c, p, value, key)
 		}()
 	}
+	return true
 }
 
 func (b *Bot) applyModelClick(ctx context.Context, c *Client, p buttonPayload, value, key string) {

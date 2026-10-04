@@ -26,7 +26,7 @@ The built-in commands on each surface and how skills become commands. A slash co
 | `/plugin marketplace add\|list\|update\|remove`, `/plugin install <plugin>@<marketplace>`, `/plugin install\|remove\|enable\|disable` | console, web UI, ACP editors, `POST /v1/responses` | Manages skill plugins and marketplaces, the chat twin of `coddy plugin`: adding a marketplace installs nothing, `install <plugin>@<marketplace>` installs one plugin of it. Approving a project marketplace (`marketplace trust`) is left to the terminal and Settings. | [Skills](../features/skills.md#the-plugin-command-cli-and-plugin-in-chat) |
 | `/start`, `/help` | Telegram, Pachca | The greeting and the command list of the bot. | [Telegram gateway](../surfaces/gateway.md#commands) |
 | `/context` | Telegram, Pachca | The context window usage of the chat's session by category. | [Telegram gateway](../surfaces/gateway.md#commands) |
-| `/clear` | Telegram, Pachca | Starts a new session for the chat; the old one stays on disk, and `/resume` brings it back. | [Telegram gateway](../surfaces/gateway.md#session-lifecycle) |
+| `/clear` | Telegram, Pachca | Starts a new session for the chat; the old one stays on disk. In Telegram `/resume` brings it back; Pachca has no `/resume`, and the web UI or the console continues it. | [Telegram gateway](../surfaces/gateway.md#session-lifecycle), [Pachca gateway](../surfaces/pachca.md#commands) |
 | `/<skill>` | console, web UI, ACP editors, `POST /v1/responses` | Runs a skill: the full `SKILL.md` body is written into the message that invokes it, as an attachment after the typed text, and later turns replay it. | [Skills](../features/skills.md#how-skills-are-applied) |
 
 Three boundaries follow from the code:

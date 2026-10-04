@@ -553,3 +553,75 @@ func TestReply_WithoutUsersScopeTheQuoteHasNoAuthor(t *testing.T) {
 		t.Fatalf("prompt: %q", got)
 	}
 }
+
+func TestPoll_ATransientLookupFailureKeepsTheEvent(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	e.fake.AddUser(2, "u2", "U2")
+	e.fake.AddGroupChat(600, "dev")
+	// A reply to the bot in a group needs the parent message; the lookup
+	// fails twice and then answers.
+	bm := e.fake.UserPosts(pachcafake.Post{UserID: 2, ChatID: 600, Content: "@coddy_bot hi"})
+	e.tickUntilQuiet(t, 2)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the first turn")
+	var answer pachcafake.Message
+	waitFor(t, func() bool {
+		for _, m := range e.fake.Messages(600) {
+			if m.UserID == e.fake.BotUserID() && m.ParentMessageID != nil && *m.ParentMessageID == bm.ID {
+				answer = m
+				return true
+			}
+		}
+		return false
+	}, "the answer")
+	e.bot.posted.forget(answer.ID) // so the reply needs a lookup
+	e.fake.AddFault(pachcafake.Fault{Route: "GET /messages", Status: 503, Times: 2})
+	e.fake.UserPosts(pachcafake.Post{UserID: 2, ChatID: 600, Content: "and?", ParentMessageID: answer.ID})
+	e.tickUntilQuiet(t, 4)
+	waitFor(t, func() bool { return e.runner.promptCount() == 2 }, "the reply after the lookup recovered")
+}
+
+func TestPoll_ADirectMessageNeedsNoChatLookup(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	e.fake.AddFault(pachcafake.Fault{Route: "GET /chats", Status: 500, Times: 10})
+	e.dm(t, 1, "hello")
+	e.tickUntilQuiet(t, 3)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the direct message despite the chat lookup failing")
+}
+
+func TestStripMention_KeepsLines(t *testing.T) {
+	in := "@coddy_bot look:\n  line2\n\nline3"
+	if got := stripMention(in, "coddy_bot", 5); got != "look:\n  line2\n\nline3" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestBot_AStopFinishesTheQueuedMessages(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.bot.pollEvery = bddPollFor
+	gate := make(chan struct{}, 2)
+	e.runner.mu.Lock()
+	e.runner.gate = gate
+	e.runner.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- e.bot.Start(ctx) }()
+	waitFor(t, func() bool { return e.bot.connectedClient() != nil && !e.bot.state.watermark().empty() }, "the bot to start")
+	e.dm(t, 1, "first")
+	e.dm(t, 1, "second")
+	// Both are taken: the first turn runs, the second waits in the queue,
+	// and their events are gone from the history.
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 && len(e.fake.Events()) == 0 }, "the first turn and both events taken")
+	cancel()
+	gate <- struct{}{}
+	gate <- struct{}{}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start did not return")
+	}
+	if n := e.runner.promptCount(); n != 2 {
+		t.Fatalf("a message taken before the stop was dropped: %d turns", n)
+	}
+}

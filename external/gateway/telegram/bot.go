@@ -294,9 +294,15 @@ func (b *Bot) dispatch(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgbotapi.
 	}
 	b.mu.Unlock()
 
+	// A queued message counts as in flight from here, so a stop waits for it
+	// as well as for the turn running ahead of it: Telegram already
+	// confirmed its update. Only this goroutine dispatches, and it is the one
+	// that waits at a stop, so the count never grows during that wait.
+	b.inFlight.Add(1)
 	select {
 	case ch <- workerJob{bot: bot, msg: msg, key: key}:
 	default:
+		b.inFlight.Done()
 		b.log.Debug("telegram: update rejected", "reason", "worker queue full", "key", key, "cap", workerQueueCap)
 		b.reply(bot, chatID, msg.MessageID, "⏳ Still processing your previous message, please wait.")
 	}
@@ -311,11 +317,19 @@ func (b *Bot) sessionWorker(ctx context.Context, ch chan workerJob) {
 			if !ok {
 				return
 			}
-			b.inFlight.Add(1)
 			b.processMessage(ctx, job.bot, job.msg, job.key)
 			b.inFlight.Done()
 		case <-ctx.Done():
-			return
+			// The stop waited as long as it could: what is still queued is
+			// let go, and no longer counted.
+			for {
+				select {
+				case <-ch:
+					b.inFlight.Done()
+				default:
+					return
+				}
+			}
 		}
 	}
 }

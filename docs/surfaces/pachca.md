@@ -83,7 +83,8 @@ The banner names the bot (`gateway     pachca`), and the log says `pachca bot co
 - **Group chat or channel**: a group is where many people talk, so the bot answers only a message that mentions it (`@nickname`, or `<@id>`) or replies to one of its messages. A command needs the mention too, and so does a message in a thread opened under the bot's message. Everything else is left to the people in the chat.
 - **Replies**: a person who replies to a message asks about it. The agent receives the replied-to message quoted in front of what the person wrote, the first line naming its author (`> Anna:`), in a direct chat and in a group alike, for the bot's own answer and for a colleague's message. A mention alone under a reply asks the agent to deal with the quoted message. The quote stays in the session's transcript; a settings command is never quoted. Naming the author needs the `users:read` scope; without it the quote has no author line.
 - **Order and catch-up**: the bot reads the events history every `poll_interval_seconds`, newest first, down to the last event it handled, and hands the new ones over oldest first. The position is kept in `<sessions>/gateway_pachca_state.json`, so a restart answers what was written while the bot was down. The very first start begins after the newest event in the history and leaves older ones alone.
-- **One turn at a time per session**: messages of one conversation queue up behind the running turn; a full queue is answered with a short "still working" note.
+- **One turn at a time per session**: messages of one conversation queue up behind the running turn, and a stop or a restart waits up to 20 seconds for the running turn and the queued ones before the bot goes. A message that finds the queue full (32 waiting) is not taken, and the chat is told to send it again.
+- **A passing failure loses nothing**: when Pachca does not answer a lookup the bot needs (whether a chat is a group, who wrote the message a reply answers), the event stays in the history and is read again on the next poll.
 - The chat-to-session map lives in `<sessions>/gateway_pachca_sessions.json`, apart from the Telegram one.
 
 ## Commands
@@ -108,7 +109,7 @@ A short rate limit (`429` with a pause up to a minute) is waited out. The daily 
 
 ## Permissions and woken turns
 
-The chat's own agent is allowed what it asks, like in Telegram: the operator configured the bot deliberately. A subagent whose definition narrows what it may do asks in the chat with **Allow** and **Reject** buttons, and only the person whose session asked can answer. A background subagent asks the same way after the turn ended. A background task the agent started with `notify_on_finish` wakes the conversation when it ends, and the woken turn runs in the chat it belongs to: a note says what woke the agent, then the answer follows.
+The chat's own agent is allowed what it asks, like in Telegram: the operator configured the bot deliberately. A subagent whose definition narrows what it may do asks in the chat with **Allow** and **Reject** buttons, and only somebody whose session in that chat is the one that asked can answer: the person themselves, or anyone in a group chat whose isolation is `shared` (or an admin under `admin`), since they share that session. A background subagent asks the same way after the turn ended. A background task the agent started with `notify_on_finish` wakes the conversation when it ends, and the woken turn runs in the chat it belongs to: a note says what woke the agent, then the answer follows.
 
 ## What is not supported
 
