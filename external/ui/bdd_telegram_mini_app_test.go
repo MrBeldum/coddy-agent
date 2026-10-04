@@ -12,7 +12,7 @@ import (
 // a vitest test of the SPA's Telegram module (ui/telegram) or of the sign-in
 // screen, run by name.
 func TestWebUITelegramMiniAppFeature(t *testing.T) {
-	const tg = "src/ui/telegram/telegram.test.ts"
+	const tg = "src/ui/telegram/telegram.test.tsx"
 	const auth = "src/ui/auth/AuthGate.test.tsx"
 	steps := map[string][]string{
 		`^a launch in the fragment or the query makes the tab a Mini App, and a start parameter alone does not$`: {
@@ -43,6 +43,8 @@ func TestWebUITelegramMiniAppFeature(t *testing.T) {
 			"the Mini App window the theme follows Telegram until the user picks one"},
 		`^the back button is an Escape for whatever answers it$`: {
 			"the back button a press is an Escape for whatever answers it",
+			"the back button a press closes the composer's picker sheet wherever the focus is",
+			"the back button a press closes the image viewer wherever the focus is",
 			"the back button the client hears when the button should show, and a press is answered"},
 		`^an Escape nothing claimed leaves the conversation and never skips a question$`: {
 			"the back button an Escape nothing claimed leaves the conversation and never reaches the question card"},

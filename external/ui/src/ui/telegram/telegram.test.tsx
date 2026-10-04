@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { useState } from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { Composer } from "../chat/Composer";
+import { ImageLightbox } from "../components/ImageLightbox";
 import { CODDY_UI_THEME_COOKIE } from "../theme/themeCookie";
 import { createTelegramBridge, versionAtLeast } from "./bridge";
 import { backButtonWanted, pressBack, TELEGRAM_BACK_LAYERS } from "./backButton";
@@ -69,6 +73,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   dispose?.();
   dispose = null;
   delete (window as unknown as { TelegramWebviewProxy?: unknown }).TelegramWebviewProxy;
@@ -446,6 +451,67 @@ describe("the back button", () => {
       window.removeEventListener("keydown", dialog, true);
       window.removeEventListener("keydown", questionCard);
     }
+  });
+
+  // Telegram Web's Back is a button of the parent page: a click on it leaves
+  // the frame's focus on body, and so does a tap on a sheet's title or on a
+  // picture. A layer that heard Escape only with the focus inside would let
+  // the press through to leaving the conversation.
+  test("a press closes the composer's picker sheet wherever the focus is", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string) => {
+        const path = new URL(String(input), "http://x").pathname;
+        const items = path === "/coddy/slash-commands" ? [{ name: "review", description: "review skill" }] : [];
+        return Promise.resolve({ ok: true, json: async () => ({ items, has_more: false, page: 1 }) });
+      }),
+    );
+    function Docked() {
+      const [value, setValue] = useState("");
+      return (
+        <Composer
+          value={value}
+          isEmpty={false}
+          sessionId="sess_1"
+          mode="agent"
+          modes={["agent", "plan"]}
+          onModeChange={() => {}}
+          onChange={setValue}
+          onSend={() => {}}
+        />
+      );
+    }
+    go("/#/s/sess_1");
+    render(<Docked />);
+    const field = screen.getByRole("textbox", { name: "Message" });
+    field.focus();
+    fireEvent.change(field, { target: { value: "/rev", selectionStart: 4, selectionEnd: 4 } });
+    await waitFor(() => expect(document.querySelector(".slash-menu--sheet")).not.toBeNull());
+    field.blur();
+    expect(pressBack(window, document)).toBe("escape");
+    await waitFor(() => expect(document.querySelector(".slash-menu--sheet")).toBeNull());
+    expect(window.location.hash).toBe("#/s/sess_1");
+  });
+
+  test("a press closes the image viewer wherever the focus is", async () => {
+    go("/#/s/sess_1");
+    const onClose = vi.fn();
+    render(<ImageLightbox src="/p.png" alt="A picture" onClose={onClose} />);
+    (document.activeElement as HTMLElement).blur();
+    expect(pressBack(window, document)).toBe("escape");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(window.location.hash).toBe("#/s/sess_1");
   });
 
   test("the client hears when the button should show, and a press is answered", async () => {

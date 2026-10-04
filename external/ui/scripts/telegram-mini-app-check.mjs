@@ -16,8 +16,10 @@
  *            the docked composer and the last message stay in the visible
  *            part, nothing scrolls sideways, the sticky title still sticks;
  *   sheets   the mode sheet and, on the start screen, the context sheet open
- *            inside the visible part; Telegram's Back closes the sheet, and
- *            from a conversation goes to the start screen;
+ *            inside the visible part; Telegram's Back closes the sheet, the
+ *            composer's picker sheet too (the click on Back leaves the
+ *            frame's focus on body), and from a conversation goes to the
+ *            start screen;
  *   theme    Telegram's light theme turns the app light while the user has
  *            picked none, and the header follows;
  *   signin   a second coddy serve with sign-in, opened from the page on
@@ -349,6 +351,17 @@ try {
     await page.locator("#miniappBack").click();
     await app.waitForSelector(".mode-menu--sheet", { state: "detached" });
     check("Back closes the sheet", true);
+    // The composer's picker sheet: the click on Back is on the page, so the
+    // frame's focus is on body when the Escape arrives, not in the field.
+    const field = app.locator(".composer-card textarea").first();
+    await field.click();
+    await field.fill("/");
+    await app.waitForSelector(".slash-menu--sheet");
+    await page.locator("#miniappBack").click();
+    await app.waitForSelector(".slash-menu--sheet", { state: "detached" });
+    const kept = await app.evaluate(() => location.hash);
+    check("Back closes the composer's picker sheet and stays in the conversation", /^#\/s\//.test(kept), kept);
+    await field.fill("");
     await page.locator("#miniappBack").click();
     await until("the start screen", async () => !(await app.evaluate(() => location.hash)));
     check("Back leaves the conversation for the start screen", true);
