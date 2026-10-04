@@ -116,6 +116,11 @@
             "type": "string",
             "description": "Reasoning level pre-selected for new chats; must be one of the resolved levels, otherwise ignored."
           },
+          "allow_reasoning_off": {
+            "type": "boolean",
+            "description": "Expose Off in the reasoning selector for this model. Enable it only when this provider/model deployment honours Coddy's provider-specific request that disables reasoning; Coddy cannot verify that capability automatically.",
+            "default": false
+          },
           "stream": {
             "type": [
               "boolean",

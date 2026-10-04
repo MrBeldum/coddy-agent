@@ -586,7 +586,11 @@ export function SettingsSection(props: {
                   {
                     id: "reasoning",
                     legend: t("settings.models.group.reasoning"),
-                    paths: ["reasoning_levels", "reasoning_default"],
+                    paths: [
+                      "reasoning_levels",
+                      "reasoning_default",
+                      "allow_reasoning_off",
+                    ],
                   },
                 ]
               : undefined
