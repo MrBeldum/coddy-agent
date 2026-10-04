@@ -489,14 +489,20 @@ describe("telegram.css", () => {
   test("the docked composer and the sheets are lifted by the keyboard or the hidden part, whichever is more", () => {
     expect(css).toMatch(/--coddy-telegram-lift:\s*max\(\s*var\(--coddy-keyboard-inset, 0px\),\s*var\(--coddy-telegram-hidden-bottom, 0px\)\s*\)/);
     const rule = (sel: RegExp) => css.match(new RegExp(sel.source + String.raw`[^{]*\{([^}]*)\}`))?.[1] ?? "";
-    // The composer keeps its bottom on the keyboard inset and grows its padding
-    // by what Telegram hides beyond the keyboard, so its height - the
-    // transcript's reserve - grows too.
-    const composer = rule(/\.chat-bottom:has\(\.composer-wrap-docked\)/);
+    // The composer keeps its bottom on the keyboard inset, and the block over
+    // the transcript - whose height ChatScreen measures as the transcript's
+    // reserve - grows by what Telegram hides beyond the keyboard.
+    const composer = rule(/\.chat-bottom:has\(\.composer-wrap-docked\) \{/);
     expect(composer).not.toMatch(/(^|[^-])bottom:/);
-    expect(composer).toMatch(
-      /padding-bottom:\s*calc\([\s\S]*var\(--coddy-telegram-hidden-bottom, 0px\)\s*-\s*var\(--coddy-keyboard-inset, 0px\)/,
+    // A block of its own, not padding: the reserve is read by a ResizeObserver,
+    // which a change of padding does not wake.
+    const inner = rule(/\.chat-bottom:has\(\.composer-wrap-docked\)\s+\.chat-bottom-inner::after/);
+    expect(inner).toMatch(
+      /height:\s*max\(\s*0px,\s*var\(--coddy-telegram-hidden-bottom, 0px\)\s*-\s*var\(--coddy-keyboard-inset, 0px\)\s*\)/,
     );
+    expect(inner).toMatch(/display:\s*block/);
+    const chatScreen = readFileSync(join(here, "../chat/ChatScreen.tsx"), "utf8");
+    expect(chatScreen).toMatch(/className="chat-bottom-inner" ref=\{composerHostRef\}/);
     expect(rule(/\.mode-menu--sheet,/)).toMatch(/bottom:\s*var\(--coddy-telegram-lift\)/);
     // Sheets stay sheets: nothing turns them into centred panels.
     expect(css).not.toMatch(/translateY\(-50%\)/);

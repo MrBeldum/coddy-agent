@@ -50,23 +50,12 @@
     );
   }
 
-  /* The docked composer keeps its bottom on the keyboard inset (styles.css)
-     and grows its own padding by what Telegram hides beyond the keyboard:
-     the block's height is the transcript's reserve (ChatScreen), so the tail
-     of the transcript grows with it and a transcript parked at its newest
-     message follows, the way it does for the usage banner. */
+  /* The docked composer keeps its bottom on the keyboard inset (styles.css). */
   html[data-telegram-mini-app="true"] .chat-bottom:has(.composer-wrap-docked) {
-    padding-bottom: calc(
-      max(
-          12px,
-          env(safe-area-inset-bottom, 0px),
-          var(--coddy-telegram-safe-bottom, 0px)
-        ) +
-        max(
-          0px,
-          var(--coddy-telegram-hidden-bottom, 0px) -
-            var(--coddy-keyboard-inset, 0px)
-        )
+    padding-bottom: max(
+      12px,
+      env(safe-area-inset-bottom, 0px),
+      var(--coddy-telegram-safe-bottom, 0px)
     );
     padding-left: max(
       14px,
@@ -77,6 +66,24 @@
       14px,
       env(safe-area-inset-right, 0px),
       var(--coddy-telegram-safe-right, 0px)
+    );
+  }
+
+  /* What Telegram hides beyond the keyboard is a block at the end of the
+     one over the transcript, whose content height ChatScreen measures as the
+     transcript's reserve (a ResizeObserver, which padding would not wake):
+     the composer rises into the visible part, the transcript's tail grows
+     with it, and a transcript parked at its newest message follows, the way
+     it does when the usage banner arrives. */
+  html[data-telegram-mini-app="true"]
+    .chat-bottom:has(.composer-wrap-docked)
+    .chat-bottom-inner::after {
+    content: "";
+    display: block;
+    height: max(
+      0px,
+      var(--coddy-telegram-hidden-bottom, 0px) -
+        var(--coddy-keyboard-inset, 0px)
     );
   }
 
