@@ -104,13 +104,13 @@ func (r *runner) telegramProbes() []probe {
 }
 
 // pachcaRequiredScopes are the scopes the Pachca bot cannot work without;
-// pachcaRecommendedScopes the one it works without, at a cost.
+// pachcaRecommendedScopes the ones it works without, at a cost.
 var (
 	pachcaRequiredScopes = []string{
 		"messages:create", "messages:update", "messages:read",
 		"chats:read", "profile:read", "webhooks:events:read",
 	}
-	pachcaRecommendedScopes = []string{"webhooks:events:delete"}
+	pachcaRecommendedScopes = []string{"webhooks:events:delete", "users:read"}
 )
 
 // pachcaProbes checks the Pachca bot token when that bot is enabled:
@@ -179,8 +179,8 @@ func (r *runner) pachcaProbes() []probe {
 					"grant them in the bot's settings in Pachca (Integrations, the bot, API tab) and copy the new token")}
 			}
 			if len(recommended) > 0 {
-				return []Check{r.check(StatusWarning, path, path+".token", "the token cannot delete handled events ("+strings.Join(recommended, ", ")+"); the events history will keep growing",
-					"grant webhooks:events:delete in the bot's settings in Pachca")}
+				return []Check{r.check(StatusWarning, path, path+".token", "the token lacks recommended scopes: "+strings.Join(recommended, ", ")+" (without webhooks:events:delete the events history keeps growing, without users:read a quoted reply names no author)",
+					"grant them in the bot's settings in Pachca")}
 			}
 			return []Check{r.check(StatusOK, path, path, fmt.Sprintf("token accepted by Pachca, bot user %d", info.Data.UserID), "")}
 		case http.StatusUnauthorized:

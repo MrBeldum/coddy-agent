@@ -86,3 +86,20 @@ func TestIsGroupKey(t *testing.T) {
 		}
 	}
 }
+
+func TestReplyContext(t *testing.T) {
+	if a, q := replyContext(nil); a != "" || q != "" {
+		t.Fatalf("no reply: %q %q", a, q)
+	}
+	a, q := replyContext(&tgbotapi.Message{From: &tgbotapi.User{FirstName: "Anna", LastName: "K"}, Text: "hi"})
+	if a != "Anna K" || q != "hi" {
+		t.Fatalf("text reply: %q %q", a, q)
+	}
+	a, q = replyContext(&tgbotapi.Message{From: &tgbotapi.User{UserName: "boris"}, Caption: "a photo"})
+	if a != "@boris" || q != "a photo" {
+		t.Fatalf("caption reply: %q %q", a, q)
+	}
+	if _, q := replyContext(&tgbotapi.Message{From: &tgbotapi.User{FirstName: "x"}}); q != "" {
+		t.Fatalf("a message without text quoted %q", q)
+	}
+}

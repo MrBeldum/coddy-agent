@@ -2,6 +2,8 @@
 
 package pachca
 
+import "github.com/EvilFreelancer/coddy-agent/external/gateway/replyquote"
+
 // What this adapter tells the model about answering into a Pachca chat: a
 // system prompt block for the length of one turn
 // (session.PromptRunOpts.SurfaceSystemPrompt), never a line added to what the
@@ -17,6 +19,7 @@ const pachcaGuidance = "## Answering in a Pachca chat\n\n" +
 	"- lists are not rendered: `-` and `1.` stay as typed, which still reads well, so keep list items short;\n" +
 	"- tables are not rendered: prefer a short list, or a fenced `text` block when the columns really matter;\n" +
 	"- a chat is a narrow column: answer in a few short paragraphs and put the thing that was asked for first.\n\n" +
+	replyquote.Guidance + "\n\n" +
 	"None of this is visible to the person, and nothing about it belongs in the answer itself."
 
 // surfaceSystemPrompt is what the gateway hands the session for one turn.

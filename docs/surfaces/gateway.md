@@ -18,6 +18,7 @@ This page is about the Telegram bot and the gateway's common parts. The Pachca (
 - [Debugging a chat](#debugging-a-chat)
 - [Bot interaction model](#bot-interaction-model)
   - [Private chats](#private-chats)
+  - [Replies](#replies)
   - [Group chats](#group-chats)
   - [Commands](#commands)
 - [What the messenger needs, and where it is said](#what-the-messenger-needs-and-where-it-is-said)
@@ -514,15 +515,29 @@ starts.
 
 ### Private chats
 
-Every user who starts a private conversation with the bot gets their own isolated session. No configuration needed.
+Every user who starts a private conversation with the bot gets their own isolated session. No configuration needed. Every message is for the bot, with or without a mention.
+
+### Replies
+
+A person who replies to a message asks about it. The agent receives the replied-to message quoted in front of what the person wrote, its first line naming the author:
+
+```
+> Anna:
+> the build is red since noon
+
+why?
+```
+
+This works in a private chat and in a group alike, for a reply to the bot's own answer and for a reply to somebody else's message (in a group, together with a mention of the bot). A mention alone under a reply asks the agent to deal with the quoted message. The quote is part of the user message, so the transcript in the web UI reads the way the chat did; a settings command is never quoted. The model is told about the convention for each turn ([What the messenger needs](#what-the-messenger-needs-and-where-it-is-said)).
 
 ### Group chats
 
-In a group the bot **only responds** when explicitly addressed. It will react to:
+A group is where many people talk, so the bot **only responds** when explicitly addressed:
 
 1. A message that **@mentions** the bot (`@coddy_agent_bot hello`)
 2. A **direct reply** to a previous bot message
-3. A bot command (`/clear`, `/resume`, `/model`, `/mcp`, `/context`, `/help`, `/start`) or a settings command (`/agent`, `/plan`, `/ask`, `/reasoning`, `/think`, `/nothink`), with or without the mention
+
+Commands follow the same rule: in a group a bot command or a settings command needs the mention, which Telegram writes as `/clear@coddy_agent_bot` (the command menu of a group inserts that form), or a reply to the bot's message. A bare `/clear` in a group is left to the people in it.
 
 When `isolation` is `admin`, the bot additionally ignores everyone who is not in the `admins` list.
 

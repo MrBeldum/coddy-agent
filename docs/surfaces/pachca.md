@@ -23,6 +23,7 @@ The adapter is deliberately smaller than the [Telegram gateway](gateway.md): it 
    - `messages:create`, `messages:update`, `messages:read` - posting, streaming edits, recognising replies to the bot;
    - `chats:read` - telling a direct chat from a group;
    - `profile:read` - the bot's own nickname, which a mention names;
+   - `users:read` (recommended) - the author's name in a quoted reply;
    - `webhooks:events:read` - reading the events history;
    - `webhooks:events:delete` (recommended) - removing handled events, so the history does not grow.
 3. On the **Outgoing webhook** tab:
@@ -68,7 +69,7 @@ make build TAGS="gateway.pachca"
 coddy serve --dry-run
 ```
 
-`--dry-run` checks the token with `GET /oauth/token/info`: an error for a missing or revoked token or a missing required scope, a warning when only `webhooks:events:delete` is missing. Then start the server:
+`--dry-run` checks the token with `GET /oauth/token/info`: an error for a missing or revoked token or a missing required scope, a warning when only the recommended `webhooks:events:delete` or `users:read` is missing. Then start the server:
 
 ```bash
 coddy serve
@@ -78,8 +79,9 @@ The banner names the bot (`gateway     pachca`), and the log says `pachca bot co
 
 ## How the bot behaves
 
-- **Direct chat**: every message is for the bot.
-- **Group chat or channel**: the bot answers when it is mentioned (`@nickname`, or `<@id>`), when the message is a reply to one of its messages, when the message is written in a thread opened under one of its messages, and when the message is a command. Everything else is left alone.
+- **Direct chat**: every message is for the bot, with or without a mention or a reply.
+- **Group chat or channel**: a group is where many people talk, so the bot answers only a message that mentions it (`@nickname`, or `<@id>`) or replies to one of its messages. A command needs the mention too, and so does a message in a thread opened under the bot's message. Everything else is left to the people in the chat.
+- **Replies**: a person who replies to a message asks about it. The agent receives the replied-to message quoted in front of what the person wrote, the first line naming its author (`> Anna:`), in a direct chat and in a group alike, for the bot's own answer and for a colleague's message. A mention alone under a reply asks the agent to deal with the quoted message. The quote stays in the session's transcript; a settings command is never quoted. Naming the author needs the `users:read` scope; without it the quote has no author line.
 - **Order and catch-up**: the bot reads the events history every `poll_interval_seconds`, newest first, down to the last event it handled, and hands the new ones over oldest first. The position is kept in `<sessions>/gateway_pachca_state.json`, so a restart answers what was written while the bot was down. The very first start begins after the newest event in the history and leaves older ones alone.
 - **One turn at a time per session**: messages of one conversation queue up behind the running turn; a full queue is answered with a short "still working" note.
 - The chat-to-session map lives in `<sessions>/gateway_pachca_sessions.json`, apart from the Telegram one.
@@ -94,7 +96,7 @@ The banner names the bot (`gateway     pachca`), and the log says `pachca bot co
 | `/context` | The context window usage of the conversation's session. |
 | `/agent`, `/plan`, `/ask`, `/think`, `/nothink`, `/reasoning <level>` | Settings commands, handed to the session like on every surface; `--once` and `--count=N` limit them to the next messages. |
 
-A command in a group chat needs no mention. `/permissions` is not taken from a chat: the bot approves its own agent's requests itself.
+In a group chat a command needs the bot's mention (`@nickname /clear`) or a reply to its message. `/permissions` is not taken from a chat: the bot approves its own agent's requests itself.
 
 ## Answers, limits and formatting
 
@@ -115,7 +117,7 @@ The webhook intake (the bot only reads the events history), `/resume` and `/mcp`
 ## Troubleshooting
 
 - **The bot never answers and the log is quiet.** Check that **Save events history** is on: without it the history is always empty. The bot warns once in the log when the history has stayed empty for five minutes after the start.
-- **The bot answers in a direct chat but not in a group.** Mention it, reply to its message, or write in a thread under its message. Check that the bot is a member of the chat and that `default_access` or the chat's override lets the person in.
+- **The bot answers in a direct chat but not in a group.** Mention it or reply to its message; in a group even a command or a message in a thread under its answer needs one of the two. Check that the bot is a member of the chat and that `default_access` or the chat's override lets the person in.
 - **`--dry-run` reports missing scopes.** Grant them on the bot's API tab in Pachca and copy the token again.
 - **The history keeps growing.** The token lacks `webhooks:events:delete`; the bot still works on its saved position.
 - **Debug output for this bot alone**: `logger.levels` with `component: gateway.pachca` and `level: debug`, or `--log-level "info,gateway.pachca=debug"`. Every ignored event is logged at debug with a reason.

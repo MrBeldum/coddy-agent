@@ -15,6 +15,7 @@ import (
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/access"
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/proxyutil"
+	"github.com/EvilFreelancer/coddy-agent/external/gateway/replyquote"
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/sessionstore"
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/agent"
@@ -362,7 +363,8 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 				"/resume [id or title] — continue another session\n"+
 				"/clear — start a new session (forgets previous context)\n"+
 				"/help — show this message\n\n"+
-				"In group chats mention me (@"+b.botName+") or reply to my message to talk to me.")
+				"Reply to a message to ask about it.\n"+
+				"In group chats mention me (@"+b.botName+") or reply to my message to talk to me; commands there need the mention too (/clear@"+b.botName+").")
 		return
 	}
 	if isCommand(msg, "model") && strings.TrimSpace(msg.CommandArguments()) == "" {
@@ -393,9 +395,17 @@ func (b *Bot) processMessage(ctx context.Context, bot *tgbotapi.BotAPI, msg *tgb
 	}
 
 	// Strip @mention prefix if present.
-	text = stripMention(text, b.botName)
-	if strings.TrimSpace(text) == "" {
+	text = strings.TrimSpace(stripMention(text, b.botName))
+	// A reply asks about the message it answers: the session receives that
+	// message quoted in front of what the person wrote, and a mention alone
+	// under a reply asks about the quoted message. A settings command is not
+	// quoted - the manager reads it off the start of the text.
+	author, quoted := replyContext(msg.ReplyToMessage)
+	if text == "" && quoted == "" {
 		return
+	}
+	if !isSettingsCommand(msg) {
+		text = replyquote.Prompt(author, quoted, text)
 	}
 
 	// A typed "/model <id>" is a session-scoped pick on this surface even
@@ -501,18 +511,31 @@ func (b *Bot) chatSender(bot *tgbotapi.BotAPI, chatID int64, replyTo int, rich r
 	return s
 }
 
-// shouldRespond checks whether the bot should process a group message.
-// It responds to: built-in commands, direct @-mentions, and replies to the bot.
-func (b *Bot) shouldRespond(msg *tgbotapi.Message, text string) bool {
-	if msg.IsCommand() {
-		switch strings.ToLower(msg.Command()) {
-		case "clear", "start", "help", "model", "mcp", "context", "resume":
-			return true
-		}
-		if isSettingsCommand(msg) {
-			return true
+// replyContext is the author and the text of the message msg replies to,
+// empty when it replies to none or to one without text (the service message
+// that opens a forum topic, a sticker).
+func replyContext(msg *tgbotapi.Message) (author, text string) {
+	if msg == nil {
+		return "", ""
+	}
+	text = msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
+	if msg.From != nil {
+		author = strings.TrimSpace(msg.From.FirstName + " " + msg.From.LastName)
+		if author == "" && msg.From.UserName != "" {
+			author = "@" + msg.From.UserName
 		}
 	}
+	return author, text
+}
+
+// shouldRespond checks whether the bot should process a group message. A
+// group is where many people talk, so only a mention of the bot or a reply to
+// one of its messages is for it; a command needs the mention too, which
+// Telegram writes as /command@botname.
+func (b *Bot) shouldRespond(msg *tgbotapi.Message, text string) bool {
 	if strings.Contains(text, "@"+b.botName) {
 		return true
 	}

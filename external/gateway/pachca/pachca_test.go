@@ -465,3 +465,91 @@ func TestSender_FinalAnswerOutlivesTheTurnContext(t *testing.T) {
 		t.Fatalf("the answer of a cut-off turn was lost: %+v", ms)
 	}
 }
+
+// group posts a message of userID into a group chat 600 and runs the poll.
+func (e *testEnv) groupPost(t *testing.T, userID int64, text string, parent int64) pachcafake.Message {
+	t.Helper()
+	e.fake.AddUser(userID, fmt.Sprintf("u%d", userID), fmt.Sprintf("U%d", userID))
+	e.fake.AddGroupChat(600, "dev")
+	m := e.fake.UserPosts(pachcafake.Post{UserID: userID, ChatID: 600, Content: text, ParentMessageID: parent})
+	e.tickUntilQuiet(t, 2)
+	return m
+}
+
+func TestGroup_OnlyAMentionOrAReplyToTheBotIsAnswered(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	e.groupPost(t, 1, "/help", 0)
+	e.groupPost(t, 1, "/plan do it", 0)
+	time.Sleep(50 * time.Millisecond)
+	if n := len(e.fake.Messages(600)); n != 2 {
+		t.Fatalf("a command without a mention was answered in a group: %d messages", n)
+	}
+	if e.runner.promptCount() != 0 {
+		t.Fatal("a settings command without a mention reached the session")
+	}
+	// A thread under the bot's message is not a reply to it.
+	m := e.groupPost(t, 1, "@coddy_bot hi", 0)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the mention")
+	var botMsg pachcafake.Message
+	waitFor(t, func() bool {
+		for _, x := range e.fake.Messages(600) {
+			if x.UserID == e.fake.BotUserID() && x.ParentMessageID != nil && *x.ParentMessageID == m.ID {
+				botMsg = x
+				return true
+			}
+		}
+		return false
+	}, "the bot's answer")
+	_, threadChat := e.fake.StartThread(botMsg.ID)
+	e.fake.UserPosts(pachcafake.Post{UserID: 1, ChatID: threadChat, Content: "and more?"})
+	e.tickUntilQuiet(t, 2)
+	time.Sleep(50 * time.Millisecond)
+	if n := e.runner.promptCount(); n != 1 {
+		t.Fatalf("a thread message without a mention or a reply ran a turn: %d turns", n)
+	}
+}
+
+func TestReply_AMentionAloneAsksAboutTheQuotedMessage(t *testing.T) {
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true}, nil)
+	e.startAt(t)
+	m := e.groupPost(t, 2, "deploy failed at step 3", 0)
+	e.groupPost(t, 1, "@coddy_bot", m.ID)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the turn")
+	e.runner.mu.Lock()
+	got := e.runner.prompts[0]
+	e.runner.mu.Unlock()
+	if got != "> U2:\n> deploy failed at step 3" {
+		t.Fatalf("prompt: %q", got)
+	}
+}
+
+func TestReply_AnUnreadableMessageLeavesTheQuoteOut(t *testing.T) {
+	scopes := []string{"messages:create", "messages:update", "chats:read", "profile:read", "webhooks:events:read", "webhooks:events:delete"}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true, Scopes: scopes}, nil)
+	e.startAt(t)
+	m := e.groupPost(t, 2, "secret", 0)
+	e.groupPost(t, 1, "@coddy_bot explain", m.ID)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the turn")
+	e.runner.mu.Lock()
+	got := e.runner.prompts[0]
+	e.runner.mu.Unlock()
+	if got != "explain" {
+		t.Fatalf("prompt: %q", got)
+	}
+}
+
+func TestReply_WithoutUsersScopeTheQuoteHasNoAuthor(t *testing.T) {
+	scopes := []string{"messages:create", "messages:update", "messages:read", "chats:read", "profile:read", "webhooks:events:read", "webhooks:events:delete"}
+	e := newTestEnv(t, pachcafake.Options{IgnoreSelfMessages: true, Scopes: scopes}, nil)
+	e.startAt(t)
+	m := e.groupPost(t, 2, "look", 0)
+	e.groupPost(t, 1, "@coddy_bot ok?", m.ID)
+	waitFor(t, func() bool { return e.runner.promptCount() == 1 }, "the turn")
+	e.runner.mu.Lock()
+	got := e.runner.prompts[0]
+	e.runner.mu.Unlock()
+	if got != "> look\n\nok?" {
+		t.Fatalf("prompt: %q", got)
+	}
+}

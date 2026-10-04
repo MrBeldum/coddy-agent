@@ -467,6 +467,26 @@ func (w *pachcaWorld) repliesToBot(name, text, group string) error {
 	return nil
 }
 
+func (w *pachcaWorld) repliesToBotDirect(name, text string) error {
+	uid := w.person(name)
+	chat := w.fake.PersonalChat(uid)
+	last, ok := w.lastBotMessage(chat)
+	if !ok {
+		return fmt.Errorf("no bot message in the direct chat with %s", name)
+	}
+	w.post(pachcafake.Post{UserID: uid, ChatID: chat, Content: text, ParentMessageID: last.ID})
+	return nil
+}
+
+func (w *pachcaWorld) repliesToThatMessage(name, text, group string) error {
+	w.post(pachcafake.Post{UserID: w.person(name), ChatID: w.group(group), Content: text, ParentMessageID: w.lastPost.ID})
+	return nil
+}
+
+func (w *pachcaWorld) agentAskedDoc(doc *godog.DocString) error {
+	return w.agentAsked(strings.TrimSpace(doc.Content))
+}
+
 func (w *pachcaWorld) writesInThread(name, text, group string) error {
 	last, ok := w.lastBotMessage(w.group(group))
 	if !ok {
@@ -725,6 +745,9 @@ func initializePachcaScenario(sc *godog.ScenarioContext) {
 	sc.Step(`^the group "([^"]*)" shows no bot message$`, w.groupShowsNothing)
 	sc.Step(`^the thread shows a bot message "([^"]*)"$`, w.threadShows)
 	sc.Step(`^the agent was asked "([^"]*)"$`, w.agentAsked)
+	sc.Step(`^the agent was asked:$`, w.agentAskedDoc)
+	sc.Step(`^the person "([^"]*)" replies "([^"]*)" to the bot's last message in the direct chat$`, w.repliesToBotDirect)
+	sc.Step(`^the person "([^"]*)" replies "([^"]*)" to that message in the group "([^"]*)"$`, w.repliesToThatMessage)
 	sc.Step(`^the agent was asked nothing$`, w.agentAskedNothing)
 	sc.Step(`^the agent was asked (\d+) times?$`, w.agentAskedTimes)
 	sc.Step(`^the events history no longer holds that message$`, w.historyLacksMessage)

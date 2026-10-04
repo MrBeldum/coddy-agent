@@ -290,7 +290,7 @@ func TestTelegramTokenProbe(t *testing.T) {
 
 func TestPachcaTokenProbe(t *testing.T) {
 	status := http.StatusOK
-	scopes := `["messages:create","messages:update","messages:read","chats:read","profile:read","webhooks:events:read","webhooks:events:delete"]`
+	scopes := `["messages:create","messages:update","messages:read","chats:read","profile:read","users:read","webhooks:events:read","webhooks:events:delete"]`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/token/info" || r.Header.Get("Authorization") != "Bearer pc-token" {
 			http.NotFound(w, r)
@@ -310,7 +310,7 @@ func TestPachcaTokenProbe(t *testing.T) {
 	if c := find(t, run(t, body, nil), "gateways.pachca"); c.Status != StatusOK || !strings.Contains(c.Message, "77") {
 		t.Errorf("accepted token %+v", c)
 	}
-	scopes = `["messages:create","messages:update","messages:read","chats:read","profile:read","webhooks:events:read"]`
+	scopes = `["messages:create","messages:update","messages:read","chats:read","profile:read","users:read","webhooks:events:read"]`
 	if c := find(t, run(t, body, nil), "gateways.pachca"); c.Status != StatusWarning || !strings.Contains(c.Message, "webhooks:events:delete") {
 		t.Errorf("token without the delete scope %+v", c)
 	}

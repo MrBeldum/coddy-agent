@@ -66,8 +66,9 @@ type Bot struct {
 	emptyLogWarnAfter time.Duration
 
 	// Who the bot is in the workspace, read once at Start.
-	selfID   int64
-	nickname string
+	selfID      int64
+	nickname    string
+	displayName string
 
 	mu      sync.Mutex
 	workers map[string]chan workerJob
@@ -174,6 +175,7 @@ func (b *Bot) Start(ctx context.Context) error {
 		b.selfID = profile.ID
 	}
 	b.nickname = strings.TrimPrefix(strings.TrimSpace(profile.Nickname), "@")
+	b.displayName = profile.DisplayName()
 	b.log.Info("pachca bot connected", "nickname", b.nickname, "user_id", b.selfID)
 	if missing := missingScopes(info.Scopes, requiredScopes); len(missing) > 0 {
 		b.log.Warn("pachca: the bot token lacks scopes it needs", "missing", strings.Join(missing, ","))

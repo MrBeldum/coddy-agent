@@ -425,13 +425,18 @@ func (m *mcpTest) menu(id int) tgfake.MessageView {
 	return msg
 }
 
-// In a group /mcp is answered without a mention, like the other bot
-// commands the command menu lists (docs/surfaces/gateway.md, Group chats).
-func TestGroupChatAnswersMCPWithoutAMention(t *testing.T) {
+// In a group a command needs the bot's mention, like any message there: a
+// group is where many people talk (docs/surfaces/gateway.md, Group chats).
+// Telegram writes the mention of a command as /command@botname.
+func TestGroupChatAnswersMCPOnlyWithAMention(t *testing.T) {
 	b := New(&config.TelegramGatewayConfig{}, nil, "", slog.New(slog.DiscardHandler), "", nil)
 	b.botName = "coddy_bot"
 	msg := commandMessage("/mcp")
+	if b.shouldRespond(msg, msg.Text) {
+		t.Fatal("/mcp without a mention is answered in a group")
+	}
+	msg = commandMessage("/mcp@coddy_bot")
 	if !b.shouldRespond(msg, msg.Text) {
-		t.Fatal("/mcp in a group is not answered")
+		t.Fatal("/mcp@coddy_bot in a group is not answered")
 	}
 }

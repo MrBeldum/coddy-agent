@@ -24,6 +24,32 @@ Feature: The Telegram bot polls a Bot API server
     Then the chat shows a bot message containing "plain answer"
     And the next poll confirms that update
 
+  Scenario: A reply in a private chat asks about the quoted message
+    A person who replies to a message asks about it: the agent receives the
+    message quoted in front of what the person wrote.
+    Given the agent answers with "pong"
+    When the bot is started
+    And the user sends "ping"
+    And the chat shows a bot message containing "pong"
+    And the user replies "why?" to the bot's last message
+    Then the agent was asked:
+      """
+      > Coddy Fake:
+      > pong
+
+      why?
+      """
+
+  Scenario: In a group the bot answers only a mention or a reply to it
+    A group is where many people talk: a command or a message that does not
+    address the bot is left to them.
+    Given the agent answers with "group answer"
+    When the bot is started
+    And somebody in the group sends "/clear"
+    And somebody in the group sends "@coddy_fake_bot what is up?"
+    Then the group shows a bot message containing "group answer"
+    And the group shows no bot message about a new session
+
   Scenario: A model button tapped in the chat is applied through polling
     When the bot is started
     And the user sends "/model"

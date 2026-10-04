@@ -75,6 +75,7 @@ func DefaultScopes() []string {
 		"messages:read",
 		"chats:read",
 		"profile:read",
+		"users:read",
 		"webhooks:events:read",
 		"webhooks:events:delete",
 	}
@@ -386,6 +387,8 @@ func matchRoute(method, path string) route {
 		rt = route{key: "GET /oauth/token/info", handler: (*Server).handleTokenInfo}
 	case method == http.MethodGet && slices.Equal(parts, []string{"profile"}):
 		rt = route{key: "GET /profile", scope: "profile:read", handler: (*Server).handleProfile}
+	case method == http.MethodGet && len(parts) == 2 && parts[0] == "users":
+		rt = route{key: "GET /users", id: parts[1], scope: "users:read", handler: (*Server).handleGetUser}
 	case method == http.MethodGet && len(parts) == 2 && parts[0] == "chats":
 		rt = route{key: "GET /chats", id: parts[1], scope: "chats:read", handler: (*Server).handleGetChat}
 	case method == http.MethodPost && slices.Equal(parts, []string{"messages"}):
@@ -417,6 +420,15 @@ func (s *Server) handleTokenInfo(r *http.Request, _ string, _ []byte, _ *Call) r
 
 func (s *Server) handleProfile(_ *http.Request, _ string, _ []byte, _ *Call) reply {
 	return dataReply(http.StatusOK, s.users[s.opts.BotUserID].wire())
+}
+
+func (s *Server) handleGetUser(_ *http.Request, id string, _ []byte, _ *Call) reply {
+	n, err := strconv.ParseInt(id, 10, 64)
+	u := s.users[n]
+	if err != nil || u == nil {
+		return apiErrorReply(http.StatusNotFound, "id", id, "not_found", "User not found")
+	}
+	return dataReply(http.StatusOK, u.wire())
 }
 
 func (s *Server) handleGetChat(_ *http.Request, id string, _ []byte, _ *Call) reply {

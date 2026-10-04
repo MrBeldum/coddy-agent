@@ -664,3 +664,27 @@ func TestUnknownRouteIs404(t *testing.T) {
 		t.Fatalf("calls %+v", s.fake.Calls(""))
 	}
 }
+
+func TestGetUser(t *testing.T) {
+	s := New(Options{Token: "tok"})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	s.AddUser(42, "anna", "Anna")
+	get := func(path string) (int, string) {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer tok")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, body := get("/users/42"); code != 200 || !strings.Contains(body, `"first_name":"Anna"`) || !strings.Contains(body, `"nickname":"anna"`) {
+		t.Fatalf("GET /users/42: %d %s", code, body)
+	}
+	if code, _ := get("/users/999"); code != 404 {
+		t.Fatalf("unknown user: %d", code)
+	}
+}

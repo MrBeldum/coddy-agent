@@ -211,6 +211,24 @@ func (c *Client) Profile(ctx context.Context) (*User, error) {
 	return &out, nil
 }
 
+// User reads one person's card.
+func (c *Client) User(ctx context.Context, id int64) (*User, error) {
+	var out User
+	if err := c.do(ctx, http.MethodGet, "/users/"+strconv.FormatInt(id, 10), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DisplayName is how a message from u is introduced in a quote.
+func (u *User) DisplayName() string {
+	name := strings.TrimSpace(strings.TrimSpace(u.FirstName) + " " + strings.TrimSpace(u.LastName))
+	if name == "" && u.Nickname != "" {
+		name = "@" + strings.TrimPrefix(u.Nickname, "@")
+	}
+	return name
+}
+
 // Chat reads one chat.
 func (c *Client) Chat(ctx context.Context, id int64) (*Chat, error) {
 	var out Chat

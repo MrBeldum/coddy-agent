@@ -2,7 +2,8 @@ Feature: Pachca chat commands
   The bot takes a few commands of its own - /clear starts a new session,
   /model shows the configured models as buttons and a click switches the
   conversation's model - and hands the settings commands (/plan, /think, ...)
-  to the session like a message. In a group chat a command needs no mention.
+  to the session like a message. In a group chat a command, like anything
+  else, is taken only with a mention of the bot or as a reply to its message.
 
   Background:
     Given a fake Pachca workspace whose bot is "coddy_bot"
@@ -22,6 +23,6 @@ Feature: Pachca chat commands
     Then the session model of "anna" is "rpa/qwen3.6-35b-a3b"
     And the model menu marks "rpa/qwen3.6-35b-a3b" as current
 
-  Scenario: A command in a group needs no mention
-    When the person "boris" writes "/help" in the group "dev"
+  Scenario: A command in a group is taken with a mention
+    When the person "boris" writes "@coddy_bot /help" in the group "dev"
     Then the group "dev" shows a bot message containing "/clear"

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/access"
+	"github.com/EvilFreelancer/coddy-agent/external/gateway/replyquote"
 	"github.com/EvilFreelancer/coddy-agent/external/gateway/sessionstore"
 	"github.com/EvilFreelancer/coddy-agent/internal/acp"
 	"github.com/EvilFreelancer/coddy-agent/internal/config"
@@ -120,11 +121,11 @@ func (b *Bot) handleMessage(ctx, turnCtx context.Context, c *Client, p messagePa
 		b.log.Debug("pachca: update ignored", "reason", "unknown command", "command", in.command)
 		return true
 	}
-	if isGroup && !b.addressed(ctx, c, p, in.command) {
+	if isGroup && !b.addressed(ctx, c, p) {
 		b.log.Debug("pachca: update ignored", "reason", "not addressed to the bot", "user", p.UserID, "chat", p.ChatID)
 		return true
 	}
-	if in.text == "" {
+	if in.text == "" && p.ParentMessageID == nil {
 		return true
 	}
 
@@ -155,23 +156,15 @@ func (b *Bot) allowed(chatID, userID int64, isGroup bool) bool {
 	return true
 }
 
-// addressed reports whether a group message is for the bot: a command, a
-// mention, a reply to one of its messages, or a message in a thread opened
-// under one of its messages.
-func (b *Bot) addressed(ctx context.Context, c *Client, p messagePayload, command string) bool {
-	if command != "" {
-		return true
-	}
+// addressed reports whether a group message is for the bot. A group is
+// where many people talk, so only a mention of the bot or a reply to one of
+// its messages is: a command without either, or a message in a thread under
+// the bot's message, is left to the people in it.
+func (b *Bot) addressed(ctx context.Context, c *Client, p messagePayload) bool {
 	if mentions(p.Content, b.nickname, b.selfID) {
 		return true
 	}
-	if p.ParentMessageID != nil && b.wroteMessage(ctx, c, *p.ParentMessageID) {
-		return true
-	}
-	if p.Thread != nil && p.Thread.MessageID != nil && b.wroteMessage(ctx, c, *p.Thread.MessageID) {
-		return true
-	}
-	return false
+	return p.ParentMessageID != nil && b.wroteMessage(ctx, c, *p.ParentMessageID)
 }
 
 // wroteMessage reports whether the bot wrote message id: from memory, or by
@@ -341,6 +334,9 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 	}
 
 	text := in.text
+	if text == "" && in.msg.ParentMessageID == nil {
+		return
+	}
 	// A typed "/model <id>" is a session-scoped pick on this surface even
 	// though the manager applies it inside the turn: the gateway remembers it
 	// like a button click.
@@ -352,6 +348,12 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 
 	tctx, cancel := context.WithTimeout(ctx, turnTimeout)
 	defer cancel()
+	// A reply asks about the message it answers: the session receives that
+	// message quoted in front of what the person wrote. Commands are not
+	// quoted - the manager reads them off the start of the text.
+	if in.msg.ParentMessageID != nil && !isSettingsCommand(in.command) {
+		text = b.quoteParent(tctx, c, *in.msg.ParentMessageID, text)
+	}
 	st, err := b.ensureSession(tctx, key)
 	if err != nil {
 		b.log.Warn("pachca: ensure session", "err", err)
@@ -390,6 +392,32 @@ func (b *Bot) processMessage(ctx context.Context, in inbound, key string) {
 	}
 }
 
+// quoteParent puts the replied-to message in front of text. A message the
+// bot cannot read is left out rather than holding the turn back.
+func (b *Bot) quoteParent(ctx context.Context, c *Client, parentID int64, text string) string {
+	m, err := c.Message(ctx, parentID)
+	if err != nil {
+		b.log.Debug("pachca: read replied-to message", "err", err, "message", parentID)
+		return text
+	}
+	b.parents.put(m.ID, m.UserID)
+	return replyquote.Prompt(b.authorName(ctx, c, m.UserID), m.Content, text)
+}
+
+// authorName names the author of a quoted message: the bot itself, or the
+// person's card when the token may read it (users:read), else nobody.
+func (b *Bot) authorName(ctx context.Context, c *Client, userID int64) string {
+	if userID == b.selfID {
+		return b.displayName
+	}
+	u, err := c.User(ctx, userID)
+	if err != nil {
+		b.log.Debug("pachca: read author", "err", err, "user", userID)
+		return ""
+	}
+	return u.DisplayName()
+}
+
 func (b *Bot) helpText() string {
 	var sb strings.Builder
 	sb.WriteString("**Commands**\n\n")
@@ -400,10 +428,11 @@ func (b *Bot) helpText() string {
 	sb.WriteString("/context - context window usage\n")
 	sb.WriteString("/clear - start a new session\n")
 	sb.WriteString("/help - this message\n\n")
+	sb.WriteString("Reply to a message to ask about it.\n")
 	if b.nickname != "" {
-		sb.WriteString("In a group chat mention me (@" + b.nickname + "), reply to my message or write in a thread under it.")
+		sb.WriteString("In a group chat mention me (@" + b.nickname + ") or reply to my message; commands there need the mention too.")
 	} else {
-		sb.WriteString("In a group chat mention me, reply to my message or write in a thread under it.")
+		sb.WriteString("In a group chat mention me or reply to my message; commands there need the mention too.")
 	}
 	return sb.String()
 }

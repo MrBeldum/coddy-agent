@@ -529,8 +529,9 @@ func TestResumeTapReplacesTheMenuAndPagingEditsIt(t *testing.T) {
 	}
 }
 
-// In a group the command is answered without a mention, like /clear.
-func TestGroupChatAnswersResumeWithoutAMention(t *testing.T) {
+// In a group the command needs the bot's mention, like /clear, or a reply
+// to one of the bot's messages.
+func TestGroupChatAnswersResumeOnlyWhenAddressed(t *testing.T) {
 	base, _, err := logger.New(config.Logger{Level: config.LogLevelError, Format: config.LogFormatText, Outputs: []string{config.LogOutputStderr}})
 	if err != nil {
 		t.Fatal(err)
@@ -538,8 +539,12 @@ func TestGroupChatAnswersResumeWithoutAMention(t *testing.T) {
 	b := New(&config.TelegramGatewayConfig{}, nil, "", logger.Component(base, logger.ComponentGatewayTelegram), "", nil)
 	b.botName = "coddy_bot"
 	msg := commandMessage("/resume login")
+	if b.shouldRespond(msg, msg.Text) {
+		t.Fatal("/resume without a mention is answered in a group")
+	}
+	msg.ReplyToMessage = &tgbotapi.Message{From: &tgbotapi.User{UserName: "coddy_bot"}}
 	if !b.shouldRespond(msg, msg.Text) {
-		t.Fatal("/resume in a group is not answered")
+		t.Fatal("/resume as a reply to the bot is not answered")
 	}
 }
 

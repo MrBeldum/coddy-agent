@@ -201,6 +201,73 @@ func (w *pollingWorld) userSends(text string) error {
 	return nil
 }
 
+// pollingGroupID is the group of the addressing scenario.
+const pollingGroupID = int64(-4242)
+
+func (w *pollingWorld) userReplies(text string) error {
+	var last int
+	for _, m := range w.fake.Chat(pollingChatID).Messages {
+		if m.From == "bot" {
+			last = m.MessageID
+		}
+	}
+	if last == 0 {
+		return fmt.Errorf("no bot message to reply to")
+	}
+	upd, _ := w.fake.InjectMessage(tgfake.IncomingMessage{ChatID: pollingChatID, UserID: pollingUserID, Text: text, ReplyToMessageID: last})
+	w.lastUpdate = upd
+	return nil
+}
+
+func (w *pollingWorld) agentWasAsked(doc *godog.DocString) error {
+	want := strings.TrimSpace(doc.Content)
+	deadline := time.Now().Add(pollingSettle)
+	for {
+		w.runner.mu.Lock()
+		prompts := append([]string(nil), w.runner.prompts...)
+		w.runner.mu.Unlock()
+		for _, p := range prompts {
+			if p == want {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the agent was never asked %q; it was asked %q", want, prompts)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (w *pollingWorld) groupMemberSends(text string) error {
+	upd, _ := w.fake.InjectMessage(tgfake.IncomingMessage{ChatID: pollingGroupID, ChatType: "group", UserID: pollingUserID + 1, Text: text})
+	w.lastUpdate = upd
+	return nil
+}
+
+func (w *pollingWorld) groupShowsBotMessage(text string) error {
+	deadline := time.Now().Add(pollingSettle)
+	for {
+		for _, m := range w.fake.Chat(pollingGroupID).Messages {
+			if m.From == "bot" && strings.Contains(m.Text, text) {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no bot message containing %q in the group:\n%s", text, w.fake.Chat(pollingGroupID).Text())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (w *pollingWorld) groupShowsNoNewSession() error {
+	for _, m := range w.fake.Chat(pollingGroupID).Messages {
+		if m.From == "bot" && strings.Contains(m.Text, "New session") {
+			return fmt.Errorf("a /clear without a mention was answered in the group")
+		}
+	}
+	return nil
+}
+
 // await polls the chat until check holds or the settle time passes.
 func (w *pollingWorld) await(what string, check func(tgfake.ChatView) bool) error {
 	deadline := time.Now().Add(pollingSettle)
@@ -358,13 +425,18 @@ func initializePollingScenario(sc *godog.ScenarioContext) {
 
 	sc.When(`^the bot is started$`, w.botStarted)
 	sc.When(`^the user sends "([^"]*)"$`, w.userSends)
+	sc.When(`^the user replies "([^"]*)" to the bot's last message$`, w.userReplies)
+	sc.When(`^somebody in the group sends "([^"]*)"$`, w.groupMemberSends)
+	sc.Then(`^the agent was asked:$`, w.agentWasAsked)
+	sc.Then(`^the group shows a bot message containing "([^"]*)"$`, w.groupShowsBotMessage)
+	sc.Then(`^the group shows no bot message about a new session$`, w.groupShowsNoNewSession)
 	sc.When(`^the user taps the button for "([^"]*)"$`, w.userTapsButton)
 	sc.When(`^the bot is stopped$`, w.botStopped)
 
 	sc.Then(`^the Bot API received "([^"]*)"$`, w.botAPIReceived)
 	sc.Then(`^the gateway's proxy carried the call to "([^"]*)"$`, w.gatewayProxyCarried)
 	sc.Then(`^the bot knows itself as "([^"]*)"$`, w.botKnowsItselfAs)
-	sc.Then(`^the chat shows a bot message containing "([^"]*)"$`, w.chatShowsBotMessage)
+	sc.Step(`^the chat shows a bot message containing "([^"]*)"$`, w.chatShowsBotMessage)
 	sc.Then(`^the next poll confirms that update$`, w.nextPollConfirms)
 	sc.Then(`^the keyboard message marks "([^"]*)" as current$`, w.keyboardMarksCurrent)
 	sc.Then(`^the session model is "([^"]*)"$`, w.sessionModelIs)
