@@ -1058,11 +1058,12 @@ func (s *Server) coddySessionsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The rail badge is global to History, not to the page or any filter the
-	// reader currently has open. Active child sessions contribute even though
-	// History itself keeps their rows hidden.
+	// reader currently has open. It counts conversations: a subagent's turn
+	// runs under its parent's, which is already counted, and a scheduler run
+	// is not a conversation anyone holds.
 	historyRows := rows
-	if !isNormalHistoryList(listOpts) || !listOpts.IncludeSubagents {
-		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{IncludeSubagents: true})
+	if !isNormalHistoryList(listOpts) {
+		historyRows, err = fs.ListSnapshotsWith(session.ListOptions{})
 		if err != nil {
 			s.log.Error("coddy sessions active count", "error", err)
 			http.Error(w, `{"error":{"message":"list failed"}}`, http.StatusInternalServerError)

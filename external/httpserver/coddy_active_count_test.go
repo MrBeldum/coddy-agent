@@ -15,7 +15,9 @@ import (
 	"github.com/EvilFreelancer/coddy-agent/internal/session"
 )
 
-func TestCoddySessionsListCountsActiveSubagentTurns(t *testing.T) {
+// The History badge counts the conversations a person is having, so a session
+// whose turn spawned subagents counts once, however many children run under it.
+func TestCoddySessionsListActiveCountLeavesSubagentTurnsOut(t *testing.T) {
 	started := make(chan string, 3)
 	release := make(chan struct{})
 	runner := func(_ context.Context, st *session.State, _ []acp.ContentBlock, _ acp.UpdateSender) (string, error) {
@@ -86,7 +88,7 @@ func TestCoddySessionsListCountsActiveSubagentTurns(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.ActiveCount != 3 {
-		t.Fatalf("active_count = %d, want 3 including the subagent turn", body.ActiveCount)
+	if body.ActiveCount != 2 {
+		t.Fatalf("active_count = %d, want 2: the subagent turn is not a conversation of its own", body.ActiveCount)
 	}
 }

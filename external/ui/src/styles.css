@@ -1074,6 +1074,16 @@ body {
   box-shadow: 0 0 0 1px var(--coddy-canvas-gradient-top);
 }
 
+/* On the labelled rail the badge stays on the icon, at the same offset from its
+   centre as on the icon-only rail (19px right and up), instead of the corner of
+   the whole pill: the icon sits centred in the 44px first track. */
+.rail-nav-hit-wide .rail-active-count {
+  top: calc(50% - 19px);
+  right: auto;
+  left: 41px;
+  transform: translateX(-100%);
+}
+
 .rail-nav-label {
   font-size: 13px;
   font-weight: 600;
