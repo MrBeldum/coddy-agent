@@ -8,8 +8,8 @@ alwaysApply: false
 
 Before you tell the user that a UI change is complete or merge-ready:
 
-1. Start **`npx vite`** in **`external/ui`**, bound to a free loopback port (for example **`127.0.0.1:5201`**).
-2. Use **Playwright MCP** (or the repo browser tools) to open **`http://localhost:5201/layout-scroll-check.html`** and **`http://localhost:5201/`** with at least two viewports: **narrow** (for example **390px**) and **wide** (for example **1280px**).
+1. Choose one free port (for example **`PORT=5201`**) and start **`npx vite --host localhost --port "$PORT"`** in **`external/ui`**.
+2. Use **Playwright MCP** (or the repo browser tools) to open **`http://localhost:$PORT/layout-scroll-check.html`** and **`http://localhost:$PORT/`** with at least two viewports: **narrow** (for example **390px**) and **wide** (for example **1280px**).
 3. Run **`browser_evaluate`** to compare **`getBoundingClientRect()`** edges for **`.chat-header`**, **`.messages-inner`** first child, and **`.composer-card`** (left and right should match within about **1px** after shared column padding).
 4. If anything is off, fix CSS and re-check before reporting done.
 
