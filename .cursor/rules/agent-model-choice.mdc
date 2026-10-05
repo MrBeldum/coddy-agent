@@ -3,6 +3,9 @@ description: User-owned model choice and settings notices
 globs:
   - "internal/agent/**/*.go"
   - "internal/tooling/**/*.go"
+  - "internal/tools/switch_model*.go"
+  - "internal/tools/compact_context*.go"
+  - "internal/config/**/*"
   - "internal/session/**/*settings*.go"
   - "external/scheduler/**/*.go"
   - "external/cli/**/*.go"

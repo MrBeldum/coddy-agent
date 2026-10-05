@@ -15,7 +15,7 @@ alwaysApply: false
 ---
 # Provider authentication isolation
 
-- A machine-wide Codex or Devin CLI login serves exactly one configured row: the sole row, or otherwise the conventionally named row.
+- A machine-wide Codex or Devin CLI login serves exactly one configured row: the sole row, or among multiple rows the row named `codex` for Codex and `devin` for Devin.
 - Completion, model discovery, context-window lookup, usage, labels, dry-run, and sign-in all propagate `NoCLILogin`.
 - A second credential-less row cannot consume another row's login.
 - An unsaved retyped sign-in probes the requested provider type and only the current proxy.
