@@ -4637,6 +4637,9 @@ code.md-math-pending {
 .composer-queue-text {
   flex: 1 1 auto;
   min-width: 0;
+  /* Centres the first line on the 24px close control beside it, so a one-line
+     message sits level with its × and a longer one hangs from the same line. */
+  padding-top: 3px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   display: -webkit-box;

@@ -31,10 +31,6 @@ test("the cancel control sits in the top right corner", () => {
   expect(rule(".composer-queue-remove")).toMatch(/align-self:\s*flex-start/);
 });
 
-test("queued message text uses its natural line box", () => {
-  expect(body(".composer-queue-text")).not.toMatch(/padding-top\s*:/);
-});
-
 test("the close control is a framed square that lightens under the pointer", () => {
   const close = rule(".sessions-close");
   expect(close).toMatch(/border:\s*1px solid/);
