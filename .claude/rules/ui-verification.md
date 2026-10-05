@@ -8,8 +8,8 @@ paths:
 
 Before you tell the user that a UI change is complete or merge-ready:
 
-1. Start **`npx vite`** in **`external/ui`** on a free port (for example **`127.0.0.1:5201`**).
-2. Use **Playwright MCP** (or the repo browser tools) to open **`/layout-scroll-check.html`** and **`/`** with at least two viewports: **narrow** (for example **390px**) and **wide** (for example **1280px**).
+1. Choose one free port (for example **`PORT=5201`**) and start **`npx vite --host localhost --port "$PORT"`** in **`external/ui`**.
+2. Use **Playwright MCP** (or the repo browser tools) to open **`http://localhost:$PORT/layout-scroll-check.html`** and **`http://localhost:$PORT/`** with at least two viewports: **narrow** (for example **390px**) and **wide** (for example **1280px**).
 3. Run **`browser_evaluate`** to compare **`getBoundingClientRect()`** edges for **`.chat-header`**, **`.messages-inner`** first child, and **`.composer-card`** (left and right should match within about **1px** after shared column padding).
 4. If anything is off, fix CSS and re-check before reporting done.
 
@@ -58,3 +58,10 @@ opens a 3306-message session under CPU throttling, scrolls it without a jump, ed
 older page, runs a turn in a second browser, reads through a swarm relay, and fails past a budget.
 Run it once more with **`CODDY_ENGINE=webkit`** when the change touches scroll anchoring: WebKit does
 not anchor scrolling, so there the window's own correction is all that keeps the reader's row still.
+
+## Capture isolation and redaction
+
+- Captures use a temporary browser-context page, never the operator's main tab, and close it afterward.
+- Navigate the capture page through localhost to avoid host-specific zoom. Set the viewport explicitly and blur focus unless focus is what the screenshot documents.
+- Screenshot stands use isolated `HOME` and `CODDY_HOME` with neutral fixtures.
+- Before pushing, inspect every PNG for skill names, hosts, tokens, usernames, and personal paths.
