@@ -263,6 +263,14 @@ import {
   BackgroundTasksPanel,
   type TaskFocus,
 } from "./tasks/BackgroundTasksPanel";
+import { DockTabs } from "./components/DockTabs";
+import { SessionChangesPanel } from "./changes/SessionChangesPanel";
+import { DiffViewerModal } from "./changes/DiffViewerModal";
+import { emitChangesSettled } from "./changes/sessionChangesBus";
+import {
+  setSessionChangesEnabled,
+  readSessionChangesFromConfigDoc,
+} from "./chat/sessionChangesConfig";
 import {
   clearFinishedBackgroundTasks,
   getBackgroundTask,
@@ -1155,6 +1163,14 @@ export function App() {
   const [tasksOpen, setTasksOpen] = useState(
     () => initialRoute.branch === "session" && initialRoute.tasksOpen,
   );
+  // Which face of the shared right dock is showing. Tasks keep every existing
+  // entry point; the changed-files card asks for the Changes face.
+  const [dockTab, setDockTab] = useState<"tasks" | "changes">("tasks");
+  // The file a card row click asked the Changes face to open on.
+  const [changesPath, setChangesPath] = useState<string>("");
+  // The full review window is a modal rather than a drawer: it needs the whole
+  // width to put two diff columns side by side.
+  const [changesViewerOpen, setChangesViewerOpen] = useState(false);
   // A card the shell asks the Tasks panel to open from a task-targeted link. Which
   // cards are open otherwise is the panel's own business and is not part of the address.
   //
@@ -2805,6 +2821,7 @@ export function App() {
           autoEnabled: compaction?.auto_enable !== false,
           threshold: threshold >= 1 && threshold <= 100 ? threshold : 80,
         });
+        setSessionChangesEnabled(readSessionChangesFromConfigDoc(res.data));
       }
     })();
   }, [headers, configEpoch]);
@@ -3003,6 +3020,7 @@ export function App() {
       onConfigReloaded: () => serverEventHandlersRef.current.configReloaded(),
       onMessageQueue: (sid, queue) =>
         serverEventHandlersRef.current.messageQueue(sid, queue),
+      onSessionChanges: (sid) => emitChangesSettled(sid),
       onSessionSettings: (event) =>
         serverEventHandlersRef.current.sessionSettings(event),
       onSubagentPermission: (parentSid) =>
@@ -5467,11 +5485,34 @@ export function App() {
     setSchedulerOpen(false);
     setSchedulerEditor(null);
     setSettingsRoute(false);
+    setDockTab("tasks");
     setTasksOpen(true);
     if (isStackedShell()) {
       setSessionTasksHash(sid);
     }
   }, [sessionId]);
+
+  /** Opens the dock on its Changes face, from the changed-files card. An empty
+   *  path is the whole set; a path preselects the clicked file's diff. */
+  const openChangesDock = useCallback(
+    (path?: string) => {
+      const sid = sessionId.trim();
+      if (!sid) {
+        return;
+      }
+      setSessionsOpen(false);
+      setSchedulerOpen(false);
+      setSchedulerEditor(null);
+      setSettingsRoute(false);
+      setChangesPath(path || "");
+      setDockTab("changes");
+      setTasksOpen(true);
+      if (isStackedShell()) {
+        setSessionTasksHash(sid);
+      }
+    },
+    [sessionId],
+  );
 
   const closeTasksDrawer = useCallback(() => {
     setTasksOpen(false);
@@ -5871,7 +5912,11 @@ export function App() {
   }, [backgroundTasks]);
 
   // The panel belongs to a chat, so it only exists when one is open.
-  const tasksPanelOpen = tasksOpen && !!sessionId.trim();
+  const tasksPanelOpen = tasksOpen && dockTab === "tasks" && !!sessionId.trim();
+  // Tasks and Changes are two faces of one right dock: `tasksOpen` keeps being
+  // the dock's open state (every Escape path and stacked-shell rule already
+  // speaks it), the tab picks the face on show.
+  const dockOpen = tasksOpen && !!sessionId.trim();
 
   const shellBackdropOpen =
     sessionsOpen ||
@@ -6342,7 +6387,8 @@ export function App() {
         className={[
           "shell-main",
           sessionsOpen ? "shell-history-open" : "",
-          tasksPanelOpen ? "shell-tasks-open" : "",
+          dockOpen ? "shell-tasks-open" : "",
+          dockOpen && dockTab === "changes" ? "shell-changes-open" : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -6522,33 +6568,56 @@ export function App() {
             />
           </div>
         ) : null}
-        {tasksPanelOpen ? (
-          <BackgroundTasksPanel
+        {changesViewerOpen && sessionId.trim() ? (
+          <DiffViewerModal
             open
-            focus={
-              tasksFocus && tasksFocus.sid === sessionId.trim()
-                ? tasksFocus
-                : null
-            }
-            onFocusHonoured={spendTasksFocus}
-            tasks={backgroundTasks}
-            loadOutput={loadBackgroundTaskOutput}
-            listError={backgroundListError}
-            loading={backgroundListLoading}
-            nowMs={backgroundNowMs}
-            onClose={closeTasksDrawer}
-            onStopTask={stopBackgroundTaskById}
-            onClearFinished={() => {
-              void clearFinishedTasks();
-            }}
-            onOpenSession={openSessionInPlace}
+            sessionId={sessionId}
+            onClose={() => setChangesViewerOpen(false)}
           />
+        ) : null}
+        {dockOpen ? (
+          dockTab === "changes" ? (
+            <SessionChangesPanel
+              open
+              sessionId={sessionId}
+              initialPath={changesPath || undefined}
+              dockTab={dockTab}
+              onDockTab={setDockTab}
+              onClose={closeTasksDrawer}
+            />
+          ) : (
+            <BackgroundTasksPanel
+              open
+              headAddon={
+                <DockTabs tab={dockTab} onTab={setDockTab} />
+              }
+              focus={
+                tasksFocus && tasksFocus.sid === sessionId.trim()
+                  ? tasksFocus
+                  : null
+              }
+              onFocusHonoured={spendTasksFocus}
+              tasks={backgroundTasks}
+              loadOutput={loadBackgroundTaskOutput}
+              listError={backgroundListError}
+              loading={backgroundListLoading}
+              nowMs={backgroundNowMs}
+              onClose={closeTasksDrawer}
+              onStopTask={stopBackgroundTaskById}
+              onClearFinished={() => {
+                void clearFinishedTasks();
+              }}
+              onOpenSession={openSessionInPlace}
+            />
+          )
         ) : null}
 
         {atSwarmRoot ? null : (
           <ChatScreen
             title={currentTitle}
             sessionId={sessionId}
+            onOpenChangesViewer={() => setChangesViewerOpen(true)}
+            onOpenSessionChanges={openChangesDock}
             backgroundTasks={backgroundTasks}
             onOpenBackgroundTasks={openTasksFromNav}
             onBackgroundTasksChanged={() => {

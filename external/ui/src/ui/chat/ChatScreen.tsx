@@ -23,6 +23,8 @@ import type { QueuedMessage, QueueMode } from "./Composer";
 import type { MessageListProps } from "../messages/MessageList";
 import type { BackgroundTask } from "../tasks/types";
 import { countRunningTasks, isAwaitingPermission } from "../tasks/taskStatus";
+import { finishedToolCalls } from "../changes/toolActivity";
+import { SessionChangesCard } from "../changes/SessionChangesCard";
 import type { TurnProgress } from "./turnProgress";
 import { SubagentPermissionCards } from "./SubagentPermissionCard";
 import { SubagentReadOnlyNotice } from "./SubagentReadOnlyNotice";
@@ -153,6 +155,10 @@ export function ChatScreen(props: {
   /** The Tasks panel is showing, for the header control's expanded state. */
   backgroundTasksOpen?: boolean;
   onCloseBackgroundTasks?: () => void;
+  /** Opens the session diff viewer from the changed-files card under the transcript. */
+  onOpenSessionChanges?: (path?: string) => void;
+  /** Opens the full-screen review window from the card summary. */
+  onOpenChangesViewer?: () => void;
   /** Re-read the task rows: a background subagent's prompt was answered here. */
   onBackgroundTasksChanged?: () => void;
   /** Roots this session works in - its own directory, then its worktrees -
@@ -824,12 +830,25 @@ export function ChatScreen(props: {
                 isAwaitingPermission,
               )}
               tail={
-                props.backgroundTasks ? (
-                  <SubagentPermissionCards
-                    tasks={props.backgroundTasks}
-                    onAnswered={() => props.onBackgroundTasksChanged?.()}
-                  />
-                ) : null
+                <>
+                  {props.backgroundTasks ? (
+                    <SubagentPermissionCards
+                      tasks={props.backgroundTasks}
+                      onAnswered={() => props.onBackgroundTasksChanged?.()}
+                    />
+                  ) : null}
+                  {props.onOpenSessionChanges &&
+                  props.onOpenChangesViewer &&
+                  props.sessionId ? (
+                    <SessionChangesCard
+                      sessionId={props.sessionId}
+                      generating={props.generating === true}
+                      toolActivity={finishedToolCalls(props.items)}
+                      onOpenReview={props.onOpenSessionChanges}
+                      onOpenViewer={props.onOpenChangesViewer}
+                    />
+                  ) : null}
+                </>
               }
             />
             <div className="chat-scroll-tail" aria-hidden />

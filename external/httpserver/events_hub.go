@@ -201,6 +201,39 @@ func (s *Server) publishConfigReloaded() {
 	}
 }
 
+// sessionChangesFrame says that the recorded change set of one session settled
+// or moved: a finished turn's workspace diff is on disk (or there was nothing
+// to store), or the session was rolled back.
+//
+// Thin like configReloadedFrame: the change set itself stays behind
+// GET /coddy/sessions/{id}/changes, and the event only tells the changed-files
+// card that reading it now gives the answer the turn left.
+func sessionChangesFrame(sessionID string, at time.Time) []byte {
+	body, err := json.Marshal(map[string]interface{}{
+		"object":    "coddy.session_changes",
+		"sessionId": sessionID,
+		"at":        at.UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return nil
+	}
+	frame := make([]byte, 0, len(body)+40)
+	frame = append(frame, "event: session_changes\ndata: "...)
+	frame = append(frame, body...)
+	frame = append(frame, "\n\n"...)
+	return frame
+}
+
+// publishSessionChanges announces a settled change set to every events subscriber.
+func (s *Server) publishSessionChanges(sessionID string) {
+	if s.events == nil || sessionID == "" {
+		return
+	}
+	if frame := sessionChangesFrame(sessionID, time.Now()); frame != nil {
+		s.events.publish(frame)
+	}
+}
+
 // sessionRewoundFrame renders an in-place history truncation as one SSE frame.
 func sessionRewoundFrame(sessionID string, messagesRev uint64) []byte {
 	body, err := json.Marshal(map[string]interface{}{

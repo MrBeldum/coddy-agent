@@ -22,6 +22,11 @@ export type ServerEventHandlers = {
    *  follow-up onto the turn it is watching. Carries the whole queue and its
    *  version; the caller keeps the highest version it has seen. */
   onMessageQueue?: (sessionId: string, queue: QueuedMessageEvent) => void;
+  /** A session's recorded change set settled or moved: a finished turn's workspace
+   *  diff is on disk, or the session was rolled back. The changed-files card reads
+   *  the set when this arrives rather than when the stream ends, which the capture
+   *  can still be racing. */
+  onSessionChanges?: (sessionId: string) => void;
   /** A session's settings changed - model, reasoning, mode, permission mode,
    *  the overrides for the next turns - from any surface. Carries the whole
    *  versioned snapshot, and a notice of the change when the agent made it
@@ -62,6 +67,7 @@ export type ServerEvent =
   | { type: "turn_ended"; sessionId: string }
   | { type: "provider_usage"; sessionId: string; usage: ProviderUsage }
   | { type: "message_queue"; sessionId: string; queue: QueuedMessageEvent }
+  | { type: "session_changes"; sessionId: string }
   | { type: "session_settings"; event: SessionSettingsEvent }
   | { type: "config_reloaded" }
   | { type: "subagent_permission"; parentSessionId: string }
@@ -185,6 +191,7 @@ export function parseServerEvent(ev: {
     }
     case "turn_started":
     case "turn_ended":
+    case "session_changes":
     case "session_rewound": {
       const sid = sessionIdOf(ev.data);
       return sid ? { type: ev.event, sessionId: sid } : null;
@@ -223,6 +230,9 @@ export function dispatchServerEvent(
       return;
     case "session_rewound":
       h.onSessionRewound?.(event.sessionId);
+      return;
+    case "session_changes":
+      h.onSessionChanges?.(event.sessionId);
       return;
     case "turn_started":
       h.onTurnStarted(event.sessionId);

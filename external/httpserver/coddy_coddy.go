@@ -233,6 +233,7 @@ func (s *Server) registerCoddyRoutes() {
 	s.registerDocsRoutes()
 	s.registerSchedulerRoutes()
 	s.registerRewindRoute()
+	s.registerChangesRoutes()
 	s.registerSkillsManagementRoutes()
 	s.registerMCPManagementRoutes()
 }

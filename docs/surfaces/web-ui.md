@@ -999,6 +999,118 @@ A held project hooks file surfaces in the transcript as a **notice-level system 
 - **external/ui/src/ui/messages/SystemNoticeMessage.test.tsx** (notice row: status role, notice class, no retry)
 - **external/ui/src/ui/settings/settingsSections.test.ts** (translated label and blurb for the `hooks` config tab)
 
+## Session changed files card
+
+The card sits at the **end of the transcript**, next to the subagent permission
+rows (`.changes-card`, `external/ui/src/ui/changes/`). It summarises what the
+**whole session** did to the workspace — `N files changed`, `+A −D`, then a row
+per file with its own counts — because the numbers describe every turn above it
+together, not any single message.
+
+![The changed-files card under a finished turn: 3 files changed, +8 −1, with Undo and Review](../assets/session-changes-card-dark-1280.png)
+
+*The changed-files card under the transcript: the net change of the whole session, one row per file*
+
+- Data comes from `GET /coddy/sessions/{id}/changes`, which collapses the
+  per-turn workspace diffs stored in the session bundle. Those diffs are captured
+  by snapshotting the workspace around each turn, so an edit made by a shell
+  command is listed exactly like one made by the `edit` tool.
+- **While the agent works the card steps aside**; the set is still moving. When the
+  turn ends it waits for **`event: session_changes`** on `GET /coddy/events`,
+  which the server sends once the turn's diff is on disk, then reads and shows the
+  set. Reading on the end of the stream instead raced the capture and could show the
+  old set. With no event within 4 s (the stream is down, the turn came through
+  another door) it reads anyway. A failed read keeps the previous set on screen — a
+  restarting server must not look like "nothing changed".
+- **Ctrl+S / Cmd+S shows or hides the card** at any time; the browser's "Save
+  page" never opens. Opened mid-turn it lists the finished turns plus what the
+  running turn has written so far — the server compares the workspace with the
+  turn's pre-turn snapshot — and it re-reads after every finished tool call while
+  it stays open. Hidden, it reads nothing. Opened in a chat that changed nothing,
+  it says so in one line.
+- A session that changed nothing renders **no card at all**, and neither does one
+  where every change cancelled out (a file created and removed again, or edited
+  and edited back, is left out of the set).
+- **Review** and the summary open the review window; **clicking a file row**
+  opens the docked drawer on that one file.
+- **`.idea`, `.vscode`, `.git` and `.svn` never appear.** An editor rewrites its
+  settings on its own schedule and a VCS client rewrites its administrative area.
+  The rule is `session.IsToolStatePath` and it applies three times over: the
+  workspace snapshot skips those folders, the aggregate drops them when a session
+  recorded by an older build is read back, and the working-copy scopes filter them
+  as well. Matching is on whole path segments, so `docs/idea.md`, `.ideas/plan.md`
+  and `git-notes.txt` are ordinary files.
+- **Undo** asks first, then POSTs `.../changes/revert`, which reverses every turn
+  diff of the session: edited files go back to their pre-session content and
+  created files are removed. Tool state is skipped here too - putting `.git/index`
+  back would leave the client describing a tree that is no longer there. Git is
+  not involved, so the confirmation says plainly that it undoes the whole session.
+- `ui.session_changes: false` in config.yaml hides the card and stops it
+  fetching; omitted keeps the default (on).
+
+Two surfaces read the change set, picked by the question being asked. A **file
+row** asks about one file and opens the drawer on it; the **summary**, **Review**
+and **`+N more`** ask about the whole set and open the review window.
+
+The **drawer** (`.changes-panel`, `SessionChangesPanel.tsx`) and the **Tasks
+panel** are two faces of one right dock (`dockTab` in `App.tsx`): opening one
+closes the other, a tab strip in the panel head switches between them, and the
+chat column reserves exactly the width of the face on show. The drawer shows the
+file list on top and the unified diff of the selected file below. The diff body
+reuses `PermissionToolPreview` — the same renderer the permission gate and the
+transcript foldouts use — fed by `diffPreviewFromPatch`, so a diff looks the same
+everywhere in the app. A binary file is listed but has no diff to show.
+
+![The right dock on its Changed files face: the file list on top, the diff of notes.txt below](../assets/session-changes-dock-dark-1280.png)
+
+*The shared right dock on the Changed files face; the tab strip in the head switches to Background tasks*
+
+The **review window** (`.dv-window`, `DiffViewerModal.tsx`) is a modal holding
+every changed file diff in one scrollable document. Its toolbar carries a scope
+select (**All edits** / **Last turn** / **Uncommitted** / **All changed files**,
+with that scope's `+A −D` beside it), collapse/expand all, go to file, the
+unified/split toggle, and the file tree. A file section has a sticky header with
+copy-path and collapse on hover. Between hunks sits a wordless separator rather
+than an `N unmodified lines` filler row.
+
+![The review window: a scope select, the totals, and one section per changed file](../assets/session-changes-review-window-dark-1280.png)
+
+*The review window over the whole change set: every file diff in one scrollable document*
+
+Code is coloured by `lowlight` (highlight.js behind a tree API, the same engine
+`rehype-highlight` gives the markdown renderer), so the `hljs-*` styles already
+in the stylesheet apply and the viewer never injects markup. The grammar comes
+from the file extension via `diffLanguage.ts`; an unknown extension renders as
+plain text rather than being guessed at.
+
+The scopes come from `?scope=` on the same two routes. `turn` folds only the
+newest stored turn. `uncommitted` leaves the session behind and diffs the
+**tracked** working copy against **`git HEAD`**, counting untracked files in a
+banner without reading them. `all` is that plus the untracked files themselves,
+for when the question is what is in this folder that HEAD has not — capped at 500
+files and 2 MB each, with whatever it left out reported in the same banner under a
+different heading. Neither reads what git is told to ignore, so a build directory
+or a virtualenv stays out on its own. In a folder that is not a git repository
+the window says so instead of showing an empty diff (`vcsAvailable: false`).
+
+The detail route reads only the file it was asked for
+(`gitws.UncommittedChangeFor`, `gitws.WorktreeChangeFor`): the viewer loads one
+patch at a time, and resolving the whole set per request meant a git subprocess
+per changed file on every one of them. An untracked path is only read once git
+has named it, so the route cannot be pointed at an arbitrary file.
+
+Automated checks:
+
+- **external/ui/src/ui/changes/sessionChangesText.test.ts** (Russian plural buckets, path splitting)
+- **external/ui/src/ui/changes/SessionChangesCard.test.tsx** (counts, empty session, preference off, undo confirmation, which surface each entry point opens)
+- **external/ui/src/ui/changes/diffRows.test.ts** (unified and split row building, uneven runs, hunk gaps)
+- **external/ui/src/ui/changes/fileTree.test.ts** (directory grouping and single-child chain collapsing)
+- **external/ui/src/ui/changes/DiffViewerModal.test.tsx** (scope switching, view toggle, collapse all, go to file, tree, copy path, untracked banner, no-git notice, colouring on and off)
+- **external/ui/src/ui/changes/diffLanguage.test.ts** + **highlightLine.test.ts** (grammar choice, and that colouring reproduces the line exactly)
+- **internal/linediff** (unified diff and line stats; Myers' O(ND) algorithm in linear space, so a scattered edit in a large file stays a scattered edit - the old LCS table had to be abandoned above a size cap and reported such a file as a whole rewrite. The search is bounded by `snakeBudget`, which only a pair that is both enormous and almost entirely different can exhaust; that pair falls back to a wholesale replacement)
+- **internal/gitws/changes_test.go** (working-copy statuses, untracked counting and inclusion, the read caps, .gitignore, whitespace-preserving blob reads, renames, and that an unlisted path stays unreadable)
+- **features/session_changes.feature** (end to end: a turn edits a file, the card reports it, the viewer reads the diff, the last-turn scope narrows it, undo restores the workspace)
+
 ### Subagent transcripts
 
 A child session is read-only: `GET /coddy/sessions/{id}/messages` returns `subagent {parentSessionId, name, taskId}` and `readOnly: true`, and every prompt against it is refused with 409. The SPA reads those two fields (absent on an ordinary session), renders the transcript with the usual message renderer, and replaces the composer with a notice (`SubagentReadOnlyNotice`): "Read-only transcript of subagent `<name>`. Prompts go to the parent chat." with an **Open parent chat** link to `#/s/<parentSessionId>`. Retry, message editing and the plan card's **Run plan** / **Discard** are withheld for such a session (the handlers are not passed at all, so a `plan_document` card renders without its footer and its markdown editor is read-only), and the chat header reads "Subagent `<name>`" because a child has no History row to name it. Child sessions are hidden from History, and nothing about a child's id sets it apart, so the shell fetches any id opened from the Tasks panel or by URL and lets the messages endpoint answer.

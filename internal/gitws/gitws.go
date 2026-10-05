@@ -199,6 +199,16 @@ func WorktreesRoot(repoRoot string) string {
 	return filepath.Join(repoRoot, ".coddy", "worktrees")
 }
 
+// IsWorktreesRoot reports whether dir is the folder WorktreesRoot names, for
+// whichever repository it belongs to. Every entry in it is a full checkout of
+// another branch, so a walk of the main checkout - a turn's file snapshot, a
+// directory tree shown to the model - skips it instead of reading the project
+// once per worktree.
+func IsWorktreesRoot(dir string) bool {
+	dir = filepath.Clean(dir)
+	return filepath.Base(dir) == "worktrees" && filepath.Base(filepath.Dir(dir)) == ".coddy"
+}
+
 // EnsureWorktree returns the path of a worktree for branch, creating it under
 // WorktreesRoot of the main checkout when missing. Reports whether it was
 // created. repoDir may be any working copy of the repository, a linked worktree
