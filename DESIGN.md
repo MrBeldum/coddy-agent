@@ -398,8 +398,12 @@ A phone gives the shell 360 to 430 CSS px. Everything below lives in one **`@med
   hairline: the pins are one list kept by hand, and the groups below are the ones the machine made.
   **`groupSessions`** lifts the pinned rows out first, so a pin is held **once** - a conversation at the
   top *and* inside its folder would leave dragging one of the two meaning nothing.
-- **A pinned row is dragged by its grip** (**`.session-drag-grip`**, left of the title,
-  **`touch-action: none`** so a finger drags the row instead of scrolling the list). The drag runs on
+- **A pinned row is dragged by the row itself** (**`.is-reorderable`**), with no grip: a handle beside
+  the title pushed a pin's title off the edge every other row shares. A mouse or a pen starts the drag
+  once the press has travelled **4px**, and the click that release produces is swallowed so the moved
+  row does not open; a finger has to **hold the row for 400ms** first, so a swipe still scrolls the
+  list, and once held the page's **`touchmove`** is cancelled so the finger moves the pin, not the
+  list. The row takes no text selection, native link drag or touch callout. The drag runs on
   **pointer events** - HTML5 drag-and-drop never starts from touch - the dragged row fades
   (**`.is-dragging`**) and the **landing place** is drawn on the list itself - an inset accent rule
   along the top of the row it would take (**`.is-drop-target`**), which the 14px corner radius carries
@@ -468,8 +472,8 @@ A phone gives the shell 360 to 430 CSS px. Everything below lives in one **`@med
   moves it - with delete in the destructive colour. An icon per action cost the title a button's width each and made a
   mis-click a delete; inside the menu the actions have room for their words. The menu is portaled and
   placed from the trigger, and flips above the row near the foot of the window.
-- **A pin is a mark on the title** (**`.session-pin-mark`**, accent), not a badge: the row is already at
-  the top saying it.
+- **A pinned row carries no mark of its own**: it stands under the *Pinned* heading, which already says
+  it, and a pushpin beside the title only took the title's room.
 - **Rename edits the row in place** (**`.session-title-input`**, the box the chat header already uses):
   the name is **selected** when it opens, so typing replaces it and the box shows the beginning rather
   than the tail a caret at the end would scroll to. **Enter** and blur save, **Escape** leaves the title

@@ -2131,30 +2131,21 @@ a.rail-brand {
     color-mix(in srgb, var(--text) 8%, var(--coddy-blend-base));
 }
 
-/* The handle. touch-action none is what lets a finger drag the row instead of
-   scrolling the list under it. */
-.session-drag-grip {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  margin-left: -4px;
-  color: color-mix(in srgb, var(--text) 30%, var(--coddy-blend-base));
-  cursor: grab;
-  touch-action: none;
-  transition: color 140ms ease;
+/* A pin is dragged by its row, so the row must not also start a text
+   selection, a native link drag or the long-press callout of a touch browser. */
+.session-item.is-reorderable {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
-.session-item:hover .session-drag-grip {
-  color: color-mix(in srgb, var(--text) 60%, var(--coddy-blend-base));
-}
-
-.session-drag-grip:active {
-  cursor: grabbing;
+.session-item.is-reorderable .session-row-link {
+  -webkit-user-drag: none;
 }
 
 .session-item.is-dragging {
   opacity: 0.45;
+  cursor: grabbing;
 }
 
 /* Where the drop would land, drawn on the list rather than under the pointer:
@@ -2219,16 +2210,6 @@ a.rail-brand {
 .archived-session-action:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-/* A pin is a mark on the title, not a badge: it says where the row is, and the
-   row is already at the top saying it. */
-.session-pin-mark {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  line-height: 1;
-  color: var(--accent);
 }
 
 .session-menu {
