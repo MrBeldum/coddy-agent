@@ -659,8 +659,9 @@ export const messagesRu: Record<string, string> = {
   "settings.schema.scheduler.enable.label": "Включено",
   "settings.schema.scheduler.enable.desc":
     "Когда включено, этот процесс может запускать демон планировщика и REST API.",
-  "settings.schema.scheduler.dir.label": "Каталог заданий",
-  "settings.schema.scheduler.dir.desc": "Каталог markdown-определений заданий.",
+  "settings.schema.scheduler.project_trust.label": "Проектные задания",
+  "settings.schema.scheduler.project_trust.desc":
+    'Задания в .coddy/scheduler рабочей папки приходят вместе с checkout. "ask": показывать их, но не запускать, пока задание не одобрено для этой папки (щит в панели планировщика). "allow": запускать как свои. "deny": никогда не запускать.',
   "settings.schema.scheduler.max_queue.label": "Максимум очереди",
   "settings.schema.scheduler.max_queue.desc":
     "Максимум одновременных запусков агента по расписанию.",
@@ -1562,6 +1563,29 @@ export const messagesRu: Record<string, string> = {
   "scheduler.loading": "Загрузка…",
   "scheduler.noDescription": "—",
   "scheduler.paused": "на паузе",
+  "scheduler.group.user": "Общие",
+  "scheduler.group.userEmpty": "Общих заданий нет",
+  "scheduler.group.thisProject": "Этот проект · {name}",
+  "scheduler.group.project": "Проект · {name}",
+  "scheduler.trust.trusted": "Одобрено",
+  "scheduler.trust.needsApproval": "ждёт одобрения",
+  "scheduler.trust.denied": "запрещено",
+  "scheduler.trust.conflict": "конфликт id",
+  "scheduler.trust.invalid": "ошибка",
+  "scheduler.trust.review": "Проверить и одобрить",
+  "scheduler.trust.reviewAria": "Проверить и одобрить проектное задание {jobId}",
+  "scheduler.trust.approveTitle": "Одобрить задание для этой папки",
+  "scheduler.trust.withdrawTitle": "Отозвать одобрение",
+  "scheduler.trust.from": "Проектное задание из {workspace}",
+  "scheduler.trust.reviewNote":
+    "Оно пришло с репозиторием и по расписанию запускает агента с вашими правами. Одобрение относится ровно к файлу ниже; любое изменение потребует одобрить его снова.",
+  "scheduler.field.scope": "Где хранится задание",
+  "scheduler.field.scopeHelp":
+    "Общие задания лежат в домашней папке Coddy. Проектное задание сохраняется в репозитории (.coddy/scheduler) и переезжает вместе с ним; для вас оно одобрено, остальные одобряют его сами.",
+  "scheduler.field.scopeNoSession":
+    "Откройте чат в проекте, чтобы создать в нём проектное задание.",
+  "scheduler.scope.user": "Общее",
+  "scheduler.scope.project": "Этот проект ({name})",
   "scheduler.addJob": "Добавить задачу",
   "scheduler.runJobNow": "Запустить сейчас",
   "scheduler.stopJob": "Остановить задачу",
@@ -1578,7 +1602,7 @@ export const messagesRu: Record<string, string> = {
   "scheduler.field.schedulePlaceholder": "0 * * * *",
   "scheduler.field.cwd": "cwd (необязательно)",
   "scheduler.field.cwdHelp":
-    "По умолчанию — рабочая директория агента для этого экземпляра.",
+    "По умолчанию рабочая директория агента этого экземпляра; у проектного задания cwd задаётся относительно его рабочей папки.",
   "scheduler.field.mode": "mode",
   "scheduler.mode.agent": "agent",
   "scheduler.mode.ask": "ask",
