@@ -105,10 +105,10 @@ func SchemaExampleConfigJSON() *ConfigJSON {
 		},
 		Scheduler: SchedulerJSON{
 			Enabled:        false,
-			Dir:            "${CODDY_HOME}/scheduler",
 			MaxQueue:       10,
 			Timeout:        "30m",
 			RetainSessions: 5,
+			ProjectTrust:   ProjectTrustAsk,
 		},
 		Gateways: GatewaysJSON{
 			Telegram: TelegramGatewayJSON{

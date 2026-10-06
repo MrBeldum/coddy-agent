@@ -276,6 +276,7 @@ import {
 } from "./chat/subagentTranscript";
 import type { BackgroundTask } from "./tasks/types";
 import type { SchedulerInfo, SchedulerJob } from "./scheduler/types";
+import { parseSchedulerJobRef, schedulerJobRef } from "./scheduler/types";
 import { Settings } from "./settings/Settings";
 import { noteSettingsConfigReloaded } from "./settings/settingsConfigStore";
 import { MCP_SECTION_ID } from "./settings/settingsSections";
@@ -1948,7 +1949,10 @@ export function App() {
         setSchedulerListLoading(true);
         setSchedulerListError(null);
       }
-      const res = await schedulerListJobs(false);
+      const res = await schedulerListJobs(
+        false,
+        workspaceScope(sessionId, chatWorkspace),
+      );
       if (!silent) {
         setSchedulerListLoading(false);
       }
@@ -1998,7 +2002,7 @@ export function App() {
       setSchedulerInfo(res.data.scheduler);
       setSchedulerJobs(res.data.jobs || []);
     },
-    [sessionId, t, isAppEnvironment],
+    [sessionId, chatWorkspace, t, isAppEnvironment],
   );
 
   const applyLocationHash = useCallback(() => {
@@ -2383,7 +2387,9 @@ export function App() {
     if (!schedulerRunsJobId) {
       return "";
     }
-    const job = schedulerJobs.find((j) => j.job_id === schedulerRunsJobId);
+    const job = schedulerJobs.find(
+      (j) => schedulerJobRef(j) === schedulerRunsJobId,
+    );
     return (job?.session_id || "").trim();
   }, [schedulerJobs, schedulerRunsJobId]);
 
@@ -6410,7 +6416,7 @@ export function App() {
                 open
                 className="scheduler-runs-dock"
                 title={t("scheduler.runsTitle", {
-                  jobId: schedulerEditor.jobId,
+                  jobId: parseSchedulerJobRef(schedulerEditor.jobId).id,
                 })}
                 emptyText={t("scheduler.runsEmpty")}
                 focus={schedulerRunsFocus}
@@ -6446,6 +6452,9 @@ export function App() {
               availableModels={llmModelIds}
               defaultModel={llmModel}
               currentCwd={currentSessionCwd}
+              sessionHeaders={workspaceScope(sessionId, chatWorkspace).headers}
+              workspacePath={sessionId.trim() ? chatWorkspace : ""}
+              projectTrust={schedulerInfo?.project_trust || "ask"}
               onClose={closeSchedulerEditor}
               onSaved={(createdId) => {
                 void refreshSchedulerJobs({ silent: true });

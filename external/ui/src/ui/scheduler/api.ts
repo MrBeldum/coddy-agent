@@ -3,7 +3,28 @@ import type {
   SchedulerJob,
   SchedulerJobCreate,
   SchedulerJobPatch,
+  SchedulerJobRef,
 } from "./types";
+import { parseSchedulerJobRef } from "./types";
+import {
+  applyWorkspaceQuery,
+  type WorkspaceScope,
+} from "../chat/workspaceScope";
+
+/**
+ * URL of one job's route: `/coddy/scheduler/jobs/<id><suffix>`, with
+ * `scope=project&workspace=<path>` for a project job, so the server never
+ * mistakes it for the user job of the same id.
+ */
+export function schedulerJobUrl(ref: SchedulerJobRef, suffix = ""): string {
+  const { id, scope, workspace } = parseSchedulerJobRef(ref);
+  const path = `/coddy/scheduler/jobs/${encodeURIComponent(id)}${suffix}`;
+  if (scope !== "project") {
+    return path;
+  }
+  const sp = new URLSearchParams({ scope: "project", workspace });
+  return `${path}?${sp.toString()}`;
+}
 
 async function readErrorMessage(res: Response): Promise<string> {
   try {
@@ -36,16 +57,25 @@ async function parseJson<T>(res: Response): Promise<ApiResult<T>> {
   return { ok: true, data };
 }
 
+/**
+ * Lists the jobs. With a workspace scope (the chat's session, or the folder a
+ * new chat picked) the project jobs follow the user jobs: those of that
+ * workspace and of every other workspace the scheduler runs.
+ */
 export async function schedulerListJobs(
   includeBody?: boolean,
+  scope?: WorkspaceScope,
 ): Promise<ApiResult<JobsListResponse>> {
   const sp = new URLSearchParams();
   if (includeBody) {
     sp.set("include_body", "true");
   }
+  if (scope) {
+    applyWorkspaceQuery(sp, scope);
+  }
   const q = sp.toString();
   const path = q ? `/coddy/scheduler/jobs?${q}` : "/coddy/scheduler/jobs";
-  const res = await fetch(path);
+  const res = await fetch(path, scope ? { headers: scope.headers } : undefined);
   return parseJson<JobsListResponse>(res);
 }
 
@@ -53,19 +83,45 @@ export async function schedulerGetJob(
   jobId: string,
 ): Promise<ApiResult<SchedulerJob>> {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}`,
+    schedulerJobUrl(jobId),
   );
   return parseJson<SchedulerJob>(res);
 }
 
+/**
+ * Creates a job. A project job is written to the workspace of the session in
+ * `sessionHeaders` and approved at once: the operator made it.
+ */
 export async function schedulerCreateJob(
   body: SchedulerJobCreate,
+  sessionHeaders?: Record<string, string>,
 ): Promise<ApiResult<{ object?: string; job_id?: string }>> {
   const res = await fetch("/coddy/scheduler/jobs", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(sessionHeaders || {}) },
     body: JSON.stringify(body),
   });
+  return parseJson(res);
+}
+
+/** Approves a project job for its workspace, bound to the digest shown. */
+export async function schedulerTrustJob(
+  ref: SchedulerJobRef,
+  digest: string,
+): Promise<ApiResult<{ trusted?: boolean }>> {
+  const res = await fetch(schedulerJobUrl(ref, "/trust"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ digest }),
+  });
+  return parseJson(res);
+}
+
+/** Withdraws the approval of a project job. */
+export async function schedulerUntrustJob(
+  ref: SchedulerJobRef,
+): Promise<ApiResult<{ trusted?: boolean; removed?: boolean }>> {
+  const res = await fetch(schedulerJobUrl(ref, "/untrust"), { method: "POST" });
   return parseJson(res);
 }
 
@@ -76,7 +132,7 @@ export async function schedulerPatchJob(
   ApiResult<{ object?: string; job_id?: string }>
 > {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}`,
+    schedulerJobUrl(jobId),
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -90,7 +146,7 @@ export async function schedulerDeleteJob(
   jobId: string,
 ): Promise<ApiResult<null>> {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}`,
+    schedulerJobUrl(jobId),
     { method: "DELETE" },
   );
   if (res.ok && (res.status === 204 || res.status === 200)) {
@@ -107,7 +163,7 @@ export async function schedulerPauseJob(
   jobId: string,
 ): Promise<ApiResult<{ object?: string; job_id?: string }>> {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}/pause`,
+    schedulerJobUrl(jobId, "/pause"),
     { method: "POST" },
   );
   return parseJson(res);
@@ -117,7 +173,7 @@ export async function schedulerResumeJob(
   jobId: string,
 ): Promise<ApiResult<{ object?: string; job_id?: string }>> {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}/resume`,
+    schedulerJobUrl(jobId, "/resume"),
     { method: "POST" },
   );
   return parseJson(res);
@@ -129,7 +185,7 @@ export async function schedulerRunJob(
   ApiResult<{ object?: string; job_id?: string; status?: string }>
 > {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}/run`,
+    schedulerJobUrl(jobId, "/run"),
     { method: "POST" },
   );
   return parseJson(res);
@@ -141,7 +197,7 @@ export async function schedulerCancelJob(
   ApiResult<{ object?: string; job_id?: string; cancelled?: boolean }>
 > {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}/cancel`,
+    schedulerJobUrl(jobId, "/cancel"),
     { method: "POST" },
   );
   return parseJson(res);
@@ -156,7 +212,7 @@ export async function schedulerClearJobRuns(
   jobId: string,
 ): Promise<ApiResult<{ object?: string; job_id?: string; cleared?: number }>> {
   const res = await fetch(
-    `/coddy/scheduler/jobs/${encodeURIComponent(jobId)}/runs`,
+    schedulerJobUrl(jobId, "/runs"),
     { method: "DELETE" },
   );
   return parseJson(res);

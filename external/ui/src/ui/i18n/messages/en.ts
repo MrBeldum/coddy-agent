@@ -648,9 +648,9 @@ export const messagesEn: Record<string, string> = {
   "settings.schema.scheduler.enable.label": "Enabled",
   "settings.schema.scheduler.enable.desc":
     "When true, this process may run the scheduler daemon and REST.",
-  "settings.schema.scheduler.dir.label": "Jobs directory",
-  "settings.schema.scheduler.dir.desc":
-    "Directory of job markdown definitions.",
+  "settings.schema.scheduler.project_trust.label": "Project jobs",
+  "settings.schema.scheduler.project_trust.desc":
+    'Jobs in a workspace\'s .coddy/scheduler travel with the checkout. "ask": list them but run nothing until that exact job is approved for this workspace (the shield in the scheduler drawer). "allow": run them like your own jobs. "deny": never run them.',
   "settings.schema.scheduler.max_queue.label": "Max queue",
   "settings.schema.scheduler.max_queue.desc":
     "Maximum concurrent scheduled agent runs.",
@@ -1527,6 +1527,29 @@ export const messagesEn: Record<string, string> = {
   "scheduler.loading": "Loading…",
   "scheduler.noDescription": "—",
   "scheduler.paused": "paused",
+  "scheduler.group.user": "Global",
+  "scheduler.group.userEmpty": "No global jobs",
+  "scheduler.group.thisProject": "This project · {name}",
+  "scheduler.group.project": "Project · {name}",
+  "scheduler.trust.trusted": "Approved",
+  "scheduler.trust.needsApproval": "needs approval",
+  "scheduler.trust.denied": "denied",
+  "scheduler.trust.conflict": "id conflict",
+  "scheduler.trust.invalid": "invalid",
+  "scheduler.trust.review": "Review and approve",
+  "scheduler.trust.reviewAria": "Review and approve project job {jobId}",
+  "scheduler.trust.approveTitle": "Approve this job for this workspace",
+  "scheduler.trust.withdrawTitle": "Withdraw the approval",
+  "scheduler.trust.from": "Project job from {workspace}",
+  "scheduler.trust.reviewNote":
+    "It came with the repository and runs an agent with your permissions on a timer. Approving trusts exactly the file below; any later change needs approving again.",
+  "scheduler.field.scope": "Where the job lives",
+  "scheduler.field.scopeHelp":
+    "Global jobs live in your Coddy home. A project job is saved in the repository (.coddy/scheduler) and travels with it; it is approved for you, others approve it themselves.",
+  "scheduler.field.scopeNoSession":
+    "Open a chat in a project to create a project job there.",
+  "scheduler.scope.user": "Global",
+  "scheduler.scope.project": "This project ({name})",
   "scheduler.addJob": "Add job",
   "scheduler.runJobNow": "Run job now",
   "scheduler.stopJob": "Stop job",
@@ -1543,7 +1566,7 @@ export const messagesEn: Record<string, string> = {
   "scheduler.field.schedulePlaceholder": "0 * * * *",
   "scheduler.field.cwd": "cwd (optional)",
   "scheduler.field.cwdHelp":
-    "Defaults to the agent working directory for this instance.",
+    "Defaults to the agent working directory for this instance; a project job's cwd is relative to its workspace.",
   "scheduler.field.mode": "mode",
   "scheduler.mode.agent": "agent",
   "scheduler.mode.ask": "ask",

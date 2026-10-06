@@ -21,8 +21,11 @@ type SchedulerJobSessionSpec struct {
 	// ID is the session id the job's sidecar records; minted by the scheduler
 	// before the first run so the pointer exists before the bundle does.
 	ID string
-	// JobID is the scheduler job (the file basename under scheduler.dir).
+	// JobID is the scheduler job (the basename of its *.md file).
 	JobID string
+	// Workspace is the canonical workspace of a project job; empty for a user
+	// job.
+	Workspace string
 	// CWD is the job's resolved working directory.
 	CWD string
 	// Title is pinned as the session title; the job id when empty.
@@ -52,7 +55,7 @@ func schedulerRunMetaFromSnapshot(meta SessionMeta) *SchedulerRunMeta {
 	if jobID == "" {
 		return nil
 	}
-	out := &SchedulerRunMeta{JobID: jobID, Trigger: strings.TrimSpace(meta.SchedulerTrigger)}
+	out := &SchedulerRunMeta{JobID: jobID, Workspace: strings.TrimSpace(meta.SchedulerJobWorkspace), Trigger: strings.TrimSpace(meta.SchedulerTrigger)}
 	if raw := strings.TrimSpace(meta.SchedulerFireSlot); raw != "" {
 		if slot, err := time.Parse(time.RFC3339, raw); err == nil {
 			out.FireSlot = slot.UTC()
@@ -117,6 +120,7 @@ func (m *Manager) EnsureSchedulerJobSession(ctx context.Context, spec SchedulerJ
 		contextWindows: m,
 	}
 	state.SetSchedulerJobWithoutPersist(jobID)
+	state.SetSchedulerJobWorkspaceWithoutPersist(spec.Workspace)
 	title := strings.TrimSpace(spec.Title)
 	if title == "" {
 		title = jobID
