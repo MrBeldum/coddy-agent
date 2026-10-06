@@ -65,3 +65,26 @@ func TestToolsCreateTrustedProjectJobsAndNeverApproveForeignOnes(t *testing.T) {
 		}
 	}
 }
+
+// A tool call from a session elsewhere still knows the daemon's own
+// workspace: a user job may not take the id of a project job there.
+func TestToolsKnowTheDaemonsWorkspace(t *testing.T) {
+	root := t.TempDir()
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	home, proc, other := filepath.Join(root, "home"), filepath.Join(root, "proc"), filepath.Join(root, "other")
+	for _, d := range []string{home, filepath.Join(proc, ".coddy", "scheduler"), other} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(proc, ".coddy", "scheduler", "nightly.md"), []byte("---\nschedule: \"0 3 * * *\"\n---\nx\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Paths: config.Paths{Home: home, CWD: proc}, Scheduler: config.SchedulerConfig{Enabled: true}}
+	_, err := jobCreateTool(cfg).Execute(context.Background(), `{"job_id":"nightly","description":"d","schedule":"0 3 * * *","body":"x"}`, &tooling.Env{CWD: other})
+	if err == nil {
+		t.Fatal("a user job took the id of a project job of the daemon's workspace")
+	}
+}

@@ -69,10 +69,13 @@ func (o *Service) ProjectJob(id, workspace string) (JobAddr, error) {
 		if o.SessionWorkspace == "" {
 			return JobAddr{}, ErrWorkspaceUnknown
 		}
+		o.register()
 		return JobAddr{Scope: storage.ScopeProject, Workspace: o.SessionWorkspace, ID: id}, nil
 	}
 	ws = CanonicalWorkspace(ws)
-	if ws != o.SessionWorkspace && !inScanSet(o.Cfg, o.ProcessCWD, ws) {
+	if ws == o.SessionWorkspace {
+		o.register()
+	} else if !inScanSet(o.Cfg, o.ProcessCWD, ws) {
 		return JobAddr{}, ErrWorkspaceUnknown
 	}
 	return JobAddr{Scope: storage.ScopeProject, Workspace: ws, ID: id}, nil

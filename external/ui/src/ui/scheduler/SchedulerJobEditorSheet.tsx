@@ -257,6 +257,25 @@ export function SchedulerJobEditorSheet(props: {
     [],
   );
 
+  /**
+   * Reads the approval block of a project job again - its file, digest and
+   * trust - without touching the form, which may be mid-edit.
+   */
+  const refreshProjectView = useCallback(async (ref: string) => {
+    const res = await schedulerGetJob(ref);
+    if (!res.ok || res.data.scope !== "project") {
+      return;
+    }
+    const j = res.data;
+    setProjectView({
+      workspace: (j.workspace || "").trim(),
+      trust: j.trust || "trusted",
+      reason: (j.trust_reason || "").trim(),
+      digest: (j.digest || "").trim(),
+      raw: j.raw || "",
+    });
+  }, []);
+
   const runPatch = useCallback(async () => {
     const f = formRef.current;
     if (f.mode !== "edit" || f.loading || f.loadErr) {
@@ -317,6 +336,13 @@ export function SchedulerJobEditorSheet(props: {
         permissionMode: f.permissionMode,
         paused: f.paused,
       });
+      // The approval block shows the file and its digest: after an edit of a
+      // project job both moved, so it is read again from the server.
+      if (parseSchedulerJobRef(existingRef).scope === "project") {
+        void refreshProjectView(
+          outId !== existing ? refWithId(existingRef, outId) : existingRef,
+        );
+      }
       if (outId !== existing) {
         const nextRef = refWithId(existingRef, outId);
         const hp = parseAppHash();
@@ -330,7 +356,7 @@ export function SchedulerJobEditorSheet(props: {
     } finally {
       setSaving(false);
     }
-  }, [collectFieldErrors, snapshotFromForm]);
+  }, [collectFieldErrors, snapshotFromForm, refreshProjectView]);
 
   const runCreate = useCallback(async () => {
     const f = formRef.current;
@@ -577,6 +603,11 @@ export function SchedulerJobEditorSheet(props: {
           : await schedulerTrustJob(ref, projectView.digest);
       if (!res.ok) {
         setSaveErr(res.message);
+        // A digest that no longer matches means the file changed under the
+        // view: show the current one, so the next approval is of what is there.
+        if (res.status === 409) {
+          void refreshProjectView(ref);
+        }
         return;
       }
       setReloadSeq((n) => n + 1);

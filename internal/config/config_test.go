@@ -1991,6 +1991,10 @@ func TestLegacySchedulerDirCopiesJobsIntoTheHome(t *testing.T) {
 	write(filepath.Join(userDir, "taken.md"), "---\nschedule: \"0 5 * * *\"\n---\nhome taken\n")
 	write(filepath.Join(old, "same.md"), "---\nschedule: \"0 6 * * *\"\n---\nsame\n")
 	write(filepath.Join(userDir, "same.md"), "---\nschedule: \"0 6 * * *\"\n---\nsame\n")
+	write(filepath.Join(old, "same.state"), "{\"session_id\":\"sess_same\"}\n")
+	write(filepath.Join(old, "twice.md"), "---\nschedule: \"0 7 * * *\"\n---\nold twice\n")
+	write(filepath.Join(userDir, "twice.md"), "---\nschedule: \"0 7 * * *\"\n---\nhome twice\n")
+	write(filepath.Join(userDir, "twice-migrated.md"), "---\nschedule: \"0 7 * * *\"\n---\nan earlier copy\n")
 
 	body := "agent:\n  model: local/m\nscheduler:\n  enable: true\n  dir: " + old + "\n  max_queue: 3\n"
 	path := filepath.Join(dir, "config.yaml")
@@ -2019,6 +2023,12 @@ func TestLegacySchedulerDirCopiesJobsIntoTheHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(userDir, "same-migrated.md")); err == nil {
 		t.Fatal("a job with the same bytes was copied aside")
+	}
+	if got, _ := os.ReadFile(filepath.Join(userDir, "same.state")); !strings.Contains(string(got), "sess_same") {
+		t.Fatalf("the checkpoint of a job the home already had was not carried: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(userDir, "twice-migrated-2.md")); !strings.Contains(string(got), "old twice") {
+		t.Fatalf("a job whose -migrated name was taken was dropped: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(old, "nightly.md")); err != nil {
 		t.Fatalf("the old folder was touched: %v", err)

@@ -224,3 +224,20 @@ func TestRegistryKeepsWorkspaces(t *testing.T) {
 		t.Fatalf("registry = %v", got)
 	}
 }
+
+// A schedule that does not parse makes the snapshot invalid, so the list, an
+// approval and a manual run agree with the tick, which never fires it.
+func TestASnapshotWithABadScheduleIsInvalid(t *testing.T) {
+	rt, ws := testRoots(t)
+	ref := rt.ProjectRef(ws, "bad")
+	if err := rt.CreateJobFile(ref, []byte("---\nschedule: \"not a cron\"\n---\nx\n")); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := ReadSnapshot(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Err == nil {
+		t.Fatal("a schedule that does not parse was accepted")
+	}
+}

@@ -235,6 +235,7 @@ import {
   schedulerClearJobRuns,
   schedulerListJobs,
   schedulerRunJob,
+  setSchedulerSessionHeaders,
 } from "./scheduler/api";
 import {
   parseAppHash,
@@ -1941,6 +1942,12 @@ export function App() {
     await clearFinishedBackgroundTasks(sid);
     void refreshBackgroundTasks({ silent: true });
   }, [sessionId, refreshBackgroundTasks]);
+
+  // Requests about one project job carry the chat's session, so a job of the
+  // chat's workspace opens and is approved before the scheduler scans it.
+  useEffect(() => {
+    setSchedulerSessionHeaders(workspaceScope(sessionId, chatWorkspace).headers);
+  }, [sessionId, chatWorkspace]);
 
   const refreshSchedulerJobs = useCallback(
     async (opts?: { silent?: boolean }) => {

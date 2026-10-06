@@ -231,6 +231,14 @@ func (o *Service) renameJob(from storage.JobRef, newID string) (storage.JobRef, 
 	} else if !os.IsNotExist(err) {
 		return to, err
 	}
+	// The job session keeps the run history; it names the job by id, and the
+	// bundle walk that finds a job session without a sidecar pointer matches
+	// that id, so it has to follow the rename.
+	if sid := o.jobSessionIDOf(to); sid != "" {
+		if err := o.sessionStore().RenameSchedulerJobSession(sid, newID); err != nil {
+			return to, err
+		}
+	}
 	if from.IsProject() {
 		if err := o.trustStore().Rename(from.Workspace, from.ID, newID); err != nil {
 			return to, err

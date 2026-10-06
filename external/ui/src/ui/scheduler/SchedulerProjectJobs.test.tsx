@@ -181,3 +181,64 @@ test("without a session the project scope is offered but disabled", () => {
   );
   expect(screen.getByTestId("scheduler-scope-project")).toBeDisabled();
 });
+
+test("requests about a project job carry the chat's session, a user job's do not", async () => {
+  const api = await import("./api");
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    calls.push({ url: String(url), headers: (init?.headers || {}) as Record<string, string> });
+    return new Response(JSON.stringify({ status: "accepted" }), { status: 202 });
+  });
+  try {
+    api.setSchedulerSessionHeaders({ "X-Coddy-Session-ID": "sess_1" });
+    await api.schedulerRunJob("/srv/app/lint");
+    await api.schedulerRunJob("nightly");
+  } finally {
+    fetchSpy.mockRestore();
+    api.setSchedulerSessionHeaders({});
+  }
+  expect(calls[0]!.url).toContain("scope=project");
+  expect(calls[0]!.headers["X-Coddy-Session-ID"]).toBe("sess_1");
+  expect(calls[1]!.headers["X-Coddy-Session-ID"]).toBeUndefined();
+});
+
+test("an edit of a project job reads the approval block again without resetting the form", async () => {
+  const api = await import("./api");
+  const first = job({
+    job_id: "lint",
+    scope: "project",
+    workspace: "/srv/app",
+    trust: "needs_approval",
+    digest: "sha256:old",
+    raw: "old file",
+    body: "lint it",
+    description: "Lint",
+  });
+  vi.mocked(api.schedulerGetJob).mockReset();
+  vi.mocked(api.schedulerGetJob)
+    .mockResolvedValueOnce({ ok: true, data: first } as never)
+    .mockResolvedValue({ ok: true, data: { ...first, digest: "sha256:new", raw: "new file" } } as never);
+  vi.mocked(api.schedulerPatchJob).mockResolvedValue({ ok: true, data: { job_id: "lint" } } as never);
+  render(
+    <ConfirmProvider>
+      <SchedulerJobEditorSheet
+        open
+        mode="edit"
+        jobId="/srv/app/lint"
+        availableModels={["m"]}
+        defaultModel="m"
+        currentCwd="/srv/app"
+        projectTrust="ask"
+        onClose={() => {}}
+        onSaved={() => {}}
+        onDeleted={() => {}}
+      />
+    </ConfirmProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId("scheduler-trust-raw")).toHaveTextContent("old file"));
+  fireEvent.change(screen.getByRole("textbox", { name: /description/ }), { target: { value: "Lint more" } });
+  await waitFor(() => expect(screen.getByTestId("scheduler-trust-raw")).toHaveTextContent("new file"), { timeout: 3000 });
+  expect((screen.getByRole("textbox", { name: /description/ }) as HTMLInputElement).value).toBe("Lint more");
+  fireEvent.click(screen.getByTestId("scheduler-trust-toggle"));
+  await waitFor(() => expect(api.schedulerTrustJob).toHaveBeenLastCalledWith("/srv/app/lint", "sha256:new"));
+});

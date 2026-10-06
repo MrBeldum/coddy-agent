@@ -300,7 +300,9 @@ func TestSchedulerProjectRoutesRefuseUnknownWorkspaces(t *testing.T) {
 		Agent:     config.Agent{Model: "openai/gpt-4o"},
 	}
 	cfg.Scheduler.ApplyDefaults(cfg.Paths)
-	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) { return "", nil }
+	runner := func(context.Context, *session.State, []acp.ContentBlock, acp.UpdateSender) (string, error) {
+		return "", nil
+	}
 	mgr := session.NewManager(cfg, noopSender{}, runner, slog.Default(), cwd, &session.FileStore{Root: filepath.Join(root, "sessions")})
 	ts := httptest.NewServer(New(cfg, mgr, slog.Default(), cwd).Handler())
 	defer ts.Close()

@@ -282,6 +282,11 @@ func parseJobBytes(data []byte) (*JobFrontmatter, string, error) {
 	if strings.TrimSpace(fm.Schedule) == "" {
 		return fm, strings.TrimSpace(body), fmt.Errorf("schedule is required in frontmatter")
 	}
+	// A schedule that does not parse never fires; saying so here makes the
+	// list, an approval and a manual run agree with the tick.
+	if _, err := ParseCronUTC(fm.Schedule); err != nil {
+		return fm, strings.TrimSpace(body), fmt.Errorf("schedule %q: %w", fm.Schedule, err)
+	}
 	return fm, strings.TrimSpace(body), nil
 }
 

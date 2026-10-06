@@ -18,11 +18,15 @@ func toolEnvCWD(env *tooling.Env) string {
 	return strings.TrimSpace(env.CWD)
 }
 
-// toolService is the scheduler service acting for the tool's session: its cwd
-// is the workspace a project job of the call lives in.
+// toolService is the scheduler service acting for the tool's session: the
+// session cwd is the workspace a project job of the call lives in, while the
+// process cwd stays the daemon's (the workspace it scans whatever the session).
 func toolService(cfg *config.Config, env *tooling.Env) *schedservice.Service {
-	cwd := toolEnvCWD(env)
-	return schedservice.NewService(cfg, nil, cwd).WithSession(cwd)
+	processCWD := ""
+	if cfg != nil {
+		processCWD = cfg.Paths.CWD
+	}
+	return schedservice.NewService(cfg, nil, processCWD).WithSession(toolEnvCWD(env))
 }
 
 // toolAddr addresses the job a call names: a user job, or with scope project

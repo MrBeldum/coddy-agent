@@ -302,14 +302,17 @@ func moveLegacySchedulerDir(paths Paths, value *yaml.Node) (moved, kept []string
 				return moved, kept, err
 			}
 			if string(existing) == string(mine) {
+				// Same job: carry its checkpoint along when the home has
+				// none yet.
+				if _, err := os.Stat(filepath.Join(target, base+".state")); os.IsNotExist(err) {
+					if err := copyRegularFile(filepath.Join(src, base+".state"), filepath.Join(target, base+".state")); err != nil && !os.IsNotExist(err) {
+						return moved, kept, err
+					}
+				}
 				kept = append(kept, name)
 				continue
 			}
-			dstBase = base + "-migrated"
-			if _, err := os.Stat(filepath.Join(target, dstBase+".md")); err == nil {
-				kept = append(kept, name)
-				continue
-			}
+			dstBase = freeMigratedBase(target, base)
 		}
 		if err := copyRegularFile(filepath.Join(src, name), filepath.Join(target, dstBase+".md")); err != nil {
 			return moved, kept, err
@@ -322,6 +325,20 @@ func moveLegacySchedulerDir(paths Paths, value *yaml.Node) (moved, kept []string
 		moved = append(moved, dstBase+".md")
 	}
 	return moved, kept, nil
+}
+
+// freeMigratedBase is the first <base>-migrated, <base>-migrated-2, ... name
+// with no job file in target.
+func freeMigratedBase(target, base string) string {
+	for i := 1; ; i++ {
+		name := base + "-migrated"
+		if i > 1 {
+			name = fmt.Sprintf("%s-migrated-%d", base, i)
+		}
+		if _, err := os.Stat(filepath.Join(target, name+".md")); os.IsNotExist(err) {
+			return name
+		}
+	}
 }
 
 // sameDir reports whether two folder paths name the same folder, links

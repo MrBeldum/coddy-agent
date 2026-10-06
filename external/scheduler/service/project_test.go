@@ -267,3 +267,60 @@ func TestJobSessionFallbackKeepsScopesApart(t *testing.T) {
 		t.Fatalf("the project job's session = %q, want %q", got, id)
 	}
 }
+
+// A per-job request from a session in a workspace registers it, as a list
+// does, so a job there runs under allow without ever being listed first.
+func TestAPerJobRequestFromASessionRegistersItsWorkspace(t *testing.T) {
+	f := newProjectFixture(t, "allow")
+	f.commit(t, "lint", committedJob)
+	if _, err := f.sessionSvc.ProjectJob("lint", ""); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ws := range ScanWorkspaces(f.cfg, f.proc) {
+		found = found || ws == f.ws
+	}
+	if !found {
+		t.Fatal("the session's workspace was not registered by a per-job request")
+	}
+}
+
+// A rename carries the job session's name with it: a new job created under
+// the old id does not adopt the renamed job's run history through the walk.
+func TestARenameMovesTheJobSessionName(t *testing.T) {
+	f := newProjectFixture(t, "")
+	if err := f.svc.CreateJob(SchedulerJobCreate{JobID: "old", Schedule: "0 3 * * *", Body: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	store := &session.FileStore{Root: f.cfg.Sessions.Dir}
+	if err := os.MkdirAll(store.Root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := session.NewSessionID()
+	dir, err := store.EnsureLayout(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &session.State{ID: id, CWD: f.proc, Mode: session.ModeAgent, SessionDir: dir}
+	st.SetSchedulerJobWithoutPersist("old")
+	if err := store.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	roots := RootsOf(f.cfg)
+	if err := storage.WriteJobSessionID(roots.UserRef("old").StatePath, id); err != nil {
+		t.Fatal(err)
+	}
+	newID := "new"
+	if err := f.svc.PatchJob(UserJob("old"), SchedulerJobPatch{JobID: &newID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.CreateJob(SchedulerJobCreate{JobID: "old", Schedule: "0 4 * * *", Body: "y"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := JobSessionIDFor(store, roots.UserRef("old")); got != "" {
+		t.Fatalf("a new job under the old id adopted the renamed job's session %q", got)
+	}
+	if got := JobSessionIDFor(store, roots.UserRef("new")); got != id {
+		t.Fatalf("the renamed job's session = %q, want %q", got, id)
+	}
+}

@@ -82,10 +82,6 @@ func (o *Service) jobRow(ref storage.JobRef, now time.Time, includeBody, include
 	}
 	if sch, err := storage.ParseCronUTC(fm.Schedule); err == nil {
 		out.NextRunUTC = storage.NextScheduledDisplayUTC(sch, last, now).UTC().Format(time.RFC3339)
-	} else if !ref.IsProject() {
-		return SchedulerJob{}, false
-	} else {
-		out.Trust, out.TrustReason = TrustInvalid, err.Error()
 	}
 	return out, true
 }
