@@ -632,12 +632,17 @@ func UISchemaMap() map[string]interface{} {
 		"scheduler": objectSchema("Scheduler", "Cron-style scheduled jobs (requires scheduler build tag). A run is a background agent task under the job's own session, the job's run history.",
 			map[string]interface{}{
 				"enable":          boolProp("Enabled", "When true, this process may run the scheduler daemon and REST."),
-				"dir":             strProp("Jobs directory", "Directory of job markdown definitions."),
 				"max_queue":       intProp("Max queue", "Runs in flight across all jobs at once; a due slot past the cap is skipped, a manual run refused."),
 				"timeout":         strProp("Run timeout", "Wall-clock limit of one run, e.g. 30m or 1h30m (the task pool caps it at tools.background.max_timeout_seconds)."),
 				"retain_sessions": intProp("Retain runs", "Finished runs kept per job (task records and transcripts); older ones are removed when a run finishes."),
+				"project_trust": map[string]interface{}{
+					"type":        "string",
+					"title":       "Project jobs",
+					"description": "Jobs in a workspace's .coddy/scheduler travel with the checkout. \"ask\": list them but run nothing until that exact job is approved for this workspace (the shield in the scheduler drawer). \"allow\": run them like your own jobs. \"deny\": never run them.",
+					"enum":        []string{ProjectTrustAsk, ProjectTrustAllow, ProjectTrustDeny},
+				},
 			},
-			[]string{"enable", "dir", "max_queue", "timeout", "retain_sessions"},
+			[]string{"enable", "project_trust", "max_queue", "timeout", "retain_sessions"},
 			nil),
 		"prompts": objectSchema("Prompts", "Built-in system prompt files relative to dir.",
 			map[string]interface{}{

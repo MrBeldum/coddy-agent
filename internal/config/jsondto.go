@@ -450,10 +450,10 @@ type HooksJSON struct {
 // SchedulerJSON mirrors SchedulerConfig.
 type SchedulerJSON struct {
 	Enabled        bool   `json:"enable,omitempty"`
-	Dir            string `json:"dir,omitempty"`
 	MaxQueue       int    `json:"max_queue,omitempty"`
 	Timeout        string `json:"timeout,omitempty"`
 	RetainSessions int    `json:"retain_sessions,omitempty"`
+	ProjectTrust   string `json:"project_trust,omitempty"`
 }
 
 // ConfigToJSONDTO copies a loaded Config into ConfigJSON (for GET /coddy/config).
@@ -635,8 +635,9 @@ func ConfigToJSONDTO(c *Config) *ConfigJSON {
 	}
 	out.UI = UIJSON{Enabled: cloneBoolPtr(c.UI.Enabled)}
 	out.Scheduler = SchedulerJSON{
-		Enabled: c.Scheduler.Enabled, Dir: c.Scheduler.Dir, MaxQueue: c.Scheduler.MaxQueue,
+		Enabled: c.Scheduler.Enabled, MaxQueue: c.Scheduler.MaxQueue,
 		Timeout: c.Scheduler.Timeout, RetainSessions: c.Scheduler.RetainSessions,
+		ProjectTrust: c.Scheduler.ProjectTrust,
 	}
 	out.Subagents = SubagentsJSON{
 		Enabled:               cloneBoolPtr(c.Subagents.Enabled),
@@ -859,8 +860,9 @@ func JSONDTOToConfig(j *ConfigJSON, paths Paths) *Config {
 	}
 	cfg.UI = UIConfig{Enabled: cloneBoolPtr(j.UI.Enabled)}
 	cfg.Scheduler = SchedulerConfig{
-		Enabled: j.Scheduler.Enabled, Dir: j.Scheduler.Dir, MaxQueue: j.Scheduler.MaxQueue,
+		Enabled: j.Scheduler.Enabled, MaxQueue: j.Scheduler.MaxQueue,
 		Timeout: j.Scheduler.Timeout, RetainSessions: j.Scheduler.RetainSessions,
+		ProjectTrust: j.Scheduler.ProjectTrust,
 	}
 	cfg.Subagents = Subagents{
 		Enabled:               cloneBoolPtr(j.Subagents.Enabled),

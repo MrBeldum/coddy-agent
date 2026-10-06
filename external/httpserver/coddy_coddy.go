@@ -1737,7 +1737,11 @@ func (s *Server) coddySessionMessagesGet(w http.ResponseWriter, r *http.Request)
 		out["subagent"] = subagentMetaLink(meta)
 	} else if st.IsSchedulerJob() {
 		out["readOnly"] = true
-		out["schedulerJob"] = map[string]interface{}{"jobId": st.GetSchedulerJobID()}
+		job := map[string]interface{}{"jobId": st.GetSchedulerJobID()}
+		if ws := st.GetSchedulerJobWorkspace(); ws != "" {
+			job["workspace"] = ws
+		}
+		out["schedulerJob"] = job
 	}
 	// An archived session is where the composer learns it must not offer a
 	// prompt. It cannot be read off the session listing: that skips the archive,

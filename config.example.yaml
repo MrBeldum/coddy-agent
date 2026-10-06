@@ -492,13 +492,14 @@ tools:
 #   enable: true
 
 # Cron scheduler (external/scheduler + lib/, tools/; build with: go build -tags=scheduler).
-# Jobs live under scheduler.dir (${CODDY_HOME}/scheduler when dir is empty or omitted): YAML frontmatter description, schedule
-# (5-field crontab, UTC), optional cwd, model, mode; markdown body is the one-shot agent instruction. Sidecars: basename.state,
-# basename.lock during a run.
+# Jobs live in two fixed folders: your own in ${CODDY_HOME}/scheduler, and the project jobs a repository carries in
+# <workspace>/.coddy/scheduler, which run only once approved (project_trust). YAML frontmatter description, schedule
+# (5-field crontab, UTC), optional cwd, model, mode; markdown body is the one-shot agent instruction. Sidecar: basename.state
+# (kept in ${CODDY_HOME} for a project job).
 # Enable with scheduler.enable, or per run with `coddy serve --scheduler`.
 # scheduler:
 #   enable: false
-#   dir: ""              # empty = ${CODDY_HOME}/scheduler
+#   project_trust: ask   # ask (approve each project job), allow (run them like your own) or deny
 #   max_queue: 10        # concurrent scheduled runs (default); when saturated the daemon skips extras until slots free (see logs)
 #   timeout: "30m"       # per scheduled agent run
 
