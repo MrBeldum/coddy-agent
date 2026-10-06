@@ -793,6 +793,7 @@ function objectSectionGroups(key: string): SchemaFormGroup[] | undefined {
           "persist_max_turns",
           "copilot_max_tokens",
           "max_search_hits",
+          "max_note_chars",
         ],
       },
       {
