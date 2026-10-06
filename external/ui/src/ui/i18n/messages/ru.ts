@@ -83,7 +83,7 @@ export const messagesRu: Record<string, string> = {
   "settings.section.tools.label": "Инструменты и разрешения",
   "settings.section.mcp_servers.label": "MCP-серверы",
   "settings.section.skills.label": "Навыки",
-  "settings.section.memory.label": "Копайлот памяти",
+  "settings.section.memory.label": "Память",
   "settings.section.system.label": "Промпты",
   "settings.section.compaction.label": "Сжатие контекста",
   "settings.section.subagents.label": "Субагенты",

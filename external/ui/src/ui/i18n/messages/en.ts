@@ -88,7 +88,7 @@ export const messagesEn: Record<string, string> = {
   "settings.section.tools.label": "Tools and permissions",
   "settings.section.mcp_servers.label": "MCP servers",
   "settings.section.skills.label": "Skills",
-  "settings.section.memory.label": "Memory copilot",
+  "settings.section.memory.label": "Memory",
   "settings.section.system.label": "Prompts",
   "settings.section.compaction.label": "Context compaction",
   "settings.section.subagents.label": "Subagents",
